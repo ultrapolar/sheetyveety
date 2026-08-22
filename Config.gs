@@ -24,7 +24,7 @@ const CONFIG = {
     PINK: 3,     // C - "pink" flag, set at EOD, consumed at SOD
     LOADED: 5,   // E - tasks printed and ready to hand out
     QUEUE: 6,    // F - upcoming tasks, waiting to be printed
-    ARCHIVE: 13  // M - running history of completed tasks
+    ARCHIVE: 14  // N - running history of completed tasks
   },
 
   COLOR: {

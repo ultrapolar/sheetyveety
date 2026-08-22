@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Repair.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -22,7 +22,8 @@ function loadScript(context) {
   const source = SOURCES.map(f => fs.readFileSync(f, 'utf8')).join('\n;\n') + `
 ;globalThis.__api = {
   CONFIG, parseStatus_, extractName_, splitList_, normalizeColor_, isDoneColor_,
-  escapeHtml_, processWopToDeck, processSodPinks, executeSodOperations_FromUI
+  escapeHtml_, columnLetter_, processWopToDeck, processSodPinks,
+  executeSodOperations_FromUI, repairHistoryColumn, applyHistoryColumnRepair
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -31,7 +32,7 @@ function loadScript(context) {
 function scenario(deckRows, wopRows, selection) {
   const deckValues = deckRows.map(r => {
     const row = r.slice();
-    while (row.length < 13) row.push('');
+    while (row.length < 14) row.push('');
     return row;
   });
   const wopValues = wopRows.map(r => {
@@ -115,8 +116,8 @@ function scenario(deckRows, wopRows, selection) {
 // ==========================================================================
 // EOD
 // ==========================================================================
-const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Archive'];
-const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
+const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Legacy', 'Archive'];
+const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHIVE: 14 };
 
 // 1. Single Y advances one task.
 {
@@ -135,7 +136,7 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
 // 2. Two Y's advance twice.
 {
   const s = scenario(
-    [HEADER, ['Jane Doe', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', 'OLD 01/01']],
+    [HEADER, ['Jane Doe', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', '', 'OLD 01/01']],
     [{ name: 'Jane Doe', status: 'YY' }],
     { start: 1, rows: 1 });
   s.api.processWopToDeck();
@@ -189,7 +190,7 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
 // 5b. Re-running that row after topping up does exactly 1 more, not 2.
 {
   const s = scenario(
-    [HEADER, ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', 'T1 08/22 | T2 08/22']],
+    [HEADER, ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', '', 'T1 08/22 | T2 08/22']],
     [{ name: 'Jane Doe', status: 'Y (2 of 3 done, ran out)', statusBg: '#ffff00' }],
     { start: 1, rows: 1 });
   s.api.processWopToDeck();
@@ -279,7 +280,7 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
 {
   const narrowDeck = [['Name', 'Current'], ['Jane Doe', 'T1']];
   const deck = new FakeSheet('Deck List', narrowDeck.map(r => {
-    const row = r.slice(); while (row.length < 13) row.push(''); return row;
+    const row = r.slice(); while (row.length < 14) row.push(''); return row;
   }));
   // Simulate getDataRange() stopping at column B by shrinking the reported grid.
   deck.getDataRange = function () {
@@ -295,9 +296,9 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
   const api = loadScript(context);
   api.processWopToDeck();
   check('EOD narrow deck: archive written cleanly',
-    String(deck.values[1][12]), 'T1 08/22');
+    String(deck.values[1][13]), 'T1 08/22');
   check('EOD narrow deck: no "undefined" leaked into padded cells',
-    String(deck.values[1][11]), '');
+    String(deck.values[1][12]), '');
 }
 
 // ==========================================================================
@@ -454,7 +455,7 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
 // 24. A whole-column selection is clamped to rows that hold data.
 {
   const deckValues = [HEADER, ['Jane Doe', 'T1', '', '', 'T2', '', '', '', '', '', '', '', '']]
-    .map(r => { const row = r.slice(); while (row.length < 13) row.push(''); return row; });
+    .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
   const wopValues = [];
   for (let i = 0; i < 500; i++) wopValues.push(makeGrid(1, 11, '')[0]);
   wopValues[0][0] = 'Jane Doe';
@@ -524,6 +525,142 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
   s.api.processWopToDeck();
   check('Dense span: all advanced', s.deckCell(9, C.CURRENT), 'T8b');
   check('Dense span: untouched header intact', s.deckCell(1, C.CURRENT), 'Current');
+}
+
+// 28. Column letters.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  check('columnLetter 1', api.columnLetter_(1), 'A');
+  check('columnLetter 13', api.columnLetter_(13), 'M');
+  check('columnLetter 14', api.columnLetter_(14), 'N');
+  check('columnLetter 26', api.columnLetter_(26), 'Z');
+  check('columnLetter 27', api.columnLetter_(27), 'AA');
+  check('archive column is N', api.CONFIG.DECK_COL.ARCHIVE, 14);
+}
+
+// 29. Repair moves stranded history from M into an empty N.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/20 | T2 08/21', ''],
+    ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'T7 08/20', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+  s.api.repairHistoryColumn();
+  check('Repair: preview changes nothing', s.deckCell(2, C.ARCHIVE), '');
+  check('Repair: preview leaves M alone', s.deckCell(2, C.LEGACY), 'T1 08/20 | T2 08/21');
+  checkTruthy('Repair: preview lists the rows',
+    s.harness.dialogs[0].title === 'Repair History Column');
+
+  s.api.applyHistoryColumnRepair(true);
+  check('Repair: Jane history now in N', s.deckCell(2, C.ARCHIVE), 'T1 08/20 | T2 08/21');
+  check('Repair: John history now in N', s.deckCell(3, C.ARCHIVE), 'T7 08/20');
+  check('Repair: M cleared', s.deckCell(2, C.LEGACY), '');
+  check('Repair: header row untouched', s.deckCell(1, C.LEGACY), 'Legacy');
+}
+
+// 30. When N already holds something, it keeps its place and M is appended.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T2 08/21', 'TYPED BY HAND']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+  s.api.applyHistoryColumnRepair(true);
+  check('Repair merge: existing text kept first',
+    s.deckCell(2, C.ARCHIVE), 'TYPED BY HAND | T2 08/21');
+  checkTruthy('Repair merge: flagged for review',
+    s.harness.dialogs[0].html.includes('worth an eyeball'));
+}
+
+// 31. Running the repair twice does not duplicate anything.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/20', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+  s.api.applyHistoryColumnRepair(false); // leave M in place
+  check('Repair idempotent: first pass', s.deckCell(2, C.ARCHIVE), 'T1 08/20');
+  check('Repair idempotent: M still there', s.deckCell(2, C.LEGACY), 'T1 08/20');
+  s.api.applyHistoryColumnRepair(false);
+  check('Repair idempotent: second pass unchanged', s.deckCell(2, C.ARCHIVE), 'T1 08/20');
+}
+
+// 32. Leaving M in place is an option.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/20', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+  s.api.applyHistoryColumnRepair(false);
+  check('Repair keep-M: copied', s.deckCell(2, C.ARCHIVE), 'T1 08/20');
+  check('Repair keep-M: original retained', s.deckCell(2, C.LEGACY), 'T1 08/20');
+}
+
+// 33. Nothing stranded means nothing to do.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', '', 'T1 08/20']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+  s.api.repairHistoryColumn();
+  checkTruthy('Repair no-op: says so',
+    s.harness.alerts.length === 1 && s.harness.alerts[0].includes('Nothing to repair'));
+  check('Repair no-op: N untouched', s.deckCell(2, C.ARCHIVE), 'T1 08/20');
+}
+
+// 34. After the fix, a fresh EOD run appends to N alongside repaired history.
+{
+  const deckRows = [HEADER,
+    ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', 'T1 08/20 | T2 08/21', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe', status: 'Y' }], { start: 1, rows: 1 });
+  s.api.applyHistoryColumnRepair(true);
+  s.api.processWopToDeck();
+  check('Post-repair EOD: appends to recovered history',
+    s.deckCell(2, C.ARCHIVE), 'T1 08/20 | T2 08/21 | T3 08/22');
+  check('Post-repair EOD: M stays empty', s.deckCell(2, C.LEGACY), '');
+  check('Post-repair EOD: student advanced', s.deckCell(2, C.CURRENT), 'T4');
+}
+
+// 35. The repair works while looking at the Deck List, not just the WOP sheet.
+{
+  const deckValues = [HEADER,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/20', '']]
+    .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
+  const deck = new FakeSheet('Deck List', deckValues);
+  const wop = new FakeSheet('Daily WOP', [new Array(11).fill('')], makeGrid(1, 11, '#ffffff'));
+  wop.setSelection(1, 1);
+  const context = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  // Active sheet is the Deck List, which getSheets_() would normally refuse.
+  const harness = install(context, [deck, wop], 'Deck List');
+  const api = loadScript(context);
+  api.repairHistoryColumn();
+  checkTruthy('Repair from Deck List: preview still opens',
+    harness.dialogs.length === 1 && harness.dialogs[0].title === 'Repair History Column');
+  api.applyHistoryColumnRepair(true);
+  check('Repair from Deck List: moved', String(deck.values[1][13]), 'T1 08/20');
+  check('Repair from Deck List: M cleared', String(deck.values[1][12]), '');
+}
+
+// 36. Column N being entirely empty makes getDataRange() stop at M.
+{
+  const deckValues = [
+    ['Name', 'Current', '', '', '', '', '', '', '', '', '', '', 'History'],
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/20']]
+    .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
+  const deck = new FakeSheet('Deck List', deckValues);
+  // Report only 13 columns of data, as the real API would when N is blank.
+  deck.getDataRange = function () {
+    const Ctor = Object.getPrototypeOf(this.getRange(1, 1, 1, 1)).constructor;
+    return new Ctor(this, 1, 1, this.values.length, 13);
+  };
+  const wop = new FakeSheet('Daily WOP', [new Array(11).fill('')], makeGrid(1, 11, '#ffffff'));
+  wop.setSelection(1, 1);
+  const context = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(context, [deck, wop], 'Deck List');
+  const api = loadScript(context);
+  api.applyHistoryColumnRepair(true);
+  check('Narrow range repair: history landed in N', String(deck.values[1][13]), 'T1 08/20');
+  check('Narrow range repair: no "undefined" written', String(deck.values[1][13]).includes('undefined'), false);
+  check('Narrow range repair: M cleared', String(deck.values[1][12]), '');
 }
 
 // ==========================================================================

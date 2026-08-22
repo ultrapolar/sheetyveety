@@ -11,4 +11,10 @@ function onOpen() {
   ui.createMenu('EOD')
     .addItem('Colored Sheets Batch Process', 'processWopToDeck')
     .addToUi();
+
+  ui.createMenu('Tools')
+    .addItem('Check setup', 'checkSheetSetup')
+    .addSeparator()
+    .addItem('Repair history column (M → N)', 'repairHistoryColumn')
+    .addToUi();
 }

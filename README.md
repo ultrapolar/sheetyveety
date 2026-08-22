@@ -9,6 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
+| `Repair.gs` | **Tools → Check setup**, and the one-off history column repair. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
 
@@ -26,11 +27,37 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-121 assertions covering the parsing rules and both scripts end to end,
+152 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
+
+## The history column was pointing at M
+
+The task history belongs in **column N**, but every version of this script up
+to now wrote it to **column M**, one column to its left. Nothing was lost — it
+accumulated in M the whole time, which is why the EOD run otherwise looked
+fine. `CONFIG.DECK_COL.ARCHIVE` is now `14`.
+
+To bring the stranded history across, run **Tools → Repair history column
+(M → N)**. It shows you every row it would change before touching anything,
+and cancelling leaves the sheet untouched. Where column N already holds
+something, the existing text keeps its place and the stranded text is appended
+after it; those rows are called out separately so you can check them. Running
+it twice is harmless — rows already carried across are skipped.
+
+Two things worth knowing:
+
+- **Row 1 is treated as a header and skipped.** If your Deck List has no header
+  row, move that one cell by hand.
+- **Clearing column M is optional**, offered as a checkbox in the preview. If
+  you would rather keep the original text until you have checked column N,
+  untick it and clear M yourself later.
+
+**Tools → Check setup** lists every column the script is pointed at next to
+whatever your header row says there. It is the quickest way to catch this kind
+of mismatch — had it existed, the M/N slip would have been obvious.
 
 ## How Column K is read
 
