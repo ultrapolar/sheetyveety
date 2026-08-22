@@ -41,6 +41,12 @@ const CONFIG = {
   ARCHIVE_SEPARATOR: ' | ',
   DATE_FORMAT: 'MM/dd',
 
+  // Used only by the one-off history column repair. History entries dated on
+  // or after this move across to the new column; anything older is left
+  // behind. Entries store no year, so the repair infers one from their order
+  // within the cell -- see inferEntryDates_ in Repair.gs.
+  HISTORY_CUTOFF: '2026-08-01',
+
   // How long a pending SOD dialog stays valid, in seconds.
   CACHE_TTL_SECONDS: 3600,
 

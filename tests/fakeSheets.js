@@ -96,6 +96,12 @@ class FakeSheet {
     return 0;
   }
   getMaxColumns() { return this.values[0].length; }
+  deleteColumn(col) {
+    this.values.forEach(row => row.splice(col - 1, 1));
+    this.backgrounds.forEach(row => row.splice(col - 1, 1));
+    this.deletedColumns = (this.deletedColumns || []).concat([col]);
+  }
+  getLastColumn() { return this.values[0].length; }
   setSelection(row, numRows) {
     this.activeRange = new FakeRange(this, row, 1, numRows, 1);
   }
@@ -108,6 +114,7 @@ function install(globalObj, sheets, activeSheetName) {
 
   const dialogs = [];
   const alerts = [];
+  const uiAnswer = { value: 'OK' };
   let lockHeld = false;
 
   const spreadsheet = {
@@ -120,7 +127,12 @@ function install(globalObj, sheets, activeSheetName) {
     getActiveSpreadsheet: () => spreadsheet,
     getUi: () => ({
       createMenu: () => ({ addItem() { return this; }, addToUi() {} }),
-      alert: msg => alerts.push(msg),
+      alert: (...args) => {
+        alerts.push(args.length > 1 ? args.join(' | ') : args[0]);
+        return args.length > 2 ? uiAnswer.value : undefined;
+      },
+      ButtonSet: { OK_CANCEL: 'OK_CANCEL' },
+      Button: { OK: 'OK', CANCEL: 'CANCEL' },
       showModalDialog: (html, title) => dialogs.push({ title, html: html.content })
     })
   };
@@ -158,7 +170,22 @@ function install(globalObj, sheets, activeSheetName) {
     Charset: { UTF_8: 'utf8' }
   };
 
-  return { dialogs, alerts, sheets: byName };
+  // SpreadsheetApp.getUi() is called fresh each time; Button/ButtonSet must
+  // be reachable from the object the script actually holds.
+  globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
+
+  return { dialogs, alerts, uiAnswer, sheets: byName };
 }
 
-module.exports = { FakeSheet, makeGrid, install };
+/** A Date whose no-arg constructor returns a fixed instant. */
+function fixedDate(iso) {
+  const pinned = new Date(iso + 'T12:00:00').getTime();
+  return class PinnedDate extends Date {
+    constructor(...args) {
+      if (args.length === 0) super(pinned); else super(...args);
+    }
+    static now() { return pinned; }
+  };
+}
+
+module.exports = { FakeSheet, makeGrid, install, fixedDate };

@@ -9,7 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
-| `Repair.gs` | **Tools → Check setup**, and the one-off history column repair. |
+| `Repair.gs` | **Tools → Check setup**, and the one-off history column migration. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
 
@@ -27,37 +27,70 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-152 assertions covering the parsing rules and both scripts end to end,
+183 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
 
-## The history column was pointing at M
+## Migrating the history column
 
-The task history belongs in **column N**, but every version of this script up
-to now wrote it to **column M**, one column to its left. Nothing was lost — it
-accumulated in M the whole time, which is why the EOD run otherwise looked
-fine. `CONFIG.DECK_COL.ARCHIVE` is now `14`.
+A column was inserted ahead of the history column. That pushed the real history
+from **M** across to **N**, while the script carried on writing to **M**. So
+column M holds everything written since the insert, and column N holds what was
+there before it.
 
-To bring the stranded history across, run **Tools → Repair history column
-(M → N)**. It shows you every row it would change before touching anything,
-and cancelling leaves the sheet untouched. Where column N already holds
-something, the existing text keeps its place and the stranded text is appended
-after it; those rows are called out separately so you can check them. Running
-it twice is harmless — rows already carried across are skipped.
+The plan is to move the recent entries into N, delete the leftover column M,
+and let N shift back into M — putting the layout back where it started.
 
-Two things worth knowing:
+### Run it in this order
 
-- **Row 1 is treated as a header and skipped.** If your Deck List has no header
-  row, move that one cell by hand.
-- **Clearing column M is optional**, offered as a checkbox in the preview. If
-  you would rather keep the original text until you have checked column N,
-  untick it and clear M yourself later.
+1. **Tools → Check setup.** Confirm every column reads sensibly before
+   changing anything.
+2. **Tools → 1. Repair history column (M → N).** Previews every row first;
+   cancelling changes nothing. Column M is *not* cleared, so this step stays
+   reversible.
+3. Look over column N.
+4. **Tools → 2. Delete leftover column M.** Refuses to run while anything
+   recent is still unmoved.
+5. **Open `Config.gs`, set `DECK_COL.ARCHIVE` to `13`, save.** Do this
+   immediately — an EOD run between step 4 and here writes history to the wrong
+   column again.
+6. **Tools → Check setup** once more to confirm.
 
-**Tools → Check setup** lists every column the script is pointed at next to
-whatever your header row says there. It is the quickest way to catch this kind
-of mismatch — had it existed, the M/N slip would have been obvious.
+### What counts as recent
+
+`CONFIG.HISTORY_CUTOFF` is `2026-08-01`. Entries dated on or after it move to
+column N; older ones stay in M and are destroyed when the column goes.
+
+History entries record only `MM/dd`, with no year, so the year has to be
+worked out. Entries are appended left to right as tasks finish, which means a
+cell reads oldest to newest — so reading it backwards, a date can never move
+*forward*. When one does, it belongs to the year before. The newest entry
+cannot be later than today. Same-day repeats are left alone, since a `YY`
+legitimately archives two tasks on one date.
+
+That inference is shown in the preview: every row lists what moves in green and
+what stays behind in red, so you can check the split before applying rather
+than trusting it blind.
+
+Two things the preview calls out:
+
+- **Text that will be lost.** Anything staying in M is destroyed at step 4.
+  It's listed per row, in red.
+- **Text with no readable date.** It can't be placed either side of the cutoff,
+  so it stays in M — and is flagged separately, because it's most likely
+  something typed by hand rather than written by the script.
+
+Row 1 is treated as a header throughout. Running the repair twice is harmless;
+rows already carried across are skipped.
+
+### Afterwards
+
+`DATE_FORMAT` is still `MM/dd`. Adding the year (`MM/dd/yy`) would make future
+entries unambiguous — the dating code already reads an explicit year in
+preference to inferring one, so it needs no further change. Worth considering,
+though it does make the history column wider.
 
 ## How Column K is read
 
@@ -116,6 +149,9 @@ lost or duplicated work.
 
 8. **Students matched but not pink** are counted in the SOD summary instead of
    vanishing without a trace.
+
+9. **The history column moved.** It was `13` (M); it is `14` (N) until the
+   migration above is finished, then `13` again.
 
 ## The rest of what changed
 
