@@ -122,6 +122,15 @@ function scenario(deckRows, wopRows, selection, today) {
 const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Legacy', 'Archive'];
 const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHIVE: 14 };
 
+// The history repair treats the Deck List's first 3 rows as headers (row 1
+// is the real header; rows 2-3 are a legend/instructions row that also holds
+// no student). Repair tests below insert these two ahead of any real data so
+// row numbers line up with a real Deck List.
+const REPAIR_FILLER_ROWS = [
+  ['LEGEND', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+  ['(instructions)', '', '', '', '', '', '', '', '', '', '', '', '', '']
+];
+
 // 1. Single Y advances one task.
 {
   const s = scenario(
@@ -641,90 +650,106 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   check('split: empty', split(''), [[], [], []]);
 }
 
-// 32. Repair moves post-cutoff history into an empty N and leaves M alone.
+// 32. Rows 2-3 are treated as headers, same as row 1, and are never touched
+//     -- even when they hold stray text that looks like recent history.
 {
   const deckRows = [HEADER,
+    ['LEGEND', '', '', '', '', '', '', '', '', '', '', '', 'ignore me 08/10', ''],
+    ['(instructions)', '', '', '', '', '', '', '', '', '', '', '', 'also ignore 08/12', ''],
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/15', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  s.api.applyHistoryColumnRepair();
+  check('Header skip: row 2 M untouched', s.deckCell(2, C.LEGACY), 'ignore me 08/10');
+  check('Header skip: row 2 N untouched', s.deckCell(2, C.ARCHIVE), '');
+  check('Header skip: row 3 M untouched', s.deckCell(3, C.LEGACY), 'also ignore 08/12');
+  check('Header skip: row 3 N untouched', s.deckCell(3, C.ARCHIVE), '');
+  check('Header skip: real row 4 still moved', s.deckCell(4, C.ARCHIVE), 'T1 08/15');
+}
+
+// 33. Repair moves post-cutoff history into an empty N and leaves M alone.
+{
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/05 | T2 08/20', ''],
     ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'T7 08/12', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.repairHistoryColumn();
-  check('Repair: preview changes nothing', s.deckCell(2, C.ARCHIVE), '');
+  check('Repair: preview changes nothing', s.deckCell(4, C.ARCHIVE), '');
   checkTruthy('Repair: preview opens',
     s.harness.dialogs[0].title === 'Repair History Column');
 
   s.api.applyHistoryColumnRepair();
-  check('Repair: Jane history now in N', s.deckCell(2, C.ARCHIVE), 'T1 08/05 | T2 08/20');
-  check('Repair: John history now in N', s.deckCell(3, C.ARCHIVE), 'T7 08/12');
-  check('Repair: M deliberately left intact', s.deckCell(2, C.LEGACY), 'T1 08/05 | T2 08/20');
+  check('Repair: Jane history now in N', s.deckCell(4, C.ARCHIVE), 'T1 08/05 | T2 08/20');
+  check('Repair: John history now in N', s.deckCell(5, C.ARCHIVE), 'T7 08/12');
+  check('Repair: M deliberately left intact', s.deckCell(4, C.LEGACY), 'T1 08/05 | T2 08/20');
   check('Repair: header row untouched', s.deckCell(1, C.LEGACY), 'Legacy');
 }
 
-// 33. Pre-cutoff entries stay put, post-cutoff ones move.
+// 34. Pre-cutoff entries stay put, post-cutoff ones move.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '',
      'Old1 06/10 | Old2 07/28 | New1 08/03 | New2 08/19', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
-  check('Cutoff: only post-8/1 moved', s.deckCell(2, C.ARCHIVE), 'New1 08/03 | New2 08/19');
+  check('Cutoff: only post-8/1 moved', s.deckCell(4, C.ARCHIVE), 'New1 08/03 | New2 08/19');
   checkTruthy('Cutoff: doomed text reported',
     s.harness.dialogs[0].html.includes('Old1 06/10 | Old2 07/28'));
   checkTruthy('Cutoff: warns it will be lost',
     s.harness.dialogs[0].html.includes('lost when the column is deleted'));
 }
 
-// 34. A row with nothing recent enough is left entirely alone.
+// 35. A row with nothing recent enough is left entirely alone.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'Old 05/10 | Older 04/02', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.repairHistoryColumn();
   checkTruthy('All-old row: preview declines',
     s.harness.alerts.length === 1 && s.harness.alerts[0].includes('Nothing to move'));
-  check('All-old row: N untouched', s.deckCell(2, C.ARCHIVE), '');
-  check('All-old row: M untouched', s.deckCell(2, C.LEGACY), 'Old 05/10 | Older 04/02');
+  check('All-old row: N untouched', s.deckCell(4, C.ARCHIVE), '');
+  check('All-old row: M untouched', s.deckCell(4, C.LEGACY), 'Old 05/10 | Older 04/02');
 }
 
-// 35. Where N already holds text, it keeps its place and the moved text follows.
+// 36. Where N already holds text, it keeps its place and the moved text follows.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T2 08/12', 'PRE-INSERT 07/01']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
   check('Merge: existing text kept first',
-    s.deckCell(2, C.ARCHIVE), 'PRE-INSERT 07/01 | T2 08/12');
+    s.deckCell(4, C.ARCHIVE), 'PRE-INSERT 07/01 | T2 08/12');
   checkTruthy('Merge: flagged for review',
     s.harness.dialogs[0].html.includes('worth an eyeball'));
 }
 
-// 36. Running the repair twice does not duplicate anything.
+// 37. Running the repair twice does not duplicate anything.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
-  check('Idempotent: first pass', s.deckCell(2, C.ARCHIVE), 'T1 08/10');
+  check('Idempotent: first pass', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
   s.api.applyHistoryColumnRepair();
-  check('Idempotent: second pass unchanged', s.deckCell(2, C.ARCHIVE), 'T1 08/10');
+  check('Idempotent: second pass unchanged', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
   s.api.applyHistoryColumnRepair();
-  check('Idempotent: third pass unchanged', s.deckCell(2, C.ARCHIVE), 'T1 08/10');
+  check('Idempotent: third pass unchanged', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
 }
 
-// 37. Undated text left behind is called out, since M is about to be deleted.
+// 38. Undated text left behind is called out, since M is about to be deleted.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '',
      'scribbled note | T1 08/10', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
-  check('Undated: dated part moved', s.deckCell(2, C.ARCHIVE), 'T1 08/10');
+  check('Undated: dated part moved', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
   checkTruthy('Undated: note flagged',
     s.harness.dialogs[0].html.includes('scribbled note'));
 }
 
-// 38. The delete step refuses while anything recent is still unmoved.
+// 39. The delete step refuses while anything recent is still unmoved.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.deleteLegacyHistoryColumn();
@@ -733,26 +758,26 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   check('Delete guard: column still there', s.deck.values[0].length, 14);
 }
 
-// 39. After the move, deleting M shifts N back into M.
+// 40. After the move, deleting M shifts N back into M.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', ''],
     ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'T7 08/12', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
-  check('Delete: history staged in N', s.deckCell(2, C.ARCHIVE), 'T1 08/10');
+  check('Delete: history staged in N', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
 
   s.api.deleteLegacyHistoryColumn();
   check('Delete: column removed', s.deck.values[0].length, 13);
-  check('Delete: history now sits in M', String(s.deck.values[1][12]), 'T1 08/10');
-  check('Delete: second row too', String(s.deck.values[2][12]), 'T7 08/12');
+  check('Delete: history now sits in M', String(s.deck.values[3][12]), 'T1 08/10');
+  check('Delete: second row too', String(s.deck.values[4][12]), 'T7 08/12');
   checkTruthy('Delete: reminds about the config change',
     s.harness.alerts.some(a => String(a).includes('DECK_COL.ARCHIVE')));
 }
 
-// 40. Cancelling the delete confirmation leaves the column in place.
+// 41. Cancelling the delete confirmation leaves the column in place.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
@@ -761,9 +786,9 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   check('Delete cancelled: column intact', s.deck.values[0].length, 14);
 }
 
-// 41. Deleting with pre-cutoff text still in M warns that it will be destroyed.
+// 42. Deleting with pre-cutoff text still in M warns that it will be destroyed.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'Old 05/01', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.api.deleteLegacyHistoryColumn();
@@ -772,22 +797,22 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   check('Delete with doomed text: went ahead on OK', s.deck.values[0].length, 13);
 }
 
-// 42. After the repair, a fresh EOD run appends alongside the moved history.
+// 43. After the repair, a fresh EOD run appends alongside the moved history.
 {
-  const deckRows = [HEADER,
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', 'T1 08/05 | T2 08/12', '']];
   const s = scenario(deckRows, [{ name: 'Jane Doe', status: 'Y' }],
     { start: 1, rows: 1 }, '2026-08-22');
   s.api.applyHistoryColumnRepair();
   s.api.processWopToDeck();
   check('Post-repair EOD: appends to moved history',
-    s.deckCell(2, C.ARCHIVE), 'T1 08/05 | T2 08/12 | T3 08/22');
-  check('Post-repair EOD: student advanced', s.deckCell(2, C.CURRENT), 'T4');
+    s.deckCell(4, C.ARCHIVE), 'T1 08/05 | T2 08/12 | T3 08/22');
+  check('Post-repair EOD: student advanced', s.deckCell(4, C.CURRENT), 'T4');
 }
 
-// 43. The repair works while looking at the Deck List, not just the WOP sheet.
+// 44. The repair works while looking at the Deck List, not just the WOP sheet.
 {
-  const deckValues = [HEADER,
+  const deckValues = [HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']]
     .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
   const deck = new FakeSheet('Deck List', deckValues);
@@ -801,13 +826,14 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   checkTruthy('Repair from Deck List: preview opens',
     harness.dialogs.length === 1 && harness.dialogs[0].title === 'Repair History Column');
   api.applyHistoryColumnRepair();
-  check('Repair from Deck List: moved', String(deck.values[1][13]), 'T1 08/10');
+  check('Repair from Deck List: moved', String(deck.values[3][13]), 'T1 08/10');
 }
 
-// 44. Column N being entirely empty makes getDataRange() stop at M.
+// 45. Column N being entirely empty makes getDataRange() stop at M.
 {
   const deckValues = [
     ['Name', 'Current', '', '', '', '', '', '', '', '', '', '', 'History'],
+    ...REPAIR_FILLER_ROWS,
     ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10']]
     .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
   const deck = new FakeSheet('Deck List', deckValues);
@@ -822,9 +848,9 @@ const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHI
   install(context, [deck, wop], 'Deck List');
   const api = loadScript(context);
   api.applyHistoryColumnRepair();
-  check('Narrow range repair: landed in N', String(deck.values[1][13]), 'T1 08/10');
+  check('Narrow range repair: landed in N', String(deck.values[3][13]), 'T1 08/10');
   check('Narrow range repair: no "undefined"',
-    String(deck.values[1][13]).includes('undefined'), false);
+    String(deck.values[3][13]).includes('undefined'), false);
 }
 
 

@@ -10,8 +10,12 @@
 // Where the history has been landing since the column was inserted.
 const LEGACY_ARCHIVE_COL_ = 13; // M
 
+// The Deck List's first 3 rows are header/non-student rows, not data. Only
+// the history repair needs to know this -- SOD and EOD are unaffected.
+
 // Give up rather than spin if an entry's date cannot be reconciled.
 const MAX_YEAR_LOOKBACK_ = 50;
+const DECK_HEADER_ROWS_ = 3;
 
 // ------------------------------------------------------------------
 // Dating history entries
@@ -133,7 +137,7 @@ function historyCutoffDate_() {
 
 /**
  * Works out what the repair would do, without changing anything.
- * Row 1 is treated as a header and left alone.
+ * The first DECK_HEADER_ROWS_ rows are treated as headers and left alone.
  */
 function planHistoryColumnRepair_(deckSheet, referenceDate) {
   const values = deckSheet.getDataRange().getValues();
@@ -145,7 +149,7 @@ function planHistoryColumnRepair_(deckSheet, referenceDate) {
   const actions = [];
   let alreadyDone = 0;
 
-  for (let r = 1; r < values.length; r++) {
+  for (let r = DECK_HEADER_ROWS_; r < values.length; r++) {
     const row = values[r];
     const stray = String(row.length >= from ? row[from - 1] : '').trim();
     if (!stray) continue;
@@ -274,8 +278,8 @@ function repairHistoryColumn() {
       ' row(s) were carried across already and will be left alone.</p>';
   }
 
-  html += '<p style="font-size: 12px; color: #64748b;">Row 1 is treated as a header and ' +
-    'skipped. Column ' + fromLetter + ' is not cleared — delete the column once you have ' +
+  html += '<p style="font-size: 12px; color: #64748b;">The first ' + DECK_HEADER_ROWS_ +
+    ' rows are treated as headers and skipped. Column ' + fromLetter + ' is not cleared — delete the column once you have ' +
     'checked column ' + toLetter + '.</p>' +
     '<div id="err" style="display: none; margin: 10px 0; padding: 8px; background: #fef2f2; ' +
     'border: 1px solid #fecaca; border-radius: 4px; color: #b91c1c;"></div>' +

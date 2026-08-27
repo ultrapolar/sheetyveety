@@ -82,8 +82,10 @@ Two things the preview calls out:
   so it stays in M — and is flagged separately, because it's most likely
   something typed by hand rather than written by the script.
 
-Row 1 is treated as a header throughout. Running the repair twice is harmless;
-rows already carried across are skipped.
+The first 3 rows of the Deck List (the real header plus two more non-student
+rows) are treated as headers throughout and are never touched, even if they
+happen to hold text that looks like recent history. Running the repair twice
+is harmless; rows already carried across are skipped.
 
 ### Afterwards
 
