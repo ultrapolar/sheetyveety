@@ -10,6 +10,27 @@
 // Where the history has been landing since the column was inserted.
 const LEGACY_ARCHIVE_COL_ = 13; // M
 
+/**
+ * True once the migration is over: step 5 of the runbook sets
+ * CONFIG.DECK_COL.ARCHIVE back to the legacy column, so the two point at the
+ * same place. From then on the "legacy" column IS the live history column,
+ * and every repair tool must refuse to touch it -- deleting it would destroy
+ * the real history.
+ */
+function historyMigrationFinished_() {
+  return LEGACY_ARCHIVE_COL_ === CONFIG.DECK_COL.ARCHIVE;
+}
+
+function assertHistoryMigrationPending_() {
+  if (historyMigrationFinished_()) {
+    throw new Error('The history column migration is already finished: DECK_COL.ARCHIVE and ' +
+      'the legacy column are both ' + columnLetter_(LEGACY_ARCHIVE_COL_) + '. Nothing to repair, ' +
+      'and deleting column ' + columnLetter_(LEGACY_ARCHIVE_COL_) + ' now would destroy the live ' +
+      'history. If you really need to run the migration again, set DECK_COL.ARCHIVE in Config.gs ' +
+      'to the column the history was pushed into first.');
+  }
+}
+
 // The Deck List's first 3 rows are header/non-student rows, not data. Only
 // the history repair needs to know this -- SOD and EOD are unaffected.
 
@@ -140,6 +161,7 @@ function historyCutoffDate_() {
  * The first DECK_HEADER_ROWS_ rows are treated as headers and left alone.
  */
 function planHistoryColumnRepair_(deckSheet, referenceDate) {
+  assertHistoryMigrationPending_();
   const values = deckSheet.getDataRange().getValues();
   const from = LEGACY_ARCHIVE_COL_;
   const to = CONFIG.DECK_COL.ARCHIVE;
@@ -378,8 +400,14 @@ function deleteLegacyHistoryColumn() {
   }
 
   try {
+    let plan;
+    try {
+      plan = planHistoryColumnRepair_(deckSheetOrThrow_());
+    } catch (err) {
+      showError_(err.message);
+      return;
+    }
     const deckSheet = deckSheetOrThrow_();
-    const plan = planHistoryColumnRepair_(deckSheet);
     const fromLetter = columnLetter_(plan.from);
     const movers = plan.actions.filter(function (a) { return a.kind !== 'keepAll'; });
 

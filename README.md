@@ -27,7 +27,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-183 assertions covering the parsing rules and both scripts end to end,
+205 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -57,6 +57,23 @@ and let N shift back into M — putting the layout back where it started.
    immediately — an EOD run between step 4 and here writes history to the wrong
    column again.
 6. **Tools → Check setup** once more to confirm.
+
+### Once step 5 is done, the migration tools switch themselves off
+
+Setting `DECK_COL.ARCHIVE` back to `13` makes it equal to the legacy column
+the repair reads from. From that point the "leftover" column *is* the live
+history, so:
+
+- the two migration items no longer appear in the **Tools** menu (reopen the
+  spreadsheet to rebuild it), and
+- if either function is reached some other way — an old menu still open, the
+  script editor's Run button — it refuses with an explanation and changes
+  nothing.
+
+Without this, running "Delete leftover column M" after the migration would
+delete every student's real history. If you ever genuinely need to run the
+migration again, set `DECK_COL.ARCHIVE` to the column the history was pushed
+into first.
 
 ### What counts as recent
 

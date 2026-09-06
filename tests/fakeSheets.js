@@ -114,8 +114,19 @@ function install(globalObj, sheets, activeSheetName) {
 
   const dialogs = [];
   const alerts = [];
+  const menus = {};
   const uiAnswer = { value: 'OK' };
   let lockHeld = false;
+
+  function fakeMenu(name) {
+    const items = [];
+    const menu = {
+      addItem(label, fn) { items.push({ label, fn }); return menu; },
+      addSeparator() { items.push({ separator: true }); return menu; },
+      addToUi() { menus[name] = items; }
+    };
+    return menu;
+  }
 
   const spreadsheet = {
     getSheetByName: n => byName[n] || null,
@@ -126,7 +137,7 @@ function install(globalObj, sheets, activeSheetName) {
   globalObj.SpreadsheetApp = {
     getActiveSpreadsheet: () => spreadsheet,
     getUi: () => ({
-      createMenu: () => ({ addItem() { return this; }, addToUi() {} }),
+      createMenu: name => fakeMenu(name),
       alert: (...args) => {
         alerts.push(args.length > 1 ? args.join(' | ') : args[0]);
         return args.length > 2 ? uiAnswer.value : undefined;
@@ -174,7 +185,7 @@ function install(globalObj, sheets, activeSheetName) {
   // be reachable from the object the script actually holds.
   globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
 
-  return { dialogs, alerts, uiAnswer, sheets: byName };
+  return { dialogs, alerts, menus, uiAnswer, sheets: byName };
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */

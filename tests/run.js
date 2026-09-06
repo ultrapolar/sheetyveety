@@ -25,7 +25,7 @@ function loadScript(context) {
   escapeHtml_, columnLetter_, processWopToDeck, processSodPinks,
   executeSodOperations_FromUI, repairHistoryColumn, applyHistoryColumnRepair,
   deleteLegacyHistoryColumn, parseEntryMonthDay_, inferEntryDates_,
-  splitHistoryEntries_, planHistoryColumnRepair_
+  splitHistoryEntries_, planHistoryColumnRepair_, historyMigrationFinished_, onOpen
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -851,6 +851,74 @@ const REPAIR_FILLER_ROWS = [
   check('Narrow range repair: landed in N', String(deck.values[3][13]), 'T1 08/10');
   check('Narrow range repair: no "undefined"',
     String(deck.values[3][13]).includes('undefined'), false);
+}
+
+// 46. Once the migration is finished (DECK_COL.ARCHIVE set back to M, per
+//     step 5 of the runbook) every repair tool must refuse to run. At that
+//     point the "legacy" column is the live history, and deleting it would
+//     destroy every student's history -- exactly the class of bug the
+//     migration exists to fix.
+{
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'Old 05/01 | T1 08/10', ''],
+    ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'Older 04/02', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  check('Post-migration guard: migration is pending before the config change',
+    s.api.historyMigrationFinished_(), false);
+
+  s.api.CONFIG.DECK_COL.ARCHIVE = C.LEGACY;
+  check('Post-migration guard: finished once ARCHIVE points back at M',
+    s.api.historyMigrationFinished_(), true);
+
+  s.api.repairHistoryColumn();
+  check('Post-migration guard: repair preview refuses, no dialog', s.harness.dialogs.length, 0);
+  checkTruthy('Post-migration guard: repair preview explains why',
+    s.harness.alerts.some(a => String(a).includes('already finished')));
+
+  let thrown = null;
+  try { s.api.applyHistoryColumnRepair(); } catch (err) { thrown = err; }
+  checkTruthy('Post-migration guard: apply throws to the dialog failure handler',
+    thrown && String(thrown.message).includes('already finished'));
+  check('Post-migration guard: apply changed nothing in M',
+    s.deckCell(4, C.LEGACY), 'Old 05/01 | T1 08/10');
+  check('Post-migration guard: apply changed nothing in N', s.deckCell(4, C.ARCHIVE), '');
+
+  s.harness.alerts.length = 0;
+  s.api.deleteLegacyHistoryColumn();
+  check('Post-migration guard: delete refuses, column count unchanged',
+    s.deck.values[0].length, 14);
+  checkTruthy('Post-migration guard: delete explains why',
+    s.harness.alerts.some(a => String(a).includes('already finished')));
+  checkTruthy('Post-migration guard: delete never asked for confirmation',
+    !s.harness.alerts.some(a => String(a).includes('permanently deleted')));
+  check('Post-migration guard: live history intact',
+    s.deckCell(4, C.LEGACY), 'Old 05/01 | T1 08/10');
+  check('Post-migration guard: second row intact', s.deckCell(5, C.LEGACY), 'Older 04/02');
+
+  // A normal EOD run still works with the config pointed back at M.
+  s.wop.values[0][0] = 'Jane Doe';
+  s.wop.values[0][10] = 'Y';
+  s.deck.values[3][4] = 'T6';
+  s.api.processWopToDeck();
+  check('Post-migration guard: EOD still archives into M',
+    s.deckCell(4, C.LEGACY), 'Old 05/01 | T1 08/10 | T5 08/22');
+}
+
+// 47. The Tools menu only offers the migration items while it is pending.
+{
+  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS], [{ name: 'Jane Doe' }],
+    { start: 1, rows: 1 }, '2026-08-22');
+  s.api.onOpen();
+  const labels = menu => (s.harness.menus[menu] || []).map(i => i.separator ? '---' : i.label);
+  check('Menu while migrating: SOD', labels('SOD'), ['Pinks Printed']);
+  check('Menu while migrating: EOD', labels('EOD'), ['Colored Sheets Batch Process']);
+  check('Menu while migrating: Tools has both migration items', labels('Tools'),
+    ['Check setup', '---', '1. Repair history column (M → N)', '2. Delete leftover column M']);
+
+  s.api.CONFIG.DECK_COL.ARCHIVE = C.LEGACY;
+  s.api.onOpen();
+  check('Menu after migration: Tools hides the migration items', labels('Tools'),
+    ['Check setup']);
 }
 
 
