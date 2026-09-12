@@ -1089,6 +1089,7 @@ const REPAIR_FILLER_ROWS = [
     ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "";', s.context);
   s.api.importRadiusData();
   check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
   checkTruthy('unset roster URL: says what to set',
