@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-283 assertions covering the parsing rules and both scripts end to end,
+296 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -52,7 +52,7 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 | R | Deck needs update | `loadButtons(…, "Deck1NeedsUpdate", …)` |
 | S | Signed out | `#SessionEndTime` value, or `No` |
 | T | Finalized | the `finalizedDate` script constant |
-| U | Topics worked on | LP rows whose Worked-On box is ticked |
+| U | Mastery | LP rows that were **completed**, as `PK3918(100)` |
 | V | Problem of the Week | `loadButtons(…, "ProblemOfTheWeek", …)` |
 | W | Session summary | `#SessionNotes-0` / `-1` |
 | X | Internal notes | `#NotesForCenterDirector-0` / `-1` |
@@ -95,6 +95,27 @@ Yes/No.
 attribute — which is why tag matching is position-independent rather than
 assuming an attribute order.
 
+### The mastery column
+
+Column U lists every assignment that was **finished**, in learning-plan order:
+
+```
+PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)
+```
+
+`100` is Completed & Mastered, `0` is Completed but Not Mastered. A row that
+was only *worked on* — neither box ticked — is left out, so the column records
+what was finished rather than what was attempted. On the completed sample all
+seven topics were worked on but only six were finished, and only three of
+those mastered.
+
+The page writes `PK-3918-00`; the trailing segment is a revision number and is
+dropped, giving `PK3918`. A completed row with no PK code falls back to its
+topic name rather than emitting a bare `(100)`.
+
+The page's own script stops both boxes being ticked at once. If one ever slips
+through, mastered wins.
+
 ### Also available, not yet wired up
 
 Extractable and tested, but not written to any column. Add an entry to
@@ -102,14 +123,11 @@ Extractable and tested, but not written to any column. Add an entry to
 
 | Extractor | Meaning |
 | --- | --- |
-| `completedMastered` | LP rows with Completed & Mastered ticked |
-| `completedNotMastered` | LP rows with Completed but Not Mastered ticked |
+| `topicsWorkedOn` | LP rows with Worked-On ticked, as topic names *(was in column U)* |
+| `completedMastered` | Completed & Mastered, as topic names |
+| `completedNotMastered` | Completed but Not Mastered, as topic names |
 | `mathleteScore` | Cool Down → Mathlete Score (1–3) |
 | `assessmentStatus` | e.g. "Pre completed", read from the radio's label |
-
-The learning-plan table tracks three states, so `topicsWorkedOn` alone
-flattens a real distinction — on the completed sample all seven topics were
-worked on, but only three were mastered.
 
 ### Guard against a mislinked row
 

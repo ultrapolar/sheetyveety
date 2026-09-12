@@ -31,7 +31,7 @@ function loadScript(context) {
   findDwpLink_, lookupRosterEntry_, testRadiusConnection,
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
-  extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_
+  extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1133,6 +1133,61 @@ const REPAIR_FILLER_ROWS = [
 }
 
 
+// 52b. Mastery scores: completed rows only, as PK code plus a percentage.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const score = file =>
+    api.RADIUS_EXTRACTORS.masteryScores(fs.readFileSync('tests/fixtures/' + file, 'utf8'));
+
+  // On the completed page one row was worked on but never finished, so it is
+  // absent from the list even though all seven were worked on.
+  check('mastery: completed page, worked-on-only row omitted',
+    score('dwp-complete.html'),
+    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)');
+  check('mastery: order follows the learning plan, not mastered-first',
+    score('dwp-complete.html').split(', ')[0], 'PK3918(100)');
+
+  check('mastery: partly filled page', score('dwp-filled.html'),
+    'PK3909(100), PK3902(0)');
+  check('mastery: nothing completed yet', score('dwp-live.html'), '');
+
+  // The page shows PK-3918-00; the sheet wants PK3918.
+  check('pk code: revision segment dropped', api.formatPkCode_('PK-3918-00'), 'PK3918');
+  check('pk code: another', api.formatPkCode_('PK-3902-00'), 'PK3902');
+  check('pk code: padded whitespace', api.formatPkCode_('  PK-3901-00 '), 'PK3901');
+  check('pk code: lowercase prefix is normalised', api.formatPkCode_('pk-3901-00'), 'PK3901');
+  check('pk code: a different prefix still works', api.formatPkCode_('WOB-77-01'), 'WOB77');
+  check('pk code: unrecognised shape is stripped, not dropped',
+    api.formatPkCode_('odd ball!'), 'oddball');
+
+  // Both boxes ticked should not happen -- the page disables one when the
+  // other is set -- but mastered wins if it ever does.
+  const bothTicked =
+    '<tbody id="dwpPKsBody"><tr>' +
+    '<td><div></div></td><td><div>PK-1234-00</div></td><td><div>Topic</div></td>' +
+    '<td><input id="1_WO_checkbox x" checked /></td>' +
+    '<td><input id="1_CM_checkbox x" checked /></td>' +
+    '<td><input id="1_CBNM_checkbox x" checked /></td>' +
+    '</tr></tbody>';
+  check('mastery: mastered wins if both are somehow ticked',
+    api.RADIUS_EXTRACTORS.masteryScores(bothTicked), 'PK1234(100)');
+
+  // A completed row with no PK code falls back to the topic name rather than
+  // emitting a bare "(100)".
+  const noCode =
+    '<tbody id="dwpPKsBody"><tr>' +
+    '<td><div></div></td><td><div></div></td><td><div>Unnamed Topic</div></td>' +
+    '<td><input id="2_WO_checkbox x" checked /></td>' +
+    '<td><input id="2_CM_checkbox x" checked /></td>' +
+    '<td><input id="2_CBNM_checkbox x" /></td>' +
+    '</tr></tbody>';
+  check('mastery: falls back to the topic name when the PK cell is blank',
+    api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(100)');
+}
+
 // 53. A fully completed page. This is the one that exposed the textarea bug
 //     and finally showed a switch set to Yes.
 {
@@ -1230,6 +1285,9 @@ const REPAIR_FILLER_ROWS = [
   check('columns Q-X written',
     [16, 17, 18, 19, 20, 21, 22, 23].map(c => String(s.wop.values[0][c])),
     ['', '', 'No', 'No', '', '', '', '']);
+  check('column U is now the mastery list',
+    vm.runInContext('CONFIG.RADIUS.FIELDS.filter(f => f.column === 21)[0].key', s.context),
+    'masteryScores');
   checkTruthy('import reports every column it wrote',
     s.harness.dialogs[0].html.includes('Q, R, S, T, U, V, W, X'));
 }

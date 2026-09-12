@@ -78,7 +78,7 @@ const CONFIG = {
       { key: 'deckNeedsUpdate',  column: 18, label: 'Deck needs update' },    // R
       { key: 'signedOut',        column: 19, label: 'Signed out' },           // S
       { key: 'finalized',        column: 20, label: 'Finalized' },            // T
-      { key: 'topicsWorkedOn',   column: 21, label: 'Topics worked on' },     // U
+      { key: 'masteryScores',    column: 21, label: 'Mastery' },              // U
       { key: 'problemOfTheWeek', column: 22, label: 'Problem of the Week' },  // V
       { key: 'sessionSummary',   column: 23, label: 'Session summary' },      // W
       { key: 'internalNotes',    column: 24, label: 'Internal notes' }        // X

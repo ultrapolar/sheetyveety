@@ -400,6 +400,17 @@ function checkedRadioLabel_(html, namePrefix) {
   return '';
 }
 
+/**
+ * The PK code as the sheet wants it: "PK-3918-00" on the page becomes
+ * "PK3918". The trailing segment is a revision number and is dropped.
+ */
+function formatPkCode_(cellText) {
+  const text = String(cellText).trim();
+  const match = text.match(/^([A-Za-z]+)\s*-\s*(\d+)/);
+  if (match) return match[1].toUpperCase() + match[2];
+  return text.replace(/[^A-Za-z0-9]/g, '');
+}
+
 /** Topic names from every assignment row whose given checkbox is ticked. */
 function topicsWhereChecked_(html, suffix) {
   const rows = dwpAssignmentRows_(html);
@@ -482,10 +493,40 @@ const RADIUS_EXTRACTORS = {
   },
 
   /**
-   * Completed & Mastered, and Completed but Not Mastered.
+   * Every completed assignment as "PK3918(100)" or "PK3902(0)", comma
+   * separated, in the order the learning plan lists them.
    *
-   * Not currently wired into CONFIG.RADIUS.FIELDS -- add an entry there to
-   * start writing either one to a column.
+   * Mastered scores 100, completed-but-not-mastered scores 0. A row that was
+   * only worked on -- neither box ticked -- is left out entirely, so this
+   * column is a record of what was finished rather than what was attempted.
+   *
+   * The page's own script stops both boxes being ticked at once; if one ever
+   * slips through, mastered wins.
+   */
+  masteryScores: function (html) {
+    const rows = dwpAssignmentRows_(html);
+    if (!rows.length) return '';
+
+    const scored = [];
+    rows.forEach(function (row) {
+      const mastered = assignmentCheckboxChecked_(row, '_CM_checkbox');
+      const notMastered = assignmentCheckboxChecked_(row, '_CBNM_checkbox');
+      if (!mastered && !notMastered) return;
+
+      const cells = splitTableCells_(row);
+      // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
+      const code = formatPkCode_(htmlCellText_(cells[1] === undefined ? '' : cells[1]));
+      const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
+      scored.push((code || topic || '(unnamed)') + '(' + (mastered ? '100' : '0') + ')');
+    });
+    return scored.join(', ');
+  },
+
+  /**
+   * The same two columns as plain topic names, kept for reference.
+   *
+   * Not wired into CONFIG.RADIUS.FIELDS -- add an entry there to write either
+   * one to a column.
    */
   completedMastered: function (html) {
     return topicsWhereChecked_(html, '_CM_checkbox');
