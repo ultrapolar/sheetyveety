@@ -400,6 +400,29 @@ function checkedRadioLabel_(html, namePrefix) {
   return '';
 }
 
+/**
+ * Folds a letter into whatever column K already holds, rather than replacing
+ * it, so a Y typed by hand and a P found on Radius end up as "YP".
+ *
+ * Refuses to touch a cell carrying one of EOD's markers ("YYP - B empty?",
+ * "Y (2 of 3 done, ran out)"): those record outstanding work, and flattening
+ * one back to bare letters would lose it.
+ */
+function mergeStatusLetters_(existing, letter) {
+  const current = String(existing == null ? '' : existing).trim();
+  const add = String(letter == null ? '' : letter).trim().toUpperCase();
+
+  if (!add) return { value: current, changed: false };
+  if (!current) return { value: add, changed: true };
+  if (!/^[YP]+$/i.test(current)) {
+    return { value: current, changed: false, blocked: true };
+  }
+  if (current.toUpperCase().indexOf(add) !== -1) {
+    return { value: current, changed: false };
+  }
+  return { value: current.toUpperCase() + add, changed: true };
+}
+
 /** "Yes" becomes a bare Y; anything else becomes blank. */
 function yesFlag_(label) {
   return String(label).trim().toLowerCase() === 'yes' ? 'Y' : '';
@@ -513,8 +536,17 @@ const RADIUS_EXTRACTORS = {
     return yesFlag_(RADIUS_EXTRACTORS.problemOfTheWeek(html));
   },
 
+  /**
+   * Needs-deck-update as the letter column K already uses for it.
+   *
+   * P, not Y. In this sheet pink means "this student needs new paperwork":
+   * EOD writes pink into Deck List column C, and SOD then moves their queue
+   * into column E. That is the same thing Radius calls a deck update. A Y
+   * would read as "finish a task" and make EOD advance the student's Deck
+   * List row instead.
+   */
   deckNeedsUpdateFlag: function (html) {
-    return yesFlag_(RADIUS_EXTRACTORS.deckNeedsUpdate(html));
+    return yesFlag_(RADIUS_EXTRACTORS.deckNeedsUpdate(html)) ? 'P' : '';
   },
 
   /** Session -> the learning-plan rows whose "Worked On" box is ticked. */
@@ -720,9 +752,32 @@ function importRadiusData() {
 
         const results = extractRadiusFields_(html);
 
+        const skipped = [];
         results.forEach(function (result) {
-          columns[result.field.key].setValue(i, result.value);
+          const column = columns[result.field.key];
+
+          if (result.field.merge !== 'statusLetters') {
+            column.setValue(i, result.value);
+            return;
+          }
+
+          // EOD has already finished this row -- its record is the last word.
+          if (isDoneColor_(column.background(i))) {
+            skipped.push('already processed by EOD');
+            return;
+          }
+
+          const merged = mergeStatusLetters_(column.value(i), result.value);
+          if (merged.blocked) {
+            skipped.push('column ' + columnLetter_(result.field.column) +
+              ' holds "' + String(column.value(i)).trim() +
+              '", which is an EOD marker — left alone');
+            return;
+          }
+          if (merged.changed) column.setValue(i, merged.value);
         });
+
+        skipped.forEach(function (reason) { log.warn(name, reason); });
 
         stats.imported++;
         log.ok(name, results.map(function (r) {

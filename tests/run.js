@@ -32,7 +32,7 @@ function loadScript(context) {
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
   extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
-  yesFlag_, CONFIG
+  yesFlag_, CONFIG, mergeStatusLetters_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1204,7 +1204,9 @@ const REPAIR_FILLER_ROWS = [
   // hand. A No writes nothing at all rather than the word "No".
   check('flag: problem of the week done', get('problemOfTheWeekFlag'), 'Y');
   check('flag: finalized', get('finalizedFlag'), 'Y');
-  check('flag: deck needs update', get('deckNeedsUpdateFlag'), 'Y');
+  // P, not Y: a Y in column K would make EOD advance the student's task.
+  check('flag: deck needs update writes P, not Y',
+    get('deckNeedsUpdateFlag'), 'P');
   check('flag: an answered-No is blank, not "No"',
     api.RADIUS_EXTRACTORS.deckNeedsUpdateFlag(
       fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')), '');
@@ -1241,17 +1243,97 @@ const REPAIR_FILLER_ROWS = [
     G: 'masteryAndAssessment',
     H: 'pagesCompleted',
     J: 'finalizedFlag',
+    K: 'deckNeedsUpdateFlag',
     L: 'signedIn',
     M: 'signedOut',
     O: 'sessionSummary',
     P: 'internalNotes'
   });
 
-  // The EOD script owns column K. Nothing in the import may target it.
-  checkTruthy('no import field targets the EOD status column',
-    api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.STATUS));
-  checkTruthy('and no field targets the name column either',
+  // Column K is shared with EOD, so it must be a merge field -- never a
+  // plain overwrite -- and nothing may ever target the name column.
+  const statusField = api.CONFIG.RADIUS.FIELDS
+    .filter(f => f.column === api.CONFIG.WOP_COL.STATUS)[0];
+  check('the EOD status column is written by merge, not overwrite',
+    statusField && statusField.merge, 'statusLetters');
+  checkTruthy('every other field is a plain write',
+    api.CONFIG.RADIUS.FIELDS.filter(f => f.merge).length === 1);
+  checkTruthy('nothing targets the name column',
     api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.NAME));
+}
+
+// 52d. Column K is shared with the EOD script, so the deck-update P is folded
+//      into whatever is already there rather than replacing it.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const merge = (cur, add) => api.mergeStatusLetters_(cur, add);
+
+  check('merge: into an empty cell', merge('', 'P').value, 'P');
+  check('merge: onto a hand-typed Y', merge('Y', 'P').value, 'YP');
+  check('merge: onto a multi-Y instruction', merge('YY', 'P').value, 'YYP');
+  check('merge: already has a P, left alone', merge('YP', 'P').value, 'YP');
+  checkTruthy('merge: already has a P, not rewritten', !merge('YP', 'P').changed);
+  check('merge: nothing to add leaves the cell', merge('Y', '').value, 'Y');
+  checkTruthy('merge: nothing to add is not a write', !merge('Y', '').changed);
+
+  // EOD's markers record outstanding work; flattening one loses it.
+  checkTruthy('merge: refuses a B-empty marker',
+    merge('YYP - B empty?', 'P').blocked);
+  check('merge: B-empty marker is unchanged',
+    merge('YYP - B empty?', 'P').value, 'YYP - B empty?');
+  checkTruthy('merge: refuses a ran-out marker',
+    merge('Y (2 of 3 done, ran out)', 'P').blocked);
+}
+
+// 52e. The import writing into column K for real.
+{
+  function runImport(existingStatus, statusBg) {
+    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz', status: existingStatus, statusBg: statusBg }],
+      { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      s.context);
+    const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        : DONE });
+    s.api.importRadiusData();
+    return s;
+  }
+
+  let s = runImport('');
+  check('import into K: empty cell gets the P', s.wopStatus(0), 'P');
+  check('import into K: other columns still land', String(s.wop.values[0][7]), '33');
+
+  s = runImport('Y');
+  check('import into K: a typed Y becomes YP', s.wopStatus(0), 'YP');
+
+  s = runImport('YP');
+  check('import into K: an existing P is not doubled', s.wopStatus(0), 'YP');
+
+  // A row EOD has already finished is left exactly as it stands.
+  s = runImport('YYP', '#00FF00');
+  check('import into K: a green row keeps its text', s.wopStatus(0), 'YYP');
+  // Untouched means untouched: the original casing survives too.
+  check('import into K: a green row keeps its colour', s.wopStatusBg(0), '#00FF00');
+  checkTruthy('import into K: and says why it was skipped',
+    s.harness.dialogs[0].html.includes('already processed by EOD'));
+  check('import into K: the rest of the row still imports',
+    String(s.wop.values[0][7]), '33');
+
+  // An EOD marker is reported rather than flattened.
+  s = runImport('YYP - B empty?', '#ffff00');
+  check('import into K: marker text survives', s.wopStatus(0), 'YYP - B empty?');
+  checkTruthy('import into K: marker is explained',
+    s.harness.dialogs[0].html.includes('EOD marker'));
 }
 
 // 53. A fully completed page. This is the one that exposed the textarea bug
@@ -1348,14 +1430,12 @@ const REPAIR_FILLER_ROWS = [
 
   s.api.importRadiusData();
 
-  // F G H J L M O P, zero-indexed.
+  // F G H J K L M O P, zero-indexed.
   check('configured columns written',
-    [5, 6, 7, 9, 11, 12, 14, 15].map(c => String(s.wop.values[0][c])),
-    ['', '', '', '', '9:59 AM', '', '', '']);
+    [5, 6, 7, 9, 10, 11, 12, 14, 15].map(c => String(s.wop.values[0][c])),
+    ['', '', '', '', '', '9:59 AM', '', '', '']);
   checkTruthy('import reports every column it wrote',
-    s.harness.dialogs[0].html.includes('F, G, H, J, L, M, O, P'));
-  check('the EOD status column is left alone',
-    String(s.wop.values[0][10]), '');
+    s.harness.dialogs[0].html.includes('F, G, H, J, K, L, M, O, P'));
 }
 
 // 54. A roster link pointing at the wrong student writes nothing.

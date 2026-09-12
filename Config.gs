@@ -78,9 +78,12 @@ const CONFIG = {
       { key: 'masteryAndAssessment', column: 7,  label: 'Mastery / assessment' },// G
       { key: 'pagesCompleted',       column: 8,  label: 'Pages completed' },     // H
       { key: 'finalizedFlag',        column: 10, label: 'Finalized' },           // J
-      // Column K is the EOD script's Y/P status column (CONFIG.WOP_COL.STATUS).
-      // Deck updates cannot go there without the two scripts overwriting each
-      // other, so deckNeedsUpdateFlag is left unassigned pending a free column.
+      // Column K is the EOD script's Y/P status column, and a deck update is
+      // the same thing as a P there. merge: 'statusLetters' folds the P into
+      // whatever the cell already holds instead of replacing it, skips rows
+      // EOD has already finished, and leaves EOD's markers untouched.
+      { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (P)',
+        merge: 'statusLetters' },                                               // K
       { key: 'signedIn',             column: 12, label: 'Signed in' },           // L
       { key: 'signedOut',            column: 13, label: 'Signed out' },          // M
       { key: 'sessionSummary',       column: 15, label: 'Session summary' },     // O

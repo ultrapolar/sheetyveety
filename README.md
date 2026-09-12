@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-313 assertions covering the parsing rules and both scripts end to end,
+333 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -52,7 +52,7 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 | G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
 | H | Pages completed | the number |
 | J | Finalized | `Y`, or blank |
-| **K** | *Deck update — **not assigned**, see below* | |
+| K | Deck update | `P`, folded into the existing cell |
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
 | O | Session summary | the note text |
@@ -67,15 +67,35 @@ An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
 
-### Column K is taken
+### Column K is shared with the EOD script
 
-`CONFIG.WOP_COL.STATUS` is column K — the Y/P column the EOD script reads and
-writes. Putting deck updates there would have the two scripts overwriting each
-other, so `deckNeedsUpdateFlag` is extracted and tested but **not assigned to
-any column**. Give it a free column in `CONFIG.RADIUS.FIELDS` to switch it on.
+Column K is `CONFIG.WOP_COL.STATUS` — the Y/P column EOD reads and writes.
+A deck update belongs there, because **a deck update and a P are the same
+thing**: EOD writes pink into Deck List column C, and SOD then moves that
+student's queue into column E. That is what Radius calls a deck update.
 
-A test asserts no import field targets column K or column A, so this cannot be
-reintroduced by accident.
+So the import writes **`P`**, never `Y`. A `Y` there would read as *finish a
+task* and make EOD advance the student's Deck List row.
+
+Because the column is shared, that one field writes differently from the rest
+(`merge: 'statusLetters'` in the field config):
+
+- The P is **folded into** whatever the cell already holds rather than
+  replacing it, so a hand-typed `Y` plus a deck update becomes `YP`.
+- A cell that already carries a P is left alone rather than doubled.
+- A row EOD has already finished — green — is **skipped entirely**, text and
+  colour untouched, and the report says why.
+- A cell holding one of EOD's markers (`YYP - B empty?`,
+  `Y (2 of 3 done, ran out)`) is **refused**, because those record outstanding
+  work and flattening one back to bare letters would lose it. The report names
+  the row so it can be sorted out by hand.
+
+**Run the import before EOD.** The import fills in the instruction; EOD
+executes it. Running EOD first is safe — those rows go green and the import
+then skips them — but the deck update won't have been picked up that day.
+
+A test asserts this is the only merge field, and that nothing ever targets
+column A.
 
 ### The mastery column
 
