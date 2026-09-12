@@ -28,7 +28,10 @@ function loadScript(context) {
   splitHistoryEntries_, planHistoryColumnRepair_,
   looksLikeLoginPage_, radiusFetch_, importRadiusData, RADIUS_EXTRACTORS,
   parseInstructionManager_, normalizeStudentName_, htmlCellText_,
-  findDwpLink_, lookupRosterEntry_, testRadiusConnection
+  findDwpLink_, lookupRosterEntry_, testRadiusConnection,
+  inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
+  dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
+  extractRadiusFields_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1022,47 +1025,136 @@ const REPAIR_FILLER_ROWS = [
   checkTruthy('lookup: no link says so', err.includes('no DWP 2.0 link'));
 }
 
-// 51. End to end with only the extractor stubbed: one roster fetch, one fetch
-//     per matched student, values into column Q.
+// 51. Extracting from a real DWP page. This one is a live session with
+//     nothing filled in, so every field should come back empty rather than
+//     throwing -- empty is a real answer here, a missing element is not.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const get = key => api.RADIUS_EXTRACTORS[key](LIVE);
+
+  check('live page: student name read from title', api.pageStudentName_(LIVE), 'Amalie Laz');
+
+  check('live: pages completed is blank, not missing', get('pagesCompleted'), '');
+  check('live: deck update switch untouched', get('deckNeedsUpdate'), '');
+  check('live: not signed out', get('signedOut'), 'No');
+  check('live: not finalized', get('finalized'), 'No');
+  check('live: no topics ticked yet', get('topicsWorkedOn'), '');
+  check('live: problem of the week untouched', get('problemOfTheWeek'), '');
+  check('live: session summary empty', get('sessionSummary'), '');
+  check('live: internal notes empty', get('internalNotes'), '');
+
+  // The assignment table is found even though nothing is ticked.
+  check('live: assignment rows located', api.dwpAssignmentRows_(LIVE).length, 3);
+
+  // Values that ARE present on this page prove the fields are server-rendered.
+  check('live: session length is in the markup',
+    api.inputValueById_(LIVE, 'SessionLength'), '60');
+  check('live: start time is in the markup',
+    api.inputValueById_(LIVE, 'SessionStartTime'), '9:59 AM');
+
+  // A missing element must throw rather than quietly return empty.
+  let err = '';
+  try { api.RADIUS_EXTRACTORS.pagesCompleted('<html><body>nothing</body></html>'); }
+  catch (e) { err = e.message; }
+  checkTruthy('missing field throws rather than writing blank',
+    err.includes('Pages Completed'));
+}
+
+// 52. The same page with values filled in.
+//
+//     CAVEAT: the sample available was an untouched session, so the populated
+//     spellings below -- particularly the loadButtons third argument and the
+//     checked attribute -- are inferred from the controls rather than
+//     observed. This test pins the inference so that comparing against a real
+//     filled-in page is a one-line change.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const FILLED = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8')
+    .replace('id="NumberOfPagesCompleted" name="NumberOfPagesCompleted" type="text" />',
+             'id="NumberOfPagesCompleted" name="NumberOfPagesCompleted" type="text" value="7" />')
+    .replace('id="SessionEndTime" name="SessionEndTime" type="text" />',
+             'id="SessionEndTime" name="SessionEndTime" type="text" value="11:02 AM" />')
+    .replace('loadButtons("divWrapUp", "Deck1NeedsUpdate", );',
+             'loadButtons("divWrapUp", "Deck1NeedsUpdate", 1);')
+    .replace('loadButtons("divSession", "ProblemOfTheWeek", );',
+             'loadButtons("divSession", "ProblemOfTheWeek", 0);')
+    .replace(/const finalizedDate = '';/,
+             "const finalizedDate = '09/12/2026 11:05:00 AM';")
+    .replace('id="114540243_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" />',
+             'id="114540243_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" checked="checked" />')
+    .replace('id="114540245_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" />',
+             'id="114540245_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" checked="checked" />')
+    .replace('id="SessionNotes-0" name="SessionNotes-0" style="resize: none; overflow: hidden;"></textarea>',
+             'id="SessionNotes-0" name="SessionNotes-0" style="resize: none; overflow: hidden;">Worked well on trig &amp; identities.</textarea>')
+    .replace('id="NotesForCenterDirector-0" name="NotesForCenterDirector-0"></textarea>',
+             'id="NotesForCenterDirector-0" name="NotesForCenterDirector-0">Needs a new deck soon.</textarea>');
+
+  const get = key => api.RADIUS_EXTRACTORS[key](FILLED);
+
+  check('filled: pages completed', get('pagesCompleted'), '7');
+  check('filled: deck needs update', get('deckNeedsUpdate'), 'Yes');
+  check('filled: signed out reports the time', get('signedOut'), '11:02 AM');
+  check('filled: finalized', get('finalized'), 'Yes');
+  check('filled: only ticked topics are listed', get('topicsWorkedOn'),
+    'Simplifying Expressions - Pythagorean Identities; The Unit Circle - Angles as Rotations');
+  check('filled: problem of the week answered no', get('problemOfTheWeek'), 'No');
+  check('filled: session summary decoded', get('sessionSummary'),
+    'Worked well on trig & identities.');
+  check('filled: internal notes', get('internalNotes'), 'Needs a new deck soon.');
+
+  // Truthy spellings the server might plausibly use.
+  check('switch: 1', api.tripleSwitchLabel_('1'), 'Yes');
+  check('switch: true', api.tripleSwitchLabel_('true'), 'Yes');
+  check('switch: True', api.tripleSwitchLabel_('True'), 'Yes');
+  check('switch: 0', api.tripleSwitchLabel_('0'), 'No');
+  check('switch: False', api.tripleSwitchLabel_('False'), 'No');
+  check('switch: empty', api.tripleSwitchLabel_(''), '');
+  check('switch: null literal', api.tripleSwitchLabel_('null'), '');
+  check('switch: anything else passes through', api.tripleSwitchLabel_('maybe'), 'maybe');
+
+  // A bare `checked` should count as well as checked="checked".
+  checkTruthy('checkbox: bare checked attribute',
+    api.assignmentCheckboxChecked_('<input id="1_WO_checkbox x" checked />', '_WO_checkbox'));
+  checkTruthy('checkbox: name="woChecked" alone is not a tick',
+    !api.assignmentCheckboxChecked_('<input id="1_WO_checkbox x" name="woChecked" />',
+      '_WO_checkbox'));
+}
+
+// 53. All eight fields land in their configured columns, Q through X.
 {
   const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
-    [{ name: '10:30 AM Jane Doe' }, { name: '11:00 AM Ghost Student' }],
-    { start: 1, rows: 2 }, '2026-08-22');
+    ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+    [{ name: '9:59 AM Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
   vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
     s.context);
 
-  s.harness.fetchHandler.value = url => {
-    if (url.indexOf('/IM') !== -1) {
-      return { code: 200, body:
-        '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-        '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1&amp;attendanceId=2">go</a></td></tr>' +
-        '</table>' };
-    }
-    return { code: 200, body: '<div id="v">42</div>' };
-  };
-  s.api.RADIUS_EXTRACTORS.testValue = html => (html.match(/<div id="v">(\d+)<\/div>/) || [])[1];
+  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  s.harness.fetchHandler.value = url => ({ code: 200, body:
+    url.indexOf('/IM') !== -1
+      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+        '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      : LIVE });
 
   s.api.importRadiusData();
 
-  check('import: value written to column Q', String(s.wop.values[0][16]), '42');
-  check('import: unmatched student leaves Q blank', String(s.wop.values[1][16]), '');
-  check('import: roster fetched once, student fetched once',
-    s.harness.fetchLog.length, 2);
-  checkTruthy('import: student page fetched via the roster link',
-    s.harness.fetchLog[1].url.indexOf('studentId=1&attendanceId=2') !== -1);
-  checkTruthy('import: cookie sent',
-    s.harness.fetchLog[0].params.headers.Cookie === 'session=abc');
-  checkTruthy('import: unmatched student explained',
-    s.harness.dialogs[0].html.includes('checked in'));
-  checkTruthy('import: reports the column it wrote',
-    s.harness.dialogs[0].html.includes('Q'));
+  check('columns Q-X written',
+    [16, 17, 18, 19, 20, 21, 22, 23].map(c => String(s.wop.values[0][c])),
+    ['', '', 'No', 'No', '', '', '', '']);
+  checkTruthy('import reports every column it wrote',
+    s.harness.dialogs[0].html.includes('Q, R, S, T, U, V, W, X'));
 }
 
-// 52. Until the extractors are written, the import refuses rather than
-//     writing a wrong value.
+// 54. A roster link pointing at the wrong student writes nothing.
 {
   const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
     ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
@@ -1071,17 +1163,20 @@ const REPAIR_FILLER_ROWS = [
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
   vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
     s.context);
+
+  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
   s.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
       ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
         '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
-      : '<div>page</div>' });
+      : LIVE });  // page is actually Amalie Laz
 
   s.api.importRadiusData();
-  check('unwritten extractor: Q left blank', String(s.wop.values[0][16]), '');
-  checkTruthy('unwritten extractor: says what is missing',
-    s.harness.dialogs[0].html.includes('has not been written yet'));
+  check('wrong student: nothing written to Q', String(s.wop.values[0][16]), '');
+  checkTruthy('wrong student: explained',
+    s.harness.dialogs[0].html.includes('instead'));
 }
+
 
 // 53. An unset Instruction Manager URL is reported, not fetched.
 {

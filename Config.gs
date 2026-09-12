@@ -74,7 +74,14 @@ const CONFIG = {
     // each one lands in. Add entries here as more values are identified --
     // every one needs a matching extractor in RADIUS_EXTRACTORS.
     FIELDS: [
-      { key: 'testValue', column: 17, label: 'Test value' } // Q
+      { key: 'pagesCompleted',   column: 17, label: 'Pages completed' },      // Q
+      { key: 'deckNeedsUpdate',  column: 18, label: 'Deck needs update' },    // R
+      { key: 'signedOut',        column: 19, label: 'Signed out' },           // S
+      { key: 'finalized',        column: 20, label: 'Finalized' },            // T
+      { key: 'topicsWorkedOn',   column: 21, label: 'Topics worked on' },     // U
+      { key: 'problemOfTheWeek', column: 22, label: 'Problem of the Week' },  // V
+      { key: 'sessionSummary',   column: 23, label: 'Session summary' },      // W
+      { key: 'internalNotes',    column: 24, label: 'Internal notes' }        // X
     ],
 
     // Pause between page fetches, in milliseconds. Radius is someone else's

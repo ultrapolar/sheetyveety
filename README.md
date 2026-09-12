@@ -28,37 +28,64 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-227 assertions covering the parsing rules and both scripts end to end,
+253 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
 
-## Radius import (nearly finished)
+## Radius import
 
-Fetches the **Instruction Manager** page, which lists today's checked-in
-students with a "DWP 2.0" link on each row, matches those names against
-column A of the highlighted Daily WOP rows, and reads each student's DWP page
-from the link on their own row. Values land in the columns listed in
-`CONFIG.RADIUS.FIELDS` — currently just column Q, for testing.
+Fetches the **Instruction Manager** page (`/AnswerKey/AnswerkeyCheckin`), which
+lists today's checked-in students with a "DWP 2.0" link per row, matches those
+names against column A of the highlighted Daily WOP rows, and reads each
+student's DWP page from the link on their own row.
 
-Working from the roster links means none of the four ids in a DWP URL
-(`studentId`, `attendanceId`, `centerId`, `dwpEntryId`) has to be derived or
-cached. `attendanceId` and `dwpEntryId` are created fresh at each visit, so
-cataloguing them was never going to hold; the link already carries them.
+The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
+attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 
-**Before first use**, set `CONFIG.RADIUS.INSTRUCTION_MANAGER_URL` in
-`Config.gs` to the address of that page — open it in a browser and copy the URL.
+### What is extracted, and where it lands
 
-### What's still missing
+| Column | Field | Read from |
+| --- | --- | --- |
+| Q | Pages completed | `#NumberOfPagesCompleted` value |
+| R | Deck needs update | `loadButtons(…, "Deck1NeedsUpdate", …)` |
+| S | Signed out | `#SessionEndTime` value, or `No` |
+| T | Finalized | the `finalizedDate` script constant |
+| U | Topics worked on | LP rows whose Worked-On box is ticked |
+| V | Problem of the Week | `loadButtons(…, "ProblemOfTheWeek", …)` |
+| W | Session summary | `#SessionNotes-0` / `-1` |
+| X | Internal notes | `#NotesForCenterDirector-0` / `-1` |
 
-`RADIUS_EXTRACTORS` pulls the values out of a DWP page and has not been
-written yet; it needs a sample of that page's HTML. Until then the import
-fails with an explanation rather than writing a wrong value.
+Rearranging is a `column:` change in `CONFIG.RADIUS.FIELDS`.
 
-Apps Script has no DOM parser, so extractors are regexes over raw HTML. If a
-value turns out to arrive by a JSON/XHR call instead, fetching that endpoint
-directly will be far steadier than scraping markup.
+An empty field returns empty — that is a real answer. A **missing** element
+throws instead, because it means the page changed shape, and a wrong value is
+worse than a loud failure.
+
+### Needs verifying against a filled-in page
+
+The sample used to build this was a live session with nothing entered, so two
+things are **inferred rather than observed**:
+
+- **Tri-state switches.** The radios carry no `checked` attribute; the state
+  arrives as the third argument of a `loadButtons` call, which was empty on
+  the sample. `1`/`true` is read as Yes and `0`/`false` as No, taken from the
+  radio values on the control. Anything unrecognised is passed through
+  unchanged rather than guessed at, so a wrong reading shows up as odd text in
+  the column instead of a confident lie.
+- **Ticked checkboxes.** Assumed to render `checked="checked"`, the ASP.NET
+  default. A bare `checked` is accepted too.
+
+Test 52 pins both inferences, so checking them against a real filled-in page
+is a one-line change.
+
+### Guard against a mislinked row
+
+Every DWP page names its own student in the `<title>`. After fetching, that
+name is compared against the Daily WOP row; a mismatch is reported and nothing
+is written. A wrong roster link therefore cannot quietly fill in another
+student's data.
 
 ### Authentication
 
@@ -71,8 +98,7 @@ browser in Script Properties. It is not in the spreadsheet and is not visible
 to people the sheet is shared with, and no password is stored anywhere. The
 trade-off is that it expires; when it does, the import says so plainly.
 **Radius → Test connection** checks the cookie *and* the roster without
-touching the spreadsheet, reporting how many students it found and how many
-have a DWP link yet.
+touching the spreadsheet.
 
 ### How names are matched
 
@@ -82,21 +108,14 @@ side reuses `extractName_`, so a leading appointment time is stripped first.
 
 A name that doesn't match is reported as *not checked in yet, or spelled
 differently* — distinct from a student who **is** on the roster but has no DWP
-link yet. Those two mean different things on the floor.
-
-### Adding more values
-
-Add an entry to `CONFIG.RADIUS.FIELDS` giving the key, the Daily WOP column
-number, and a label, then add a matching function to `RADIUS_EXTRACTORS`. The
-import writes every configured field in one pass.
+link yet.
 
 ### Notes
 
 - Columns on the Instruction Manager are located by **header text**, not
   position, so reordering them on the Radius side doesn't break the parser.
 - The roster is fetched once per run, then one page per matched student.
-- Nothing is written until every row has been attempted, so a failure part way
-  through doesn't leave half the selection filled in.
+- Nothing is written until every row has been attempted.
 - There is a `FETCH_DELAY_MS` pause between fetches. Radius is someone else's
   server.
 - The run stops itself before the 6-minute Apps Script ceiling, saves what it

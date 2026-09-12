@@ -251,19 +251,204 @@ function lookupRosterEntry_(roster, name) {
 // ------------------------------------------------------------------
 
 /**
- * NEEDS HTML.
+ * Field-level HTML helpers.
  *
+ * These work on the raw markup, so they are written to be position-independent
+ * about attribute order and tolerant of an attribute simply being absent --
+ * which is how this page represents "no value yet".
+ */
+
+function escapeForRegex_(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The whole <input> tag carrying a given id, or null. */
+function inputTagById_(html, id) {
+  const match = String(html).match(
+    new RegExp('<input\\b[^>]*\\bid="' + escapeForRegex_(id) + '"[^>]*>', 'i'));
+  return match ? match[0] : null;
+}
+
+/**
+ * An input's value attribute. Returns null when the tag is missing entirely,
+ * and '' when the tag is there but carries no value -- the page omits the
+ * attribute rather than writing value="", so the two are worth telling apart.
+ */
+function inputValueById_(html, id) {
+  const tag = inputTagById_(html, id);
+  if (!tag) return null;
+  const value = tag.match(/\bvalue="([^"]*)"/i);
+  return value ? decodeHtmlEntities_(value[1]).trim() : '';
+}
+
+/** True when a tag carries a bare or assigned checked attribute. */
+function tagIsChecked_(tag) {
+  return /(^|\s)checked(\s|=|\/|>)/i.test(String(tag));
+}
+
+function textareaContentById_(html, id) {
+  const match = String(html).match(
+    new RegExp('<textarea\\b[^>]*\\bid="' + escapeForRegex_(id) +
+      '"[^>]*>([\\s\\S]*?)<\\/textarea>', 'i'));
+  return match ? decodeHtmlEntities_(match[1]).trim() : null;
+}
+
+/**
+ * The state of a tri-state switch.
+ *
+ * The switch's radios carry no checked attribute; the server passes the value
+ * as the third argument of a loadButtons call instead:
+ *
+ *     loadButtons("divWrapUp", "Deck1NeedsUpdate", 1);
+ *
+ * On an untouched switch that argument is empty. NEEDS VERIFYING against a
+ * page where a switch is actually set -- the sample available showed only the
+ * empty form, so the truthy spelling (1, true, True) is inferred from the
+ * radio values on the control rather than observed.
+ */
+function tripleSwitchRaw_(html, fieldName) {
+  const match = String(html).match(new RegExp(
+    'loadButtons\\(\\s*"[^"]*"\\s*,\\s*"' + escapeForRegex_(fieldName) +
+    '"\\s*,([^)]*)\\)', 'i'));
+  return match ? match[1].trim().replace(/^["\']|["\']$/g, '') : null;
+}
+
+function tripleSwitchLabel_(raw) {
+  if (raw === null) return null;
+  const value = String(raw).trim().toLowerCase();
+  if (value === '' || value === 'null' || value === 'undefined') return '';
+  if (value === '1' || value === 'true') return 'Yes';
+  if (value === '0' || value === 'false') return 'No';
+  return raw;
+}
+
+/** The learning-plan assignment rows, as raw row HTML. */
+function dwpAssignmentRows_(html) {
+  const body = String(html).match(
+    /<tbody[^>]*\bid="dwpPKsBody"[^>]*>([\s\S]*?)<\/tbody>/i);
+  if (!body) return [];
+
+  const rows = [];
+  const pattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let match;
+  while ((match = pattern.exec(body[1])) !== null) rows.push(match[1]);
+  return rows;
+}
+
+/** Whether a row's WO / CM / CBNM checkbox is ticked. */
+function assignmentCheckboxChecked_(rowHtml, suffix) {
+  const tag = String(rowHtml).match(
+    new RegExp('<input\\b[^>]*\\bid="[^"]*' + escapeForRegex_(suffix) + '[^"]*"[^>]*>', 'i'));
+  return tag ? tagIsChecked_(tag[0]) : false;
+}
+
+/** The student the page is actually about, read from its title. */
+function pageStudentName_(html) {
+  const match = String(html).match(/<title>([\s\S]*?)<\/title>/i);
+  return match ? decodeHtmlEntities_(match[1]).trim() : '';
+}
+
+// ------------------------------------------------------------------
+// Pulling values off a DWP page
+// ------------------------------------------------------------------
+
+/**
  * One entry per CONFIG.RADIUS.FIELDS key. Each takes the DWP page HTML and
- * returns the value, or null when the page genuinely has no value for it --
- * which is different from a broken selector, so throw for that instead.
+ * returns the value, or null when the page genuinely has no value for it.
  *
- * If a value turns out to arrive by a JSON/XHR call rather than being in the
- * markup, fetching that endpoint directly will be far steadier than scraping.
+ * A missing element throws, because that means the page changed shape and a
+ * wrong value is worse than a loud failure. An element that is present but
+ * empty returns '' -- that is a real answer, not a fault.
  */
 const RADIUS_EXTRACTORS = {
-  testValue: function (html) {
-    throw new Error('The extractor for "testValue" has not been written yet — ' +
-      'RADIUS_EXTRACTORS in Radius.gs needs a sample of the DWP page HTML.');
+
+  /** Cool Down -> Pages Completed. */
+  pagesCompleted: function (html) {
+    const value = inputValueById_(html, 'NumberOfPagesCompleted');
+    if (value === null) {
+      throw new Error('could not find the Pages Completed field on the DWP page.');
+    }
+    return value;
+  },
+
+  /** Cool Down -> Primary Deck -> Needs deck update. */
+  deckNeedsUpdate: function (html) {
+    const raw = tripleSwitchRaw_(html, 'Deck1NeedsUpdate');
+    if (raw === null) {
+      throw new Error('could not find the "Needs deck update" switch on the DWP page.');
+    }
+    return tripleSwitchLabel_(raw);
+  },
+
+  /** Header -> End. Present means the student has been signed out. */
+  signedOut: function (html) {
+    const endTime = inputValueById_(html, 'SessionEndTime');
+    if (endTime === null) {
+      throw new Error('could not find the session End time field on the DWP page.');
+    }
+    return endTime ? endTime : 'No';
+  },
+
+  /**
+   * The finalize timestamp is injected into a script constant; empty means
+   * the DWP has not been finalized.
+   */
+  finalized: function (html) {
+    const match = String(html).match(/const\s+finalizedDate\s*=\s*'([^']*)'/);
+    if (!match) {
+      throw new Error('could not find the finalized marker on the DWP page.');
+    }
+    return match[1].trim() ? 'Yes' : 'No';
+  },
+
+  /** Session -> the learning-plan rows whose "Worked On" box is ticked. */
+  topicsWorkedOn: function (html) {
+    const rows = dwpAssignmentRows_(html);
+    if (!rows.length) return '';
+
+    const worked = [];
+    rows.forEach(function (row) {
+      if (!assignmentCheckboxChecked_(row, '_WO_checkbox')) return;
+      const cells = splitTableCells_(row);
+      // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
+      const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
+      const code = htmlCellText_(cells[1] === undefined ? '' : cells[1]);
+      worked.push(topic || code || '(unnamed)');
+    });
+    return worked.join('; ');
+  },
+
+  /** Session -> Problem of the Week switch. */
+  problemOfTheWeek: function (html) {
+    const raw = tripleSwitchRaw_(html, 'ProblemOfTheWeek');
+    if (raw === null) {
+      throw new Error('could not find the Problem of the Week switch on the DWP page.');
+    }
+    return tripleSwitchLabel_(raw);
+  },
+
+  /**
+   * Session Summary Notes appear twice, once on the Session tab and once on
+   * Cool Down, kept in step by the page's own script. Either will do; take
+   * whichever actually holds text.
+   */
+  sessionSummary: function (html) {
+    const first = textareaContentById_(html, 'SessionNotes-0');
+    const second = textareaContentById_(html, 'SessionNotes-1');
+    if (first === null && second === null) {
+      throw new Error('could not find the Session Summary Notes field on the DWP page.');
+    }
+    return first || second || '';
+  },
+
+  /** Internal Notes, likewise duplicated across the two tabs. */
+  internalNotes: function (html) {
+    const first = textareaContentById_(html, 'NotesForCenterDirector-0');
+    const second = textareaContentById_(html, 'NotesForCenterDirector-1');
+    if (first === null && second === null) {
+      throw new Error('could not find the Internal Notes field on the DWP page.');
+    }
+    return first || second || '';
   }
 };
 
@@ -348,7 +533,17 @@ function importRadiusData() {
 
       try {
         const entry = lookupRosterEntry_(roster, name);
-        const results = extractRadiusFields_(radiusFetch_(entry.url));
+        const html = radiusFetch_(entry.url);
+
+        // Guard against a mislinked roster row writing another student's data
+        // into this row. The page names the student it belongs to.
+        const pageName = pageStudentName_(html);
+        if (pageName && normalizeStudentName_(pageName) !== normalizeStudentName_(name)) {
+          throw new Error('the roster link opened the DWP for "' + pageName +
+            '" instead. Nothing was written for this row.');
+        }
+
+        const results = extractRadiusFields_(html);
 
         results.forEach(function (result) {
           columns[result.field.key].setValue(i, result.value);
