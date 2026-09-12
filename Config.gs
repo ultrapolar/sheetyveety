@@ -65,9 +65,10 @@ const CONFIG = {
     // here, or it ends up in the repo.
     COOKIE_PROPERTY: 'RADIUS_COOKIE',
 
-    // Hidden sheet caching each student's stable Radius studentId, so the
-    // import does not have to search for a name it has already resolved.
-    ID_SHEET: 'Radius IDs',
+    // The Instruction Manager page, which lists today's checked-in students
+    // and carries a DWP 2.0 link per row. Paste its address here -- open the
+    // page in a browser and copy the URL from the address bar.
+    INSTRUCTION_MANAGER_URL: '',
 
     // Which values to pull out of each DWP page, and which Daily WOP column
     // each one lands in. Add entries here as more values are identified --

@@ -28,32 +28,37 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-208 assertions covering the parsing rules and both scripts end to end,
+227 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
 
-## Radius import (unfinished)
+## Radius import (nearly finished)
 
-Reads student names from column A of the highlighted Daily WOP rows, fetches
-each one's DWP page from radius.mathnasium.com, and writes values into the
-columns listed in `CONFIG.RADIUS.FIELDS` — currently just column Q, for
-testing.
+Fetches the **Instruction Manager** page, which lists today's checked-in
+students with a "DWP 2.0" link on each row, matches those names against
+column A of the highlighted Daily WOP rows, and reads each student's DWP page
+from the link on their own row. Values land in the columns listed in
+`CONFIG.RADIUS.FIELDS` — currently just column Q, for testing.
 
-**Two pieces still need real HTML before this can run.** Both fail with an
-explanation rather than writing a wrong value:
+Working from the roster links means none of the four ids in a DWP URL
+(`studentId`, `attendanceId`, `centerId`, `dwpEntryId`) has to be derived or
+cached. `attendanceId` and `dwpEntryId` are created fresh at each visit, so
+cataloguing them was never going to hold; the link already carries them.
 
-- `resolveRadiusSession_` has to find today's `attendanceId` and `dwpEntryId`
-  for a student. Only `studentId` looks stable enough to cache; the other two
-  are almost certainly created fresh at each visit, so they can't be
-  catalogued once. This needs whatever page lists today's attendance, with
-  links through to each DWP.
-- `RADIUS_EXTRACTORS` pulls the values out of the page. Apps Script has no DOM
-  parser, so these are regexes over raw HTML. If a value turns out to arrive by
-  a JSON/XHR call instead, fetching that endpoint directly will be far steadier
-  than scraping markup — worth checking DevTools → Network before writing a
-  parser.
+**Before first use**, set `CONFIG.RADIUS.INSTRUCTION_MANAGER_URL` in
+`Config.gs` to the address of that page — open it in a browser and copy the URL.
+
+### What's still missing
+
+`RADIUS_EXTRACTORS` pulls the values out of a DWP page and has not been
+written yet; it needs a sample of that page's HTML. Until then the import
+fails with an explanation rather than writing a wrong value.
+
+Apps Script has no DOM parser, so extractors are regexes over raw HTML. If a
+value turns out to arrive by a JSON/XHR call instead, fetching that endpoint
+directly will be far steadier than scraping markup.
 
 ### Authentication
 
@@ -64,13 +69,20 @@ just returns the sign-in page — with a perfectly normal `200`, which is why
 **Radius → Set session cookie** stores a cookie copied from a logged-in
 browser in Script Properties. It is not in the spreadsheet and is not visible
 to people the sheet is shared with, and no password is stored anywhere. The
-trade-off is that it expires; when it does, the import says so plainly instead
-of failing obscurely. **Radius → Test connection** checks it without touching
-the spreadsheet.
+trade-off is that it expires; when it does, the import says so plainly.
+**Radius → Test connection** checks the cookie *and* the roster without
+touching the spreadsheet, reporting how many students it found and how many
+have a DWP link yet.
 
-If re-pasting the cookie becomes a nuisance, the alternative is storing
-credentials and having the script log in itself — more setup, and it breaks if
-the login form carries MFA or a CSRF token.
+### How names are matched
+
+Roster names and Daily WOP names are typed by different people, so matching
+ignores case and spacing and treats `Doe, Jane` as `Jane Doe`. The Daily WOP
+side reuses `extractName_`, so a leading appointment time is stripped first.
+
+A name that doesn't match is reported as *not checked in yet, or spelled
+differently* — distinct from a student who **is** on the roster but has no DWP
+link yet. Those two mean different things on the floor.
 
 ### Adding more values
 
@@ -80,10 +92,13 @@ import writes every configured field in one pass.
 
 ### Notes
 
-- Nothing is written until every row in the selection has been attempted, so a
-  failure part way through doesn't leave half the selection filled in.
-- There is a `FETCH_DELAY_MS` pause between page fetches. Radius is someone
-  else's server.
+- Columns on the Instruction Manager are located by **header text**, not
+  position, so reordering them on the Radius side doesn't break the parser.
+- The roster is fetched once per run, then one page per matched student.
+- Nothing is written until every row has been attempted, so a failure part way
+  through doesn't leave half the selection filled in.
+- There is a `FETCH_DELAY_MS` pause between fetches. Radius is someone else's
+  server.
 - The run stops itself before the 6-minute Apps Script ceiling, saves what it
   has, and tells you to highlight the rest and run again.
 

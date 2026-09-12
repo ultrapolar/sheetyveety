@@ -1,18 +1,16 @@
 /**
- * Radius import (experimental).
+ * Radius import.
  *
- * Reads student names from column A of the highlighted Daily WOP rows, looks
- * each one up on radius.mathnasium.com, and writes values pulled off their DWP
- * page into the columns listed in CONFIG.RADIUS.FIELDS.
+ * Fetches the Instruction Manager page, which lists today's checked-in
+ * students and carries a "DWP 2.0" link on each row. That link already holds
+ * every id the DWP page needs, so nothing has to be catalogued or derived --
+ * the roster is fetched once, names are matched against column A of the
+ * highlighted Daily WOP rows, and each student's DWP page is read from the
+ * link on their own row.
  *
- * Two pieces are deliberately unfinished, both marked NEEDS HTML below:
- *   - resolveRadiusSession_, which has to find today's attendanceId and
- *     dwpEntryId for a student. Those are almost certainly created fresh at
- *     each visit, so they cannot simply be catalogued -- this needs whatever
- *     roster or attendance page lists today's sessions.
- *   - RADIUS_EXTRACTORS, which pulls the actual values out of the page.
- *
- * Both fail loudly with an explanation rather than writing a wrong value.
+ * One piece is still unfinished, marked NEEDS HTML below: RADIUS_EXTRACTORS,
+ * which pulls the actual values out of a DWP page. It fails with an
+ * explanation rather than writing a wrong value.
  */
 
 // ------------------------------------------------------------------
@@ -90,55 +88,162 @@ function radiusFetch_(url) {
   return html;
 }
 
-function dwpUrl_(session) {
-  const r = CONFIG.RADIUS;
-  return r.BASE_URL + '/DWP/Index' +
-    '?studentId=' + encodeURIComponent(session.studentId) +
-    '&attendanceId=' + encodeURIComponent(session.attendanceId) +
-    '&centerId=' + encodeURIComponent(r.CENTER_ID) +
-    '&dwpEntryId=' + encodeURIComponent(session.dwpEntryId);
+// ------------------------------------------------------------------
+// HTML helpers
+//
+// Apps Script has no DOM parser, so this is string work. It is kept narrow on
+// purpose: find rows, find cells, read their text and links.
+// ------------------------------------------------------------------
+
+function decodeHtmlEntities_(text) {
+  return String(text)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, function (whole, code) {
+      return String.fromCharCode(Number(code));
+    });
 }
 
-// ------------------------------------------------------------------
-// Finding today's session for a student
-// ------------------------------------------------------------------
+/** Visible text of a table cell, tags and whitespace stripped out. */
+function htmlCellText_(cellHtml) {
+  return decodeHtmlEntities_(
+    String(cellHtml)
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+  ).replace(/\s+/g, ' ').trim();
+}
+
+function absoluteRadiusUrl_(href) {
+  const url = decodeHtmlEntities_(String(href).trim());
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.charAt(0) === '/') return CONFIG.RADIUS.BASE_URL + url;
+  return CONFIG.RADIUS.BASE_URL + '/' + url;
+}
 
 /**
- * Reads the cached studentId lookup. Sheet layout: name in column A,
- * Radius studentId in column B, row 1 a header.
+ * Names are compared loosely, because the roster and the Daily WOP sheet are
+ * typed by different people. Case and spacing are ignored, and "Doe, Jane" is
+ * treated as "Jane Doe".
  */
-function loadRadiusIds_() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet()
-    .getSheetByName(CONFIG.RADIUS.ID_SHEET);
-  if (!sheet) return {};
-
-  const values = sheet.getDataRange().getValues();
-  const index = {};
-  for (let r = 1; r < values.length; r++) {
-    const name = String(values[r][0]).trim().toLowerCase();
-    const id = String(values[r][1]).trim();
-    if (name && id) index[name] = id;
+function normalizeStudentName_(name) {
+  let text = String(name == null ? '' : name).replace(/\s+/g, ' ').trim();
+  if (text.indexOf(',') !== -1) {
+    const parts = text.split(',');
+    if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+      text = parts[1].trim() + ' ' + parts[0].trim();
+    }
   }
-  return index;
+  return text.toLowerCase();
 }
 
+function splitTableCells_(rowHtml) {
+  const cells = [];
+  const pattern = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+  let match;
+  while ((match = pattern.exec(rowHtml)) !== null) cells.push(match[1]);
+  return cells;
+}
+
+/** Pulls a DWP link out of a chunk of row HTML, href or onclick alike. */
+function findDwpLink_(html) {
+  const direct = String(html).match(/href\s*=\s*["']([^"']*\/DWP\/[^"']*)["']/i);
+  if (direct) return absoluteRadiusUrl_(direct[1]);
+
+  const loose = String(html).match(/((?:https?:\/\/[^\s"'<>]+)?\/DWP\/Index\?[^\s"'<>]+)/i);
+  if (loose) return absoluteRadiusUrl_(loose[1]);
+
+  return null;
+}
+
+// ------------------------------------------------------------------
+// The Instruction Manager roster
+// ------------------------------------------------------------------
+
 /**
- * NEEDS HTML.
+ * Reads the Instruction Manager table into a name -> DWP link lookup.
  *
- * Has to return { studentId, attendanceId, dwpEntryId } for this student's
- * session today. studentId comes from the cache; the other two are per-visit
- * and have to be read off whatever page lists today's attendance.
+ * Columns are located by their header text rather than by position, so
+ * reordering them on the Radius side does not break this.
  */
-function resolveRadiusSession_(name, idTable) {
-  const studentId = idTable[String(name).trim().toLowerCase()];
-  if (!studentId) {
-    throw new Error('No Radius studentId cached for this name. Add a row to the "' +
-      CONFIG.RADIUS.ID_SHEET + '" sheet: name in column A, studentId in column B.');
+function parseInstructionManager_(html) {
+  const rows = [];
+  const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let match;
+  while ((match = rowPattern.exec(html)) !== null) rows.push(match[1]);
+
+  if (!rows.length) {
+    throw new Error('No table rows found on the Instruction Manager page. Check ' +
+      'that CONFIG.RADIUS.INSTRUCTION_MANAGER_URL points at the right page.');
   }
 
-  throw new Error('Cannot work out today\'s attendanceId and dwpEntryId yet — ' +
-    'resolveRadiusSession_ in Radius.gs still needs the HTML of the page that ' +
-    'lists today\'s sessions.');
+  let nameIndex = -1;
+  let dwpIndex = -1;
+  let headerRow = -1;
+
+  for (let r = 0; r < rows.length && headerRow === -1; r++) {
+    const cells = splitTableCells_(rows[r]).map(htmlCellText_);
+    for (let c = 0; c < cells.length; c++) {
+      if (/student\s*name/i.test(cells[c])) nameIndex = c;
+      if (/dwp/i.test(cells[c])) dwpIndex = c;
+    }
+    if (nameIndex !== -1) headerRow = r;
+    else { nameIndex = -1; dwpIndex = -1; }
+  }
+
+  if (headerRow === -1) {
+    throw new Error('Could not find a "Student Name" column on the Instruction ' +
+      'Manager page. Its layout may have changed.');
+  }
+
+  const byName = {};
+  let withLink = 0;
+  let withoutLink = 0;
+
+  for (let r = headerRow + 1; r < rows.length; r++) {
+    const cells = splitTableCells_(rows[r]);
+    if (cells.length <= nameIndex) continue;
+
+    const name = htmlCellText_(cells[nameIndex]);
+    if (!name) continue;
+
+    // Prefer the DWP column, but fall back to anywhere in the row -- the link
+    // is unmistakable wherever it sits.
+    const url = (dwpIndex !== -1 && cells.length > dwpIndex
+      ? findDwpLink_(cells[dwpIndex])
+      : null) || findDwpLink_(rows[r]);
+
+    if (url) withLink++; else withoutLink++;
+    byName[normalizeStudentName_(name)] = { name: name, url: url };
+  }
+
+  return { byName: byName, withLink: withLink, withoutLink: withoutLink };
+}
+
+/** Fetches and parses the roster. One request, however many students. */
+function loadInstructionManager_() {
+  const url = String(CONFIG.RADIUS.INSTRUCTION_MANAGER_URL || '').trim();
+  if (!url) {
+    throw new Error('Set CONFIG.RADIUS.INSTRUCTION_MANAGER_URL in Config.gs to the ' +
+      'address of the Instruction Manager page, then run this again.');
+  }
+  return parseInstructionManager_(radiusFetch_(url));
+}
+
+/** Finds a Daily WOP name on the roster, and says why if it is not there. */
+function lookupRosterEntry_(roster, name) {
+  const entry = roster.byName[normalizeStudentName_(name)];
+  if (!entry) {
+    throw new Error('not on the Instruction Manager — have they checked in yet, ' +
+      'and is the name spelled the same way in both places?');
+  }
+  if (!entry.url) {
+    throw new Error('is on the Instruction Manager but has no DWP 2.0 link yet.');
+  }
+  return entry;
 }
 
 // ------------------------------------------------------------------
@@ -152,9 +257,8 @@ function resolveRadiusSession_(name, idTable) {
  * returns the value, or null when the page genuinely has no value for it --
  * which is different from a broken selector, so throw for that instead.
  *
- * Apps Script has no DOM parser, so these are regexes over the raw HTML. If
- * the value turns out to arrive by a JSON/XHR call instead, fetching that
- * endpoint directly will be far steadier than scraping the markup.
+ * If a value turns out to arrive by a JSON/XHR call rather than being in the
+ * markup, fetching that endpoint directly will be far steadier than scraping.
  */
 const RADIUS_EXTRACTORS = {
   testValue: function (html) {
@@ -179,11 +283,14 @@ function extractRadiusFields_(html) {
 // Menu entries
 // ------------------------------------------------------------------
 
-/** Menu entry: confirms the cookie works without touching the spreadsheet. */
+/** Menu entry: checks the cookie and the roster without touching the sheet. */
 function testRadiusConnection() {
   try {
-    radiusFetch_(CONFIG.RADIUS.BASE_URL + '/');
-    showError_('Connected to Radius successfully — the stored cookie is valid.');
+    const roster = loadInstructionManager_();
+    const total = roster.withLink + roster.withoutLink;
+    showError_('Connected to Radius. The Instruction Manager lists ' + total +
+      ' student(s), ' + roster.withLink + ' with a DWP 2.0 link' +
+      (roster.withoutLink ? ' and ' + roster.withoutLink + ' without one yet' : '') + '.');
   } catch (err) {
     showError_(err.message);
   }
@@ -215,7 +322,7 @@ function importRadiusData() {
   }
 
   const log = ActionLog_();
-  const stats = { imported: 0, skipped: 0, stoppedEarly: false };
+  const stats = { imported: 0, failed: 0 };
   const columns = {};
 
   try {
@@ -226,11 +333,10 @@ function importRadiusData() {
         selection.numRows, field.column);
     });
 
-    const idTable = loadRadiusIds_();
+    const roster = loadInstructionManager_();
 
     for (let i = 0; i < selection.numRows; i++) {
       if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
-        stats.stoppedEarly = true;
         log.warn('Run stopped', 'Approaching the 6-minute limit after ' +
           stats.imported + ' student(s). Everything fetched so far has been ' +
           'saved — highlight the remaining rows and run it again.');
@@ -241,9 +347,8 @@ function importRadiusData() {
       if (!name) continue;
 
       try {
-        const session = resolveRadiusSession_(name, idTable);
-        const html = radiusFetch_(dwpUrl_(session));
-        const results = extractRadiusFields_(html);
+        const entry = lookupRosterEntry_(roster, name);
+        const results = extractRadiusFields_(radiusFetch_(entry.url));
 
         results.forEach(function (result) {
           columns[result.field.key].setValue(i, result.value);
@@ -254,14 +359,14 @@ function importRadiusData() {
           return r.field.label + ': ' + (r.value === '' ? '(blank)' : r.value);
         }).join(', '));
       } catch (err) {
-        stats.skipped++;
+        stats.failed++;
         log.error(name, err.message);
       }
 
       Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
     }
   } catch (err) {
-    log.error('Run stopped', 'Unexpected error: ' + err.message);
+    log.error('Run stopped', err.message);
   } finally {
     try {
       Object.keys(columns).forEach(function (key) { columns[key].flush(); });
@@ -278,7 +383,7 @@ function importRadiusData() {
 
   showReport_('Radius Import', '🔗 Import Summary', [
     { label: 'Students imported', value: stats.imported },
-    { label: 'Failed', value: stats.skipped, alert: stats.skipped > 0 },
+    { label: 'Failed', value: stats.failed, alert: stats.failed > 0 },
     { label: 'Columns written',
       value: CONFIG.RADIUS.FIELDS.map(function (f) {
         return columnLetter_(f.column);

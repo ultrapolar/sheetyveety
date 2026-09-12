@@ -26,8 +26,9 @@ function loadScript(context) {
   executeSodOperations_FromUI, repairHistoryColumn, applyHistoryColumnRepair,
   deleteLegacyHistoryColumn, parseEntryMonthDay_, inferEntryDates_,
   splitHistoryEntries_, planHistoryColumnRepair_,
-  looksLikeLoginPage_, radiusFetch_, dwpUrl_, importRadiusData,
-  RADIUS_EXTRACTORS, loadRadiusIds_
+  looksLikeLoginPage_, radiusFetch_, importRadiusData, RADIUS_EXTRACTORS,
+  parseInstructionManager_, normalizeStudentName_, htmlCellText_,
+  findDwpLink_, lookupRosterEntry_, testRadiusConnection
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -903,63 +904,178 @@ const REPAIR_FILLER_ROWS = [
   check('fetch: a good page returns cleanly', fetchCase('<div>real page</div>', 200, 'abc=1'), null);
 }
 
-// 48. The DWP URL is assembled from config, with the centre id baked in.
+// 48. Parsing the Instruction Manager table.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  check('dwpUrl',
-    api.dwpUrl_({ studentId: '2942358', attendanceId: '86722299', dwpEntryId: '21711167' }),
+
+  // Mirrors the real column layout, including the ones we ignore.
+  const ROSTER = `
+    <table>
+      <thead><tr>
+        <th>Pin</th><th>Student Name</th><th>PK &amp; FO Answer Keys</th>
+        <th>WOB<br>Answer Keys</th><th>Answer Key Decks</th><th>Duration</th>
+        <th>DWP 2.0</th><th>Start/End Schoolwork</th><th>Out</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>1234</td><td>Jane Doe</td><td>-</td><td>-</td><td>-</td><td>60</td>
+          <td><a href="/DWP/Index?studentId=2942358&amp;attendanceId=86722299&amp;centerId=2514&amp;dwpEntryId=21711167">DWP 2.0</a></td>
+          <td>3:30</td><td></td>
+        </tr>
+        <tr>
+          <td>5678</td><td>John Roe</td><td>-</td><td>-</td><td>-</td><td>60</td>
+          <td><a href="https://radius.mathnasium.com/DWP/Index?studentId=111&amp;attendanceId=222&amp;centerId=2514&amp;dwpEntryId=333">DWP 2.0</a></td>
+          <td>4:00</td><td></td>
+        </tr>
+        <tr>
+          <td>9999</td><td>Not Checkedin</td><td>-</td><td>-</td><td>-</td><td>60</td>
+          <td></td><td></td><td></td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  const roster = api.parseInstructionManager_(ROSTER);
+
+  check('roster: counts links', [roster.withLink, roster.withoutLink], [2, 1]);
+  check('roster: relative href made absolute',
+    roster.byName['jane doe'].url,
     'https://radius.mathnasium.com/DWP/Index?studentId=2942358&attendanceId=86722299' +
     '&centerId=2514&dwpEntryId=21711167');
+  check('roster: absolute href left alone',
+    roster.byName['john roe'].url,
+    'https://radius.mathnasium.com/DWP/Index?studentId=111&attendanceId=222' +
+    '&centerId=2514&dwpEntryId=333');
+  check('roster: student with no link is recorded but has no url',
+    roster.byName['not checkedin'].url, null);
+  check('roster: display name preserved', roster.byName['jane doe'].name, 'Jane Doe');
+  checkTruthy('roster: header row is not treated as a student',
+    roster.byName['student name'] === undefined);
+
+  // Columns are found by header text, so reordering them changes nothing.
+  const REORDERED = ROSTER
+    .replace('<th>Student Name</th><th>PK &amp; FO Answer Keys</th>',
+             '<th>PK &amp; FO Answer Keys</th><th>Student Name</th>')
+    .replace(/<td>1234<\/td><td>Jane Doe<\/td><td>-<\/td>/,
+             '<td>1234</td><td>-</td><td>Jane Doe</td>');
+  check('roster: survives a reordered Student Name column',
+    api.parseInstructionManager_(REORDERED).byName['jane doe'].url,
+    roster.byName['jane doe'].url);
+
+  // A page without the expected table should say so, not return nothing.
+  let err = '';
+  try { api.parseInstructionManager_('<div>no tables here</div>'); }
+  catch (e) { err = e.message; }
+  checkTruthy('roster: empty page explains itself', err.includes('No table rows'));
+
+  err = '';
+  try { api.parseInstructionManager_('<table><tr><td>a</td></tr></table>'); }
+  catch (e) { err = e.message; }
+  checkTruthy('roster: missing Student Name column explains itself',
+    err.includes('Student Name'));
 }
 
-// 49. End to end with the two unfinished pieces stubbed: values land in the
-//     configured column (Q), names come from column A, failures are reported.
+// 49. Name matching is forgiving about case, spacing and "Last, First".
 {
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
-  const s = scenario(deckRows,
-    [{ name: '10:30 AM Jane Doe' }, { name: '11:00 AM John Roe' }],
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  check('name: plain', api.normalizeStudentName_('Jane Doe'), 'jane doe');
+  check('name: case and padding', api.normalizeStudentName_('  JANE   DOE '), 'jane doe');
+  check('name: last-comma-first flipped', api.normalizeStudentName_('Doe, Jane'), 'jane doe');
+  check('name: a comma that is not a name flip is left alone',
+    api.normalizeStudentName_('Smith, Jane, Jr'), 'smith, jane, jr');
+
+  check('cell text: tags and entities stripped',
+    api.htmlCellText_('<td><b>Jane</b>&nbsp;&amp;&nbsp;<i>Doe</i></td>'), 'Jane & Doe');
+
+  check('link: found via onclick rather than href',
+    api.findDwpLink_('<td onclick="go(\'/DWP/Index?studentId=5&attendanceId=6\')">x</td>'),
+    'https://radius.mathnasium.com/DWP/Index?studentId=5&attendanceId=6');
+  check('link: absent', api.findDwpLink_('<td>nothing</td>'), null);
+}
+
+// 50. Roster lookup failures distinguish "not checked in" from "no link yet".
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const roster = { byName: {
+    'jane doe': { name: 'Jane Doe', url: 'https://x/DWP/Index?a=1' },
+    'no link': { name: 'No Link', url: null }
+  } };
+
+  check('lookup: found', api.lookupRosterEntry_(roster, 'JANE DOE').url,
+    'https://x/DWP/Index?a=1');
+
+  let err = '';
+  try { api.lookupRosterEntry_(roster, 'Ghost Student'); } catch (e) { err = e.message; }
+  checkTruthy('lookup: absent says check-in', err.includes('checked in'));
+
+  err = '';
+  try { api.lookupRosterEntry_(roster, 'No Link'); } catch (e) { err = e.message; }
+  checkTruthy('lookup: no link says so', err.includes('no DWP 2.0 link'));
+}
+
+// 51. End to end with only the extractor stubbed: one roster fetch, one fetch
+//     per matched student, values into column Q.
+{
+  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+    [{ name: '10:30 AM Jane Doe' }, { name: '11:00 AM Ghost Student' }],
     { start: 1, rows: 2 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  s.harness.fetchHandler.value = () => ({ code: 200, body: '<div id="v">42</div>' });
+  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+    s.context);
 
-  // Stand in for the two pieces that still need real HTML.
+  s.harness.fetchHandler.value = url => {
+    if (url.indexOf('/IM') !== -1) {
+      return { code: 200, body:
+        '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+        '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1&amp;attendanceId=2">go</a></td></tr>' +
+        '</table>' };
+    }
+    return { code: 200, body: '<div id="v">42</div>' };
+  };
   s.api.RADIUS_EXTRACTORS.testValue = html => (html.match(/<div id="v">(\d+)<\/div>/) || [])[1];
-  vm.runInContext(
-    'resolveRadiusSession_ = function (name) {' +
-    '  if (name === "John Roe") throw new Error("not checked in today");' +
-    '  return { studentId: "1", attendanceId: "2", dwpEntryId: "3" };' +
-    '};', s.context);
 
   s.api.importRadiusData();
 
   check('import: value written to column Q', String(s.wop.values[0][16]), '42');
-  check('import: failed student leaves Q blank', String(s.wop.values[1][16]), '');
-  checkTruthy('import: success logged',
-    s.harness.dialogs[0].html.includes('Jane Doe'));
-  checkTruthy('import: failure explained',
-    s.harness.dialogs[0].html.includes('not checked in today'));
+  check('import: unmatched student leaves Q blank', String(s.wop.values[1][16]), '');
+  check('import: roster fetched once, student fetched once',
+    s.harness.fetchLog.length, 2);
+  checkTruthy('import: student page fetched via the roster link',
+    s.harness.fetchLog[1].url.indexOf('studentId=1&attendanceId=2') !== -1);
+  checkTruthy('import: cookie sent',
+    s.harness.fetchLog[0].params.headers.Cookie === 'session=abc');
+  checkTruthy('import: unmatched student explained',
+    s.harness.dialogs[0].html.includes('checked in'));
   checkTruthy('import: reports the column it wrote',
     s.harness.dialogs[0].html.includes('Q'));
-  check('import: one fetch per resolvable student', s.harness.fetchLog.length, 1);
 }
 
-// 50. Until the extractors are written, the import refuses rather than
+// 52. Until the extractors are written, the import refuses rather than
 //     writing a wrong value.
 {
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+    [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  s.harness.fetchHandler.value = () => ({ code: 200, body: '<div>page</div>' });
-  vm.runInContext(
-    'resolveRadiusSession_ = function () {' +
-    '  return { studentId: "1", attendanceId: "2", dwpEntryId: "3" };' +
-    '};', s.context);
+  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+    s.context);
+  s.harness.fetchHandler.value = url => ({ code: 200, body:
+    url.indexOf('/IM') !== -1
+      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+        '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      : '<div>page</div>' });
 
   s.api.importRadiusData();
   check('unwritten extractor: Q left blank', String(s.wop.values[0][16]), '');
@@ -967,26 +1083,18 @@ const REPAIR_FILLER_ROWS = [
     s.harness.dialogs[0].html.includes('has not been written yet'));
 }
 
-// 51. The studentId cache is read by name, case-insensitively.
+// 53. An unset Instruction Manager URL is reported, not fetched.
 {
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  check('id cache: absent sheet is not an error', s.api.loadRadiusIds_(), {});
-
-  const ids = new FakeSheet('Radius IDs', [
-    ['Name', 'Student ID'],
-    ['Jane Doe', '2942358'],
-    ['JOHN ROE', '1111111'],
-    ['', '']
-  ]);
-  const ctx2 = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
-    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  install(ctx2, [ids], 'Radius IDs');
-  const api2 = loadScript(ctx2);
-  check('id cache: reads pairs', api2.loadRadiusIds_(),
-    { 'jane doe': '2942358', 'john roe': '1111111' });
+  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+    [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+  s.api.importRadiusData();
+  check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
+  checkTruthy('unset roster URL: says what to set',
+    s.harness.dialogs[0].html.includes('INSTRUCTION_MANAGER_URL'));
 }
+
 
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
