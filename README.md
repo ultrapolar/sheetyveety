@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-253 assertions covering the parsing rules and both scripts end to end,
+260 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -63,22 +63,35 @@ An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
 
-### Needs verifying against a filled-in page
+### Confirmed against a real filled-in page
 
-The sample used to build this was a live session with nothing entered, so two
-things are **inferred rather than observed**:
+Two readings were originally inferred from an untouched session and have since
+been checked against a page an instructor filled in and finalized:
 
 - **Tri-state switches.** The radios carry no `checked` attribute; the state
-  arrives as the third argument of a `loadButtons` call, which was empty on
-  the sample. `1`/`true` is read as Yes and `0`/`false` as No, taken from the
-  radio values on the control. Anything unrecognised is passed through
-  unchanged rather than guessed at, so a wrong reading shows up as odd text in
-  the column instead of a confident lie.
-- **Ticked checkboxes.** Assumed to render `checked="checked"`, the ASP.NET
-  default. A bare `checked` is accepted too.
+  arrives as the third argument of a `loadButtons` call. A switch answered
+  *No* renders `0`, and a switch left alone still renders empty on the same
+  page — so a filled page does not make every switch look answered. The `1`
+  spelling for Yes matches the radio values on the control but has not itself
+  been seen yet, so anything unrecognised is passed through unchanged rather
+  than forced into a Yes/No.
+- **Ticked checkboxes** render `checked="checked"` — placed *before* the
+  `class` attribute, which is why tag matching is position-independent rather
+  than assuming an attribute order.
 
-Test 52 pins both inferences, so checking them against a real filled-in page
-is a one-line change.
+### Also available, not yet wired up
+
+The learning-plan table has three progress columns, and all three are
+extractable and tested:
+
+| Extractor | Meaning |
+| --- | --- |
+| `topicsWorkedOn` | Worked On ticked *(in column U)* |
+| `completedMastered` | Completed & Mastered ticked |
+| `completedNotMastered` | Completed but Not Mastered ticked |
+
+Only the first is written to a column. Add an entry to
+`CONFIG.RADIUS.FIELDS` to start writing either of the others.
 
 ### Guard against a mislinked row
 

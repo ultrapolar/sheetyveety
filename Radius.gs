@@ -301,10 +301,11 @@ function textareaContentById_(html, id) {
  *
  *     loadButtons("divWrapUp", "Deck1NeedsUpdate", 1);
  *
- * On an untouched switch that argument is empty. NEEDS VERIFYING against a
- * page where a switch is actually set -- the sample available showed only the
- * empty form, so the truthy spelling (1, true, True) is inferred from the
- * radio values on the control rather than observed.
+ * On an untouched switch that argument is empty. Confirmed against a real
+ * filled-in page: a switch answered No renders 0. The 1 spelling for Yes is
+ * taken from the radio values on the control and matches, but has not itself
+ * been seen in the wild, so unrecognised values are passed through unchanged
+ * rather than forced into a Yes/No.
  */
 function tripleSwitchRaw_(html, fieldName) {
   const match = String(html).match(new RegExp(
@@ -340,6 +341,23 @@ function assignmentCheckboxChecked_(rowHtml, suffix) {
   const tag = String(rowHtml).match(
     new RegExp('<input\\b[^>]*\\bid="[^"]*' + escapeForRegex_(suffix) + '[^"]*"[^>]*>', 'i'));
   return tag ? tagIsChecked_(tag[0]) : false;
+}
+
+/** Topic names from every assignment row whose given checkbox is ticked. */
+function topicsWhereChecked_(html, suffix) {
+  const rows = dwpAssignmentRows_(html);
+  if (!rows.length) return '';
+
+  const topics = [];
+  rows.forEach(function (row) {
+    if (!assignmentCheckboxChecked_(row, suffix)) return;
+    const cells = splitTableCells_(row);
+    // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
+    const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
+    const code = htmlCellText_(cells[1] === undefined ? '' : cells[1]);
+    topics.push(topic || code || '(unnamed)');
+  });
+  return topics.join('; ');
 }
 
 /** The student the page is actually about, read from its title. */
@@ -403,19 +421,21 @@ const RADIUS_EXTRACTORS = {
 
   /** Session -> the learning-plan rows whose "Worked On" box is ticked. */
   topicsWorkedOn: function (html) {
-    const rows = dwpAssignmentRows_(html);
-    if (!rows.length) return '';
+    return topicsWhereChecked_(html, '_WO_checkbox');
+  },
 
-    const worked = [];
-    rows.forEach(function (row) {
-      if (!assignmentCheckboxChecked_(row, '_WO_checkbox')) return;
-      const cells = splitTableCells_(row);
-      // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
-      const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
-      const code = htmlCellText_(cells[1] === undefined ? '' : cells[1]);
-      worked.push(topic || code || '(unnamed)');
-    });
-    return worked.join('; ');
+  /**
+   * Completed & Mastered, and Completed but Not Mastered.
+   *
+   * Not currently wired into CONFIG.RADIUS.FIELDS -- add an entry there to
+   * start writing either one to a column.
+   */
+  completedMastered: function (html) {
+    return topicsWhereChecked_(html, '_CM_checkbox');
+  },
+
+  completedNotMastered: function (html) {
+    return topicsWhereChecked_(html, '_CBNM_checkbox');
   },
 
   /** Session -> Problem of the Week switch. */

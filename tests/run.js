@@ -1064,69 +1064,74 @@ const REPAIR_FILLER_ROWS = [
     err.includes('Pages Completed'));
 }
 
-// 52. The same page with values filled in.
-//
-//     CAVEAT: the sample available was an untouched session, so the populated
-//     spellings below -- particularly the loadButtons third argument and the
-//     checked attribute -- are inferred from the controls rather than
-//     observed. This test pins the inference so that comparing against a real
-//     filled-in page is a one-line change.
+// 52. The same page after an instructor filled it in and finalized it.
+//     This is the real thing, not a constructed guess -- it confirms both
+//     readings that were previously inferred.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-
-  const FILLED = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8')
-    .replace('id="NumberOfPagesCompleted" name="NumberOfPagesCompleted" type="text" />',
-             'id="NumberOfPagesCompleted" name="NumberOfPagesCompleted" type="text" value="7" />')
-    .replace('id="SessionEndTime" name="SessionEndTime" type="text" />',
-             'id="SessionEndTime" name="SessionEndTime" type="text" value="11:02 AM" />')
-    .replace('loadButtons("divWrapUp", "Deck1NeedsUpdate", );',
-             'loadButtons("divWrapUp", "Deck1NeedsUpdate", 1);')
-    .replace('loadButtons("divSession", "ProblemOfTheWeek", );',
-             'loadButtons("divSession", "ProblemOfTheWeek", 0);')
-    .replace(/const finalizedDate = '';/,
-             "const finalizedDate = '09/12/2026 11:05:00 AM';")
-    .replace('id="114540243_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" />',
-             'id="114540243_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" checked="checked" />')
-    .replace('id="114540245_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" />',
-             'id="114540245_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" checked="checked" />')
-    .replace('id="SessionNotes-0" name="SessionNotes-0" style="resize: none; overflow: hidden;"></textarea>',
-             'id="SessionNotes-0" name="SessionNotes-0" style="resize: none; overflow: hidden;">Worked well on trig &amp; identities.</textarea>')
-    .replace('id="NotesForCenterDirector-0" name="NotesForCenterDirector-0"></textarea>',
-             'id="NotesForCenterDirector-0" name="NotesForCenterDirector-0">Needs a new deck soon.</textarea>');
-
+  const FILLED = fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8');
   const get = key => api.RADIUS_EXTRACTORS[key](FILLED);
 
-  check('filled: pages completed', get('pagesCompleted'), '7');
-  check('filled: deck needs update', get('deckNeedsUpdate'), 'Yes');
-  check('filled: signed out reports the time', get('signedOut'), '11:02 AM');
+  check('filled: pages completed', get('pagesCompleted'), '12');
+  check('filled: signed out reports the time', get('signedOut'), '11:42 AM');
   check('filled: finalized', get('finalized'), 'Yes');
+  check('filled: deck update answered No', get('deckNeedsUpdate'), 'No');
+  check('filled: problem of the week answered No', get('problemOfTheWeek'), 'No');
   check('filled: only ticked topics are listed', get('topicsWorkedOn'),
-    'Simplifying Expressions - Pythagorean Identities; The Unit Circle - Angles as Rotations');
-  check('filled: problem of the week answered no', get('problemOfTheWeek'), 'No');
-  check('filled: session summary decoded', get('sessionSummary'),
-    'Worked well on trig & identities.');
-  check('filled: internal notes', get('internalNotes'), 'Needs a new deck soon.');
+    'Simplifying Expressions - Pythagorean Identities; ' +
+    'Completing Right Triangles; The Unit Circle - Angles as Rotations');
+  check('filled: notes left untouched stay empty', get('sessionSummary'), '');
+  check('filled: internal notes left untouched stay empty', get('internalNotes'), '');
 
-  // Truthy spellings the server might plausibly use.
+  // CONFIRMED: the switch value really is the third loadButtons argument, and
+  // an answered-No switch renders 0.
+  check('switch value is the third loadButtons argument',
+    api.tripleSwitchRaw_(FILLED, 'Deck1NeedsUpdate'), '0');
+  // A switch left alone on the same page still reads as untouched, so a
+  // filled page does not make every switch look answered.
+  check('an untouched switch on a filled page still reads empty',
+    api.tripleSwitchRaw_(FILLED, 'SchoolworkWorkedOn'), '');
+  check('untouched switch yields blank, not No',
+    api.tripleSwitchLabel_(api.tripleSwitchRaw_(FILLED, 'SchoolworkWorkedOn')), '');
+
+  // CONFIRMED: a ticked box renders checked="checked", and it sits BEFORE the
+  // class attribute -- which is why tag matching cannot rely on position.
+  checkTruthy('ticked checkbox found even though checked precedes class',
+    api.assignmentCheckboxChecked_(
+      api.dwpAssignmentRows_(FILLED)[0], '_WO_checkbox'));
+  checkTruthy('unticked box on a row with other ticks is not a false positive',
+    !api.assignmentCheckboxChecked_(
+      api.dwpAssignmentRows_(FILLED)[0], '_CBNM_checkbox'));
+  checkTruthy('a row with nothing ticked stays untouched',
+    !api.assignmentCheckboxChecked_(
+      api.dwpAssignmentRows_(FILLED)[3], '_WO_checkbox'));
+
+  // The mastery columns are distinct from "worked on" and from each other.
+  check('completed & mastered', get('completedMastered'),
+    'Simplifying Expressions - Pythagorean Identities');
+  check('completed but not mastered', get('completedNotMastered'),
+    'The Unit Circle - Angles as Rotations');
+
+  // Spellings the server might use for Yes, which has not been seen yet.
   check('switch: 1', api.tripleSwitchLabel_('1'), 'Yes');
   check('switch: true', api.tripleSwitchLabel_('true'), 'Yes');
   check('switch: True', api.tripleSwitchLabel_('True'), 'Yes');
   check('switch: 0', api.tripleSwitchLabel_('0'), 'No');
   check('switch: False', api.tripleSwitchLabel_('False'), 'No');
-  check('switch: empty', api.tripleSwitchLabel_(''), '');
   check('switch: null literal', api.tripleSwitchLabel_('null'), '');
-  check('switch: anything else passes through', api.tripleSwitchLabel_('maybe'), 'maybe');
+  check('switch: anything unrecognised passes through rather than guessing',
+    api.tripleSwitchLabel_('maybe'), 'maybe');
 
-  // A bare `checked` should count as well as checked="checked".
-  checkTruthy('checkbox: bare checked attribute',
+  checkTruthy('checkbox: bare checked attribute counts',
     api.assignmentCheckboxChecked_('<input id="1_WO_checkbox x" checked />', '_WO_checkbox'));
   checkTruthy('checkbox: name="woChecked" alone is not a tick',
     !api.assignmentCheckboxChecked_('<input id="1_WO_checkbox x" name="woChecked" />',
       '_WO_checkbox'));
 }
+
 
 // 53. All eight fields land in their configured columns, Q through X.
 {

@@ -1,0 +1,215 @@
+<!-- Trimmed from a real DWP page (Amalie Laz, 09/12/2026) after an instructor
+     filled it in and finalized it. Same trimming as dwp-live.html. This is the
+     page that confirms the two readings previously inferred: the tri-state
+     switch value really does arrive as the third loadButtons argument, and a
+     ticked checkbox really does render checked="checked" -- placed BEFORE the
+     class attribute, which is why the tag matching is position-independent.
+     Not everything was filled in: the three Schoolwork switches and all four
+     notes fields were left untouched. -->
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Amalie Laz</title>
+    <script type="text/javascript">
+        var _lastSaveDateDesc = `Last saved`;
+        function setSessionStartTimeAndEndTime() {
+           let sessionStartTime = "9:59 AM";
+           let sessionEndTime = "11:42 AM";
+        }
+        function setEndAttPickerToNow() {
+            const endTimePicker = $("#SessionEndTime").data("kendoTimePicker");
+            let tmpEndDateTime = document.querySelector(`input[name="SessionEndTime"]`)?.value;
+            send("SessionEndTime", parsedDate);
+        }
+        function getFinalizedDateToLocalDate(fullYear = true) {
+            const finalizedDate = '9/12/2026 11:42:00 AM';
+            let finalizedDateTime;
+        }
+        function getFinalizedDateToLocalDate(fullYear = true) {
+            const finalizedDate = '9/12/2026 11:42:00 AM';
+            let finalizedDateTime;
+        }
+        function onLoadFinalizeState() {
+            if ('9/12/2026 11:42:00 AM' != null && '9/12/2026 11:42:00 AM'.length > 0 && 'Ashley Brocklehurst'.length > 0) {
+                isFinalized = true;
+                const finalizedBy = "Ashley Brocklehurst";
+                const retDateTime = '09/12/2026 11:42 AM';
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="dwpContainer d-flex flex-column">
+        <input id="countryCode" type="hidden" value="en-US" />
+        <header id="header">
+            <h3 class="text-white text-center col d-flex flex-column m-0">
+                <span>Amalie Laz</span>
+                <span id="SessionDate">09/12/2026</span>
+                <span id="SessionDateUSFormat" hidden>09/12/26</span>
+            </h3>
+            <label for="SessionLength" class="fw-bolder">Session length:</label>
+            <input class="form-control sessionLengthDropDownList" id="SessionLength" name="SessionLength" type="text" value="60" />
+            <label class="fw-bolder" for="StartTime">Start:</label>
+            <input aria-selected="SessionStartTime" class="" id="SessionStartTime" name="SessionStartTime" type="text" value="9:59 AM" />
+            <label class="fw-bolder me-0" for="EndTime">End:</label>
+            <input aria-selected="SessionEndTime" class="dwpEndAttDateTimePicker" id="SessionEndTime" name="SessionEndTime" type="text" value="11:42 AM" />
+            <span id="instructor" class="text-start">Ashley Brocklehurst</span>
+        </header>
+        <main>
+<div id="divSession">
+    <div class="w-auto mb-2" id="Schoolwork">
+        <div class="tri-state-toggle" data-switch-type="triple">
+            <div class="switch">
+                <img src="/Images/DWP/DWPSwitchNeutral.png"/>
+                <input class="toggler-button no" type="radio" value="0" />
+                <input class="toggler-button neutral" type="radio" value="null" />
+                <input class="toggler-button yes" type="radio" value="1" />
+            </div>
+        </div>
+        <script>
+            $(document).ready(function () {
+                loadButtons("divSession", "Schoolwork", 0);
+                if (!"") { $('#Schoolwork-date').css('visibility', 'hidden'); }
+            });
+        </script>
+    </div>
+    <div class="w-auto mb-2" id="ProblemOfTheWeek">
+        <span class="switchLabel dwpRequired" id="ProblemOfTheWeekTripleSwitchLabel">Problem of the Week</span>
+        <div class="tri-state-toggle" data-switch-type="triple">
+            <div class="switch">
+                <img src="/Images/DWP/DWPSwitchNeutral.png"/>
+                <input class="toggler-button no" type="radio" value="0" />
+                <input class="toggler-button neutral" type="radio" value="null" />
+                <input class="toggler-button yes" type="radio" value="1" />
+            </div>
+        </div>
+        <script>
+            $(document).ready(function () {
+                loadButtons("divSession", "ProblemOfTheWeek", 0);
+                if (!"") { $('#ProblemOfTheWeek-date').css('visibility', 'hidden'); }
+            });
+        </script>
+    </div>
+    <div class="divLpAssignments" id="divLpAssignments">
+        <div class="mb-4" id="dwpLPs">
+        <div id="dwpPKs">
+        <table id="dwpPKsTable">
+            <thead>
+                <tr>
+                    <th class="text-center fw-normal dwpPKsHeader3"></th>
+                    <th class="text-left fw-normal col-8 pb-3 dwpPKsHeader15" colspan="2">
+                        <div class="fw-normal pb-1">
+                            <a class="dwpBarcode" target="_blank" href="/answerkey/answerkey_viewer?deck=1367595">Amalie Laz_LP 1 of 2_2026-09-12</a>
+                        </div>
+                    </th>
+                    <th class="text-center fw-normal dwpPKsHeaderProgress pb-2">Worked<br />On</th>
+                    <th class="text-center fw-normal dwpPKsHeaderProgress pb-2">Completed <br />&amp; Mastered</th>
+                    <th class="text-center fw-normal dwpPKsHeaderProgress pb-2">Completed but<br />Not Mastered</th>
+                </tr>
+            </thead>
+            <tbody id="dwpPKsBody">
+                <tr>
+                    <td><div></div></td>
+                    <td><div><a class='dwpBarcode' target='_blank' href='/Document/GetWebViewerDocument?id=PK 3909 Answer Key'>PK-3909-00</a></div></td>
+                    <td><div>Simplifying Expressions - Pythagorean Identities</div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input checked="checked" class="form-check-input mx-0 dwpCheckBox" data-val="true" data-val-required="The Boolean field is required." id="114540243_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" /><input name="woChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input checked="checked" class="form-check-input mx-0 dwpCheckBox" data-val="true" data-val-required="The Boolean field is required." id="114540243_CM_checkbox dwpLpAssignment" name="cmChecked" type="checkbox" value="true" /><input name="cmChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" data-val="true" data-val-required="The Boolean field is required." id="114540243_CBNM_checkbox dwpLpAssignment" name="cbnmChecked" type="checkbox" value="true" /><input name="cbnmChecked" type="hidden" value="false" /></div></td>
+                </tr>
+                <tr>
+                    <td><div></div></td>
+                    <td><div><a class='dwpBarcode' target='_blank' href='/Document/GetWebViewerDocument?id=PK 3918 Answer Key'>PK-3918-00</a></div></td>
+                    <td><div>Completing Right Triangles</div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input checked="checked" class="form-check-input mx-0 dwpCheckBox" id="114540244_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" /><input name="woChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540244_CM_checkbox dwpLpAssignment" name="cmChecked" type="checkbox" value="true" /><input name="cmChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540244_CBNM_checkbox dwpLpAssignment" name="cbnmChecked" type="checkbox" value="true" /><input name="cbnmChecked" type="hidden" value="false" /></div></td>
+                </tr>
+                <tr>
+                    <td><div></div></td>
+                    <td><div><a class='dwpBarcode' target='_blank' href='/Document/GetWebViewerDocument?id=PK 3902 Answer Key'>PK-3902-00</a></div></td>
+                    <td><div>The Unit Circle - Angles as Rotations</div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input checked="checked" class="form-check-input mx-0 dwpCheckBox" id="114540245_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" /><input name="woChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540245_CM_checkbox dwpLpAssignment" name="cmChecked" type="checkbox" value="true" /><input name="cmChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input checked="checked" class="form-check-input mx-0 dwpCheckBox" id="114540245_CBNM_checkbox dwpLpAssignment" name="cbnmChecked" type="checkbox" value="true" /><input name="cbnmChecked" type="hidden" value="false" /></div></td>
+                </tr>
+                <tr>
+                    <td><div></div></td>
+                    <td><div><a class='dwpBarcode' target='_blank' href='/Document/GetWebViewerDocument?id=PK 3901 Answer Key'>PK-3901-00</a></div></td>
+                    <td><div>Coterminal Angles</div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540246_WO_checkbox dwpLpAssignment" name="woChecked" type="checkbox" value="true" /><input name="woChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540246_CM_checkbox dwpLpAssignment" name="cmChecked" type="checkbox" value="true" /><input name="cmChecked" type="hidden" value="false" /></div></td>
+                    <td><div class="dwpCheckBoxWrapper"><input class="form-check-input mx-0 dwpCheckBox" id="114540246_CBNM_checkbox dwpLpAssignment" name="cbnmChecked" type="checkbox" value="true" /><input name="cbnmChecked" type="hidden" value="false" /></div></td>
+                </tr>
+            </tbody>
+        </table>
+        </div>
+        </div>
+    </div>
+    <div id="SchoolworkWorkedOn">
+        <script>
+            $(document).ready(function () {
+                loadButtons("divSession", "SchoolworkWorkedOn", );
+                if (!"") { $('#SchoolworkWorkedOn-date').css('visibility', 'hidden'); }
+            });
+        </script>
+    </div>
+    <div class="w-100 mb-3">
+        <label for="SessionNotes" class="dwpLabel mb-1 w-100">Session Summary Notes:</label>
+        <textarea class="textarea-full-width k-textarea-auto-size" id="SessionNotes-0" name="SessionNotes-0" style="resize: none; overflow: hidden;"></textarea>
+        <div id="charCountSessionNotes-0" class="dwp-char-count"></div>
+    </div>
+    <div class="w-100">
+        <label for="NotesForCenterDirector" class="dwpLabel mb-1">Internal Notes:</label>
+        <textarea class="textarea-full-width" id="NotesForCenterDirector-0" name="NotesForCenterDirector-0"></textarea>
+    </div>
+</div>
+<div id="divWrapUp">
+    <div class="col-12 col-md-4">
+        <div class="d-inline-flex align-items-center">
+            <label for="NumberOfPagesCompleted" class="dwpLabel dwpRequired">Pages Completed:</label>
+            <input class="input-fixed-width number-input taller" data-val="true" data-val-number="The field NumberOfPagesCompleted must be a number." id="NumberOfPagesCompleted" name="NumberOfPagesCompleted" type="text" value="12" />
+        </div>
+    </div>
+    <div id="StudentWorkedOnAnAssessmentToday">
+        <script>
+            $(document).ready(function () {
+                loadButtons("divWrapUp", "StudentWorkedOnAnAssessmentToday", 0);
+                if (!"") { $('#StudentWorkedOnAnAssessmentToday-date').css('visibility', 'hidden'); }
+            });
+        </script>
+    </div>
+    <div class="form-group deckStack">
+        <div class="w-100"><label for="primaryDeck" class="fw-bolder">Primary Deck</label></div>
+        <div id="Deck1NeedsUpdate">
+            <span class="switchLabel dwpRequired" id="Deck1NeedsUpdateTripleSwitchLabel">Needs deck update</span>
+            <div class="tri-state-toggle" data-switch-type="triple">
+                <div class="switch">
+                    <img src="/Images/DWP/DWPSwitchNeutral.png"/>
+                    <input class="toggler-button no" type="radio" value="0" />
+                    <input class="toggler-button neutral" type="radio" value="null" />
+                    <input class="toggler-button yes" type="radio" value="1" />
+                </div>
+            </div>
+            <script>
+                $(document).ready(function () {
+                    loadButtons("divWrapUp", "Deck1NeedsUpdate", 0);
+                    if (!"") { $('#Deck1NeedsUpdate-date').css('visibility', 'hidden'); }
+                });
+            </script>
+        </div>
+    </div>
+    <div class="w-100 mb-3">
+        <label for="SessionNotes" class="dwpLabel mb-1 w-100">Session Summary Notes:</label>
+        <textarea class="textarea-full-width k-textarea-auto-size" id="SessionNotes-1" name="SessionNotes-1" style="resize: none; overflow: hidden;"></textarea>
+        <div id="charCountSessionNotes-1" class="dwp-char-count"></div>
+    </div>
+    <div class="w-100">
+        <label for="NotesForCenterDirector" class="dwpLabel mb-1">Internal Notes:</label>
+        <textarea class="textarea-full-width" id="NotesForCenterDirector-1" name="NotesForCenterDirector-1"></textarea>
+    </div>
+    <button id="finalize" type="button" onclick="validateFinalize();">Finalize</button>
+</div>
+        </main>
+    </div>
+</body>
+</html>
