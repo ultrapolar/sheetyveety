@@ -10,6 +10,7 @@ spreadsheet.
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Repair.gs` | **Tools → Check setup**, and the one-off history column migration. |
+| `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
 
@@ -27,11 +28,64 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-183 assertions covering the parsing rules and both scripts end to end,
+208 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
+
+## Radius import (unfinished)
+
+Reads student names from column A of the highlighted Daily WOP rows, fetches
+each one's DWP page from radius.mathnasium.com, and writes values into the
+columns listed in `CONFIG.RADIUS.FIELDS` — currently just column Q, for
+testing.
+
+**Two pieces still need real HTML before this can run.** Both fail with an
+explanation rather than writing a wrong value:
+
+- `resolveRadiusSession_` has to find today's `attendanceId` and `dwpEntryId`
+  for a student. Only `studentId` looks stable enough to cache; the other two
+  are almost certainly created fresh at each visit, so they can't be
+  catalogued once. This needs whatever page lists today's attendance, with
+  links through to each DWP.
+- `RADIUS_EXTRACTORS` pulls the values out of the page. Apps Script has no DOM
+  parser, so these are regexes over raw HTML. If a value turns out to arrive by
+  a JSON/XHR call instead, fetching that endpoint directly will be far steadier
+  than scraping markup — worth checking DevTools → Network before writing a
+  parser.
+
+### Authentication
+
+`UrlFetchApp` has no browser session, so requests need a credential or Radius
+just returns the sign-in page — with a perfectly normal `200`, which is why
+`looksLikeLoginPage_` exists rather than trusting the status code.
+
+**Radius → Set session cookie** stores a cookie copied from a logged-in
+browser in Script Properties. It is not in the spreadsheet and is not visible
+to people the sheet is shared with, and no password is stored anywhere. The
+trade-off is that it expires; when it does, the import says so plainly instead
+of failing obscurely. **Radius → Test connection** checks it without touching
+the spreadsheet.
+
+If re-pasting the cookie becomes a nuisance, the alternative is storing
+credentials and having the script log in itself — more setup, and it breaks if
+the login form carries MFA or a CSRF token.
+
+### Adding more values
+
+Add an entry to `CONFIG.RADIUS.FIELDS` giving the key, the Daily WOP column
+number, and a label, then add a matching function to `RADIUS_EXTRACTORS`. The
+import writes every configured field in one pass.
+
+### Notes
+
+- Nothing is written until every row in the selection has been attempted, so a
+  failure part way through doesn't leave half the selection filled in.
+- There is a `FETCH_DELAY_MS` pause between page fetches. Radius is someone
+  else's server.
+- The run stops itself before the 6-minute Apps Script ceiling, saves what it
+  has, and tells you to highlight the rest and run again.
 
 ## Migrating the history column
 

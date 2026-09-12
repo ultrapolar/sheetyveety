@@ -161,8 +161,33 @@ function install(globalObj, sheets, activeSheetName) {
     })
   };
 
+  // --- UrlFetchApp -------------------------------------------------------
+  const fetchLog = [];
+  const fetchHandler = { value: null };
+  globalObj.UrlFetchApp = {
+    fetch: (url, params) => {
+      fetchLog.push({ url, params });
+      const res = fetchHandler.value ? fetchHandler.value(url, params) : {};
+      return {
+        getResponseCode: () => (res.code === undefined ? 200 : res.code),
+        getContentText: () => (res.body === undefined ? '' : res.body)
+      };
+    }
+  };
+
+  // --- PropertiesService --------------------------------------------------
+  const scriptProps = {};
+  globalObj.PropertiesService = {
+    getScriptProperties: () => ({
+      getProperty: k => (k in scriptProps ? scriptProps[k] : null),
+      setProperty: (k, v) => { scriptProps[k] = v; },
+      deleteProperty: k => { delete scriptProps[k]; }
+    })
+  };
+
   let uuid = 0;
   globalObj.Utilities = {
+    sleep: () => {},
     getUuid: () => 'uuid-' + (++uuid),
     formatDate: () => '08/22',
     base64Encode: s => Buffer.from(s, 'utf8').toString('base64'),
@@ -174,7 +199,8 @@ function install(globalObj, sheets, activeSheetName) {
   // be reachable from the object the script actually holds.
   globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
 
-  return { dialogs, alerts, uiAnswer, sheets: byName };
+  return { dialogs, alerts, uiAnswer, fetchLog, fetchHandler, scriptProps,
+    sheets: byName };
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */

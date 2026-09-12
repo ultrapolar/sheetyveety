@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Repair.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Repair.gs', 'Radius.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -25,7 +25,9 @@ function loadScript(context) {
   escapeHtml_, columnLetter_, processWopToDeck, processSodPinks,
   executeSodOperations_FromUI, repairHistoryColumn, applyHistoryColumnRepair,
   deleteLegacyHistoryColumn, parseEntryMonthDay_, inferEntryDates_,
-  splitHistoryEntries_, planHistoryColumnRepair_
+  splitHistoryEntries_, planHistoryColumnRepair_,
+  looksLikeLoginPage_, radiusFetch_, dwpUrl_, importRadiusData,
+  RADIUS_EXTRACTORS, loadRadiusIds_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -37,13 +39,16 @@ function scenario(deckRows, wopRows, selection, today) {
     while (row.length < 14) row.push('');
     return row;
   });
+  // A real sheet is 26 columns wide by default; the Radius import writes as
+  // far right as Q, so the fixture has to be at least that wide too.
   const wopValues = wopRows.map(r => {
     const row = [r.name];
     while (row.length < 10) row.push('');
     row.push(r.status === undefined ? '' : r.status);
+    while (row.length < 26) row.push('');
     return row;
   });
-  const wopBg = makeGrid(wopValues.length, 11, '#ffffff');
+  const wopBg = makeGrid(wopValues.length, 26, '#ffffff');
   wopRows.forEach((r, i) => {
     if (r.nameBg) wopBg[i][0] = r.nameBg;
     if (r.statusBg) wopBg[i][10] = r.statusBg;
@@ -58,7 +63,7 @@ function scenario(deckRows, wopRows, selection, today) {
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   const harness = install(context, [deck, wop], 'Daily WOP');
   const api = loadScript(context);
-  return { deck, wop, harness, api,
+  return { deck, wop, harness, api, context,
     deckCell: (row, col) => String(deck.values[row - 1][col - 1]),
     wopStatus: i => String(wop.values[selection.start - 1 + i][10]),
     wopStatusBg: i => String(wop.backgrounds[selection.start - 1 + i][10]),
@@ -853,6 +858,135 @@ const REPAIR_FILLER_ROWS = [
     String(deck.values[3][13]).includes('undefined'), false);
 }
 
+
+// 46. A logged-out response is the sign-in page with a 200, so the status
+//     code alone cannot be trusted.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  checkTruthy('login detect: form action',
+    api.looksLikeLoginPage_('<form action="/Account/Login" method="post">', 'x'));
+  checkTruthy('login detect: password + username fields',
+    api.looksLikeLoginPage_('<input name="username"><input name="password">', 'x'));
+  checkTruthy('login detect: redirected URL',
+    api.looksLikeLoginPage_('<html>anything</html>', 'https://radius.mathnasium.com/Account/Login'));
+  checkTruthy('login detect: a real DWP page is not a login page',
+    !api.looksLikeLoginPage_('<div class="dwp">Student work plan</div>',
+      'https://radius.mathnasium.com/DWP/Index?studentId=1'));
+}
+
+// 47. Fetch failure modes all explain themselves.
+{
+  function fetchCase(body, code, cookie) {
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [], null);
+    const api = loadScript(ctx);
+    if (cookie) ctx.PropertiesService.getScriptProperties().setProperty('RADIUS_COOKIE', cookie);
+    h.fetchHandler.value = () => ({ code: code, body: body });
+    try { api.radiusFetch_('https://radius.mathnasium.com/x'); return null; }
+    catch (e) { return e.message; }
+  }
+
+  checkTruthy('fetch: no cookie stored says so',
+    String(fetchCase('ok', 200, null)).includes('No Radius session cookie'));
+  checkTruthy('fetch: 403 says the cookie was rejected',
+    String(fetchCase('nope', 403, 'abc=1')).includes('rejected the session cookie'));
+  checkTruthy('fetch: 500 reports the status',
+    String(fetchCase('boom', 500, 'abc=1')).includes('HTTP 500'));
+  checkTruthy('fetch: login page means expired',
+    String(fetchCase('<input name="username"><input name="password">', 200, 'abc=1'))
+      .includes('expired'));
+  check('fetch: a good page returns cleanly', fetchCase('<div>real page</div>', 200, 'abc=1'), null);
+}
+
+// 48. The DWP URL is assembled from config, with the centre id baked in.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  check('dwpUrl',
+    api.dwpUrl_({ studentId: '2942358', attendanceId: '86722299', dwpEntryId: '21711167' }),
+    'https://radius.mathnasium.com/DWP/Index?studentId=2942358&attendanceId=86722299' +
+    '&centerId=2514&dwpEntryId=21711167');
+}
+
+// 49. End to end with the two unfinished pieces stubbed: values land in the
+//     configured column (Q), names come from column A, failures are reported.
+{
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
+  const s = scenario(deckRows,
+    [{ name: '10:30 AM Jane Doe' }, { name: '11:00 AM John Roe' }],
+    { start: 1, rows: 2 }, '2026-08-22');
+
+  s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+  s.harness.fetchHandler.value = () => ({ code: 200, body: '<div id="v">42</div>' });
+
+  // Stand in for the two pieces that still need real HTML.
+  s.api.RADIUS_EXTRACTORS.testValue = html => (html.match(/<div id="v">(\d+)<\/div>/) || [])[1];
+  vm.runInContext(
+    'resolveRadiusSession_ = function (name) {' +
+    '  if (name === "John Roe") throw new Error("not checked in today");' +
+    '  return { studentId: "1", attendanceId: "2", dwpEntryId: "3" };' +
+    '};', s.context);
+
+  s.api.importRadiusData();
+
+  check('import: value written to column Q', String(s.wop.values[0][16]), '42');
+  check('import: failed student leaves Q blank', String(s.wop.values[1][16]), '');
+  checkTruthy('import: success logged',
+    s.harness.dialogs[0].html.includes('Jane Doe'));
+  checkTruthy('import: failure explained',
+    s.harness.dialogs[0].html.includes('not checked in today'));
+  checkTruthy('import: reports the column it wrote',
+    s.harness.dialogs[0].html.includes('Q'));
+  check('import: one fetch per resolvable student', s.harness.fetchLog.length, 1);
+}
+
+// 50. Until the extractors are written, the import refuses rather than
+//     writing a wrong value.
+{
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+  s.harness.fetchHandler.value = () => ({ code: 200, body: '<div>page</div>' });
+  vm.runInContext(
+    'resolveRadiusSession_ = function () {' +
+    '  return { studentId: "1", attendanceId: "2", dwpEntryId: "3" };' +
+    '};', s.context);
+
+  s.api.importRadiusData();
+  check('unwritten extractor: Q left blank', String(s.wop.values[0][16]), '');
+  checkTruthy('unwritten extractor: says what is missing',
+    s.harness.dialogs[0].html.includes('has not been written yet'));
+}
+
+// 51. The studentId cache is read by name, case-insensitively.
+{
+  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+    ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']];
+  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
+  check('id cache: absent sheet is not an error', s.api.loadRadiusIds_(), {});
+
+  const ids = new FakeSheet('Radius IDs', [
+    ['Name', 'Student ID'],
+    ['Jane Doe', '2942358'],
+    ['JOHN ROE', '1111111'],
+    ['', '']
+  ]);
+  const ctx2 = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx2, [ids], 'Radius IDs');
+  const api2 = loadScript(ctx2);
+  check('id cache: reads pairs', api2.loadRadiusIds_(),
+    { 'jane doe': '2942358', 'john roe': '1111111' });
+}
 
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

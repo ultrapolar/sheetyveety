@@ -51,5 +51,36 @@ const CONFIG = {
   CACHE_TTL_SECONDS: 3600,
 
   // How long to wait for another user's run to finish, in milliseconds.
-  LOCK_TIMEOUT_MS: 30000
+  LOCK_TIMEOUT_MS: 30000,
+
+  // ------------------------------------------------------------------
+  // Radius import (experimental)
+  // ------------------------------------------------------------------
+  RADIUS: {
+    BASE_URL: 'https://radius.mathnasium.com',
+    CENTER_ID: '2514',
+
+    // Script Property holding a session cookie copied from a logged-in
+    // browser. Set it via Radius -> Set session cookie; never hard-code it
+    // here, or it ends up in the repo.
+    COOKIE_PROPERTY: 'RADIUS_COOKIE',
+
+    // Hidden sheet caching each student's stable Radius studentId, so the
+    // import does not have to search for a name it has already resolved.
+    ID_SHEET: 'Radius IDs',
+
+    // Which values to pull out of each DWP page, and which Daily WOP column
+    // each one lands in. Add entries here as more values are identified --
+    // every one needs a matching extractor in RADIUS_EXTRACTORS.
+    FIELDS: [
+      { key: 'testValue', column: 17, label: 'Test value' } // Q
+    ],
+
+    // Pause between page fetches, in milliseconds. Radius is someone else's
+    // server; there is no reason to hammer it.
+    FETCH_DELAY_MS: 300,
+
+    // Stop and report rather than being killed by the 6-minute ceiling.
+    MAX_RUNTIME_MS: 4.5 * 60 * 1000
+  }
 };

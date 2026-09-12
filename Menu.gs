@@ -12,6 +12,13 @@ function onOpen() {
     .addItem('Colored Sheets Batch Process', 'processWopToDeck')
     .addToUi();
 
+  ui.createMenu('Radius')
+    .addItem('Import for highlighted rows', 'importRadiusData')
+    .addSeparator()
+    .addItem('Set session cookie', 'setRadiusCookie')
+    .addItem('Test connection', 'testRadiusConnection')
+    .addToUi();
+
   ui.createMenu('Tools')
     .addItem('Check setup', 'checkSheetSetup')
     .addSeparator()
