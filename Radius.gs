@@ -286,11 +286,30 @@ function tagIsChecked_(tag) {
   return /(^|\s)checked(\s|=|\/|>)/i.test(String(tag));
 }
 
+/**
+ * A textarea's text.
+ *
+ * Radius puts the content in a value attribute on the tag rather than between
+ * the tags, which is not how a textarea normally works:
+ *
+ *     <textarea id="SessionNotes-0" ... value="She flew so high"></textarea>
+ *
+ * Reading only the inner content returns '' for a note that is plainly there,
+ * and '' is a legitimate "nothing written" answer -- so the mistake would be
+ * silent rather than loud. Prefer the attribute, fall back to the inner text.
+ */
 function textareaContentById_(html, id) {
   const match = String(html).match(
     new RegExp('<textarea\\b[^>]*\\bid="' + escapeForRegex_(id) +
       '"[^>]*>([\\s\\S]*?)<\\/textarea>', 'i'));
-  return match ? decodeHtmlEntities_(match[1]).trim() : null;
+  if (!match) return null;
+
+  const openTag = match[0].match(/<textarea\b[^>]*>/i);
+  if (openTag) {
+    const value = openTag[0].match(/\bvalue="([^"]*)"/i);
+    if (value) return decodeHtmlEntities_(value[1]).trim();
+  }
+  return decodeHtmlEntities_(match[1]).trim();
 }
 
 /**
@@ -341,6 +360,44 @@ function assignmentCheckboxChecked_(rowHtml, suffix) {
   const tag = String(rowHtml).match(
     new RegExp('<input\\b[^>]*\\bid="[^"]*' + escapeForRegex_(suffix) + '[^"]*"[^>]*>', 'i'));
   return tag ? tagIsChecked_(tag[0]) : false;
+}
+
+/** The value of whichever radio in a same-named group is ticked, or ''. */
+function checkedRadioValue_(html, name) {
+  const pattern = new RegExp(
+    '<input\\b[^>]*\\bname="' + escapeForRegex_(name) + '"[^>]*>', 'gi');
+  let match;
+  while ((match = pattern.exec(html)) !== null) {
+    if (!tagIsChecked_(match[0])) continue;
+    const value = match[0].match(/\bvalue="([^"]*)"/i);
+    return value ? decodeHtmlEntities_(value[1]).trim() : '';
+  }
+  return '';
+}
+
+/**
+ * The label text of whichever ticked radio has a name starting with a prefix.
+ *
+ * The assessment options each carry their own name (AssessmentStatusId-1,
+ * -2, ...) rather than sharing one, so they are matched by prefix and read
+ * back through the label rather than the opaque numeric value.
+ */
+function checkedRadioLabel_(html, namePrefix) {
+  const pattern = /<input\b[^>]*\btype="radio"[^>]*>/gi;
+  let match;
+  while ((match = pattern.exec(html)) !== null) {
+    const tag = match[0];
+    const name = tag.match(/\bname="([^"]*)"/i);
+    if (!name || name[1].indexOf(namePrefix) !== 0) continue;
+    if (!tagIsChecked_(tag)) continue;
+
+    const id = tag.match(/\bid="([^"]*)"/i);
+    if (!id) return '';
+    const label = String(html).match(new RegExp(
+      '<label\\b[^>]*\\bfor="' + escapeForRegex_(id[1]) + '"[^>]*>([\\s\\S]*?)<\\/label>', 'i'));
+    return label ? htmlCellText_(label[1]) : '';
+  }
+  return '';
 }
 
 /** Topic names from every assignment row whose given checkbox is ticked. */
@@ -436,6 +493,19 @@ const RADIUS_EXTRACTORS = {
 
   completedNotMastered: function (html) {
     return topicsWhereChecked_(html, '_CBNM_checkbox');
+  },
+
+  /**
+   * Cool Down -> Mathlete Score, and the assessment status.
+   *
+   * Also not wired into CONFIG.RADIUS.FIELDS yet.
+   */
+  mathleteScore: function (html) {
+    return checkedRadioValue_(html, 'MathleteScore');
+  },
+
+  assessmentStatus: function (html) {
+    return checkedRadioLabel_(html, 'AssessmentStatusId');
   },
 
   /** Session -> Problem of the Week switch. */

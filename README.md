@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-260 assertions covering the parsing rules and both scripts end to end,
+283 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -63,35 +63,53 @@ An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
 
-### Confirmed against a real filled-in page
+### Reading the page: what real pages taught us
 
-Two readings were originally inferred from an untouched session and have since
-been checked against a page an instructor filled in and finalized:
+Three real pages were used to build and check this — an untouched live
+session, a partly filled one, and a fully completed one. Between them they
+settled every guess, and caught one bug that would otherwise have gone
+unnoticed for a long time.
 
-- **Tri-state switches.** The radios carry no `checked` attribute; the state
-  arrives as the third argument of a `loadButtons` call. A switch answered
-  *No* renders `0`, and a switch left alone still renders empty on the same
-  page — so a filled page does not make every switch look answered. The `1`
-  spelling for Yes matches the radio values on the control but has not itself
-  been seen yet, so anything unrecognised is passed through unchanged rather
-  than forced into a Yes/No.
-- **Ticked checkboxes** render `checked="checked"` — placed *before* the
-  `class` attribute, which is why tag matching is position-independent rather
-  than assuming an attribute order.
+**Notes live in a `value` attribute, not between the tags.** Radius renders
+them like this, which is not how a textarea normally works:
+
+```html
+<textarea id="SessionNotes-0" ... value="She flew so high and so fast"></textarea>
+```
+
+Reading the inner content returned `''` for a note that was plainly there —
+and `''` is a legitimate *nothing written* answer, so the mistake was silent
+rather than loud. The note columns would simply have stayed blank forever.
+`textareaContentById_` now prefers the attribute and falls back to the inner
+text.
+
+**Tri-state switches** carry their state in the third argument of a
+`loadButtons` call, since the radios have no `checked` attribute: `1` is Yes,
+`0` is No, empty is untouched. All three states have now been seen on real
+pages, including a switch reset back to untouched on a page where others were
+set — so a filled page does not make every switch look answered. Anything
+unrecognised is still passed through unchanged rather than forced into a
+Yes/No.
+
+**Ticked checkboxes** render `checked="checked"`, placed *before* the `class`
+attribute — which is why tag matching is position-independent rather than
+assuming an attribute order.
 
 ### Also available, not yet wired up
 
-The learning-plan table has three progress columns, and all three are
-extractable and tested:
+Extractable and tested, but not written to any column. Add an entry to
+`CONFIG.RADIUS.FIELDS` to start writing one:
 
 | Extractor | Meaning |
 | --- | --- |
-| `topicsWorkedOn` | Worked On ticked *(in column U)* |
-| `completedMastered` | Completed & Mastered ticked |
-| `completedNotMastered` | Completed but Not Mastered ticked |
+| `completedMastered` | LP rows with Completed & Mastered ticked |
+| `completedNotMastered` | LP rows with Completed but Not Mastered ticked |
+| `mathleteScore` | Cool Down → Mathlete Score (1–3) |
+| `assessmentStatus` | e.g. "Pre completed", read from the radio's label |
 
-Only the first is written to a column. Add an entry to
-`CONFIG.RADIUS.FIELDS` to start writing either of the others.
+The learning-plan table tracks three states, so `topicsWorkedOn` alone
+flattens a real distinction — on the completed sample all seven topics were
+worked on, but only three were mastered.
 
 ### Guard against a mislinked row
 

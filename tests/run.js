@@ -31,7 +31,7 @@ function loadScript(context) {
   findDwpLink_, lookupRosterEntry_, testRadiusConnection,
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
-  extractRadiusFields_
+  extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1132,6 +1132,81 @@ const REPAIR_FILLER_ROWS = [
       '_WO_checkbox'));
 }
 
+
+// 53. A fully completed page. This is the one that exposed the textarea bug
+//     and finally showed a switch set to Yes.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+  const get = key => api.RADIUS_EXTRACTORS[key](DONE);
+
+  check('complete: pages completed', get('pagesCompleted'), '33');
+  check('complete: signed out', get('signedOut'), '11:48 AM');
+  check('complete: finalized', get('finalized'), 'Yes');
+
+  // CONFIRMED at last: 1 really does mean Yes.
+  check('complete: deck needs update reads Yes', get('deckNeedsUpdate'), 'Yes');
+  check('complete: problem of the week reads Yes', get('problemOfTheWeek'), 'Yes');
+  check('switch raw value for a Yes is 1',
+    api.tripleSwitchRaw_(DONE, 'Deck1NeedsUpdate'), '1');
+
+  // A switch reset back to untouched on a page where others are set must stay
+  // blank -- neither Yes nor No.
+  check('complete: a reset switch is still blank',
+    api.tripleSwitchRaw_(DONE, 'Schoolwork'), '');
+
+  // REGRESSION: Radius keeps note text in a value attribute on the textarea
+  // rather than between the tags. Reading the inner content returned '' for a
+  // note that was plainly there, and '' is a legitimate "nothing written"
+  // answer -- so this failed silently rather than loudly.
+  check('complete: session summary read from the value attribute',
+    get('sessionSummary'), 'She flew so high and so fast');
+  check('complete: internal notes read from the value attribute',
+    get('internalNotes'), 'she doesnt shut up big L');
+  check('textarea: value attribute wins over empty inner content',
+    api.textareaContentById_('<textarea id="X" value="from attribute"></textarea>', 'X'),
+    'from attribute');
+  check('textarea: plain inner content still works',
+    api.textareaContentById_('<textarea id="X">from inner text</textarea>', 'X'),
+    'from inner text');
+  check('textarea: genuinely empty stays empty',
+    api.textareaContentById_('<textarea id="X"></textarea>', 'X'), '');
+  check('textarea: an empty value attribute is empty, not a fallback',
+    api.textareaContentById_('<textarea id="X" value="">ignored</textarea>', 'X'), '');
+  check('textarea: missing element is null, not empty',
+    api.textareaContentById_('<div>nothing</div>', 'X'), null);
+
+  // Every row is worked on here, but the mastery split differs per row.
+  check('complete: all seven topics worked on',
+    get('topicsWorkedOn').split('; ').length, 7);
+  check('complete: completed & mastered', get('completedMastered'),
+    'Completing Right Triangles; Converting Angles - Degrees and Radians; ' +
+    'Solving Trigonometric Equations');
+  check('complete: completed but not mastered', get('completedNotMastered'),
+    'The Unit Circle - Angles as Rotations; Coterminal Angles; ' +
+    'Right Triangle Trigonometry - sine, cosine and tangent');
+
+  // Radio groups.
+  check('complete: mathlete score', get('mathleteScore'), '3');
+  check('complete: assessment status read from its label',
+    get('assessmentStatus'), 'Pre completed');
+
+  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  check('untouched page: no mathlete score',
+    api.RADIUS_EXTRACTORS.mathleteScore(LIVE), '');
+  check('untouched page: no assessment status',
+    api.RADIUS_EXTRACTORS.assessmentStatus(LIVE), '');
+
+  check('radio: unticked group yields empty',
+    api.checkedRadioValue_('<input name="G" type="radio" value="1" />', 'G'), '');
+  check('radio: picks the ticked one, not the first',
+    api.checkedRadioValue_(
+      '<input name="G" type="radio" value="1" />' +
+      '<input name="G" type="radio" value="2" checked />', 'G'), '2');
+}
 
 // 53. All eight fields land in their configured columns, Q through X.
 {
