@@ -31,7 +31,8 @@ function loadScript(context) {
   findDwpLink_, lookupRosterEntry_, testRadiusConnection,
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
-  extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_
+  extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
+  yesFlag_, CONFIG
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1040,7 +1041,7 @@ const REPAIR_FILLER_ROWS = [
 
   check('live: pages completed is blank, not missing', get('pagesCompleted'), '');
   check('live: deck update switch untouched', get('deckNeedsUpdate'), '');
-  check('live: not signed out', get('signedOut'), 'No');
+  check('live: not signed out is blank, not "No"', get('signedOut'), '');
   check('live: not finalized', get('finalized'), 'No');
   check('live: no topics ticked yet', get('topicsWorkedOn'), '');
   check('live: problem of the week untouched', get('problemOfTheWeek'), '');
@@ -1077,6 +1078,7 @@ const REPAIR_FILLER_ROWS = [
 
   check('filled: pages completed', get('pagesCompleted'), '12');
   check('filled: signed out reports the time', get('signedOut'), '11:42 AM');
+  check('filled: signed in reports the time', get('signedIn'), '9:59 AM');
   check('filled: finalized', get('finalized'), 'Yes');
   check('filled: deck update answered No', get('deckNeedsUpdate'), 'No');
   check('filled: problem of the week answered No', get('problemOfTheWeek'), 'No');
@@ -1188,6 +1190,70 @@ const REPAIR_FILLER_ROWS = [
     api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(100)');
 }
 
+// 52c. The Daily WOP column layout, and the values that land in each.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const get = (key, html) => api.RADIUS_EXTRACTORS[key](html || DONE);
+
+  // Boolean-ish answers write a bare Y, matching how column K is filled in by
+  // hand. A No writes nothing at all rather than the word "No".
+  check('flag: problem of the week done', get('problemOfTheWeekFlag'), 'Y');
+  check('flag: finalized', get('finalizedFlag'), 'Y');
+  check('flag: deck needs update', get('deckNeedsUpdateFlag'), 'Y');
+  check('flag: an answered-No is blank, not "No"',
+    api.RADIUS_EXTRACTORS.deckNeedsUpdateFlag(
+      fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')), '');
+  check('flag: an untouched switch is blank',
+    get('problemOfTheWeekFlag', LIVE), '');
+  check('yesFlag: only "yes" counts', [
+    api.yesFlag_('Yes'), api.yesFlag_('yes'), api.yesFlag_('No'),
+    api.yesFlag_(''), api.yesFlag_('maybe')
+  ], ['Y', 'Y', '', '', '']);
+
+  // Times are plain times, blank until they happen -- not the word "No".
+  check('time: signed in', get('signedIn'), '10:48 AM');
+  check('time: signed out', get('signedOut'), '11:48 AM');
+  check('time: signed in on a live session', get('signedIn', LIVE), '9:59 AM');
+  check('time: not signed out yet is blank', get('signedOut', LIVE), '');
+
+  // Column G folds the assessment status onto the end of the mastery list.
+  check('column G: mastery plus assessment, one comma-separated list',
+    get('masteryAndAssessment'),
+    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0), ' +
+    'Pre completed');
+  check('column G: empty when nothing is finished',
+    get('masteryAndAssessment', LIVE), '');
+  check('column G: mastery alone when no assessment was given',
+    api.RADIUS_EXTRACTORS.masteryAndAssessment(
+      fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')),
+    'PK3909(100), PK3902(0)');
+
+  // The layout itself, so a stray edit to Config.gs shows up here.
+  const layout = {};
+  api.CONFIG.RADIUS.FIELDS.forEach(f => { layout[api.columnLetter_(f.column)] = f.key; });
+  check('column layout', layout, {
+    F: 'problemOfTheWeekFlag',
+    G: 'masteryAndAssessment',
+    H: 'pagesCompleted',
+    J: 'finalizedFlag',
+    L: 'signedIn',
+    M: 'signedOut',
+    O: 'sessionSummary',
+    P: 'internalNotes'
+  });
+
+  // The EOD script owns column K. Nothing in the import may target it.
+  checkTruthy('no import field targets the EOD status column',
+    api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.STATUS));
+  checkTruthy('and no field targets the name column either',
+    api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.NAME));
+}
+
 // 53. A fully completed page. This is the one that exposed the textarea bug
 //     and finally showed a switch set to Yes.
 {
@@ -1282,14 +1348,14 @@ const REPAIR_FILLER_ROWS = [
 
   s.api.importRadiusData();
 
-  check('columns Q-X written',
-    [16, 17, 18, 19, 20, 21, 22, 23].map(c => String(s.wop.values[0][c])),
-    ['', '', 'No', 'No', '', '', '', '']);
-  check('column U is now the mastery list',
-    vm.runInContext('CONFIG.RADIUS.FIELDS.filter(f => f.column === 21)[0].key', s.context),
-    'masteryScores');
+  // F G H J L M O P, zero-indexed.
+  check('configured columns written',
+    [5, 6, 7, 9, 11, 12, 14, 15].map(c => String(s.wop.values[0][c])),
+    ['', '', '', '', '9:59 AM', '', '', '']);
   checkTruthy('import reports every column it wrote',
-    s.harness.dialogs[0].html.includes('Q, R, S, T, U, V, W, X'));
+    s.harness.dialogs[0].html.includes('F, G, H, J, L, M, O, P'));
+  check('the EOD status column is left alone',
+    String(s.wop.values[0][10]), '');
 }
 
 // 54. A roster link pointing at the wrong student writes nothing.

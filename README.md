@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-296 assertions covering the parsing rules and both scripts end to end,
+313 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -46,54 +46,36 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 
 ### What is extracted, and where it lands
 
-| Column | Field | Read from |
+| Column | Field | Written as |
 | --- | --- | --- |
-| Q | Pages completed | `#NumberOfPagesCompleted` value |
-| R | Deck needs update | `loadButtons(…, "Deck1NeedsUpdate", …)` |
-| S | Signed out | `#SessionEndTime` value, or `No` |
-| T | Finalized | the `finalizedDate` script constant |
-| U | Mastery | LP rows that were **completed**, as `PK3918(100)` |
-| V | Problem of the Week | `loadButtons(…, "ProblemOfTheWeek", …)` |
-| W | Session summary | `#SessionNotes-0` / `-1` |
-| X | Internal notes | `#NotesForCenterDirector-0` / `-1` |
+| F | Problem of the Week | `Y`, or blank |
+| G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
+| H | Pages completed | the number |
+| J | Finalized | `Y`, or blank |
+| **K** | *Deck update — **not assigned**, see below* | |
+| L | Signed in | `10:48 AM`, or blank |
+| M | Signed out | `11:48 AM`, or blank |
+| O | Session summary | the note text |
+| P | Internal notes | the note text |
 
-Rearranging is a `column:` change in `CONFIG.RADIUS.FIELDS`.
+Yes/no answers write a bare **`Y`**, matching how the sheet is filled in by
+hand; a No writes nothing rather than the word "No". Times are plain times,
+blank until they happen. Rearranging is a `column:` change in
+`CONFIG.RADIUS.FIELDS`.
 
 An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
 
-### Reading the page: what real pages taught us
+### Column K is taken
 
-Three real pages were used to build and check this — an untouched live
-session, a partly filled one, and a fully completed one. Between them they
-settled every guess, and caught one bug that would otherwise have gone
-unnoticed for a long time.
+`CONFIG.WOP_COL.STATUS` is column K — the Y/P column the EOD script reads and
+writes. Putting deck updates there would have the two scripts overwriting each
+other, so `deckNeedsUpdateFlag` is extracted and tested but **not assigned to
+any column**. Give it a free column in `CONFIG.RADIUS.FIELDS` to switch it on.
 
-**Notes live in a `value` attribute, not between the tags.** Radius renders
-them like this, which is not how a textarea normally works:
-
-```html
-<textarea id="SessionNotes-0" ... value="She flew so high and so fast"></textarea>
-```
-
-Reading the inner content returned `''` for a note that was plainly there —
-and `''` is a legitimate *nothing written* answer, so the mistake was silent
-rather than loud. The note columns would simply have stayed blank forever.
-`textareaContentById_` now prefers the attribute and falls back to the inner
-text.
-
-**Tri-state switches** carry their state in the third argument of a
-`loadButtons` call, since the radios have no `checked` attribute: `1` is Yes,
-`0` is No, empty is untouched. All three states have now been seen on real
-pages, including a switch reset back to untouched on a page where others were
-set — so a filled page does not make every switch look answered. Anything
-unrecognised is still passed through unchanged rather than forced into a
-Yes/No.
-
-**Ticked checkboxes** render `checked="checked"`, placed *before* the `class`
-attribute — which is why tag matching is position-independent rather than
-assuming an attribute order.
+A test asserts no import field targets column K or column A, so this cannot be
+reintroduced by accident.
 
 ### The mastery column
 

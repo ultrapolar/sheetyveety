@@ -400,6 +400,11 @@ function checkedRadioLabel_(html, namePrefix) {
   return '';
 }
 
+/** "Yes" becomes a bare Y; anything else becomes blank. */
+function yesFlag_(label) {
+  return String(label).trim().toLowerCase() === 'yes' ? 'Y' : '';
+}
+
 /**
  * The PK code as the sheet wants it: "PK-3918-00" on the page becomes
  * "PK3918". The trailing segment is a revision number and is dropped.
@@ -466,13 +471,22 @@ const RADIUS_EXTRACTORS = {
     return tripleSwitchLabel_(raw);
   },
 
-  /** Header -> End. Present means the student has been signed out. */
+  /** Header -> Start. Blank until the student is signed in. */
+  signedIn: function (html) {
+    const startTime = inputValueById_(html, 'SessionStartTime');
+    if (startTime === null) {
+      throw new Error('could not find the session Start time field on the DWP page.');
+    }
+    return startTime;
+  },
+
+  /** Header -> End. Blank until the student is signed out. */
   signedOut: function (html) {
     const endTime = inputValueById_(html, 'SessionEndTime');
     if (endTime === null) {
       throw new Error('could not find the session End time field on the DWP page.');
     }
-    return endTime ? endTime : 'No';
+    return endTime;
   },
 
   /**
@@ -485,6 +499,22 @@ const RADIUS_EXTRACTORS = {
       throw new Error('could not find the finalized marker on the DWP page.');
     }
     return match[1].trim() ? 'Yes' : 'No';
+  },
+
+  /**
+   * Yes/no answers as the sheet writes them by hand: a bare Y when true,
+   * blank otherwise, to match the Y/P convention already used in column K.
+   */
+  finalizedFlag: function (html) {
+    return yesFlag_(RADIUS_EXTRACTORS.finalized(html));
+  },
+
+  problemOfTheWeekFlag: function (html) {
+    return yesFlag_(RADIUS_EXTRACTORS.problemOfTheWeek(html));
+  },
+
+  deckNeedsUpdateFlag: function (html) {
+    return yesFlag_(RADIUS_EXTRACTORS.deckNeedsUpdate(html));
   },
 
   /** Session -> the learning-plan rows whose "Worked On" box is ticked. */
@@ -520,6 +550,20 @@ const RADIUS_EXTRACTORS = {
       scored.push((code || topic || '(unnamed)') + '(' + (mastered ? '100' : '0') + ')');
     });
     return scored.join(', ');
+  },
+
+  /**
+   * Everything finished this session in one cell: the mastery scores, then
+   * the assessment status if one was given. Comma separated throughout, so
+   * it reads as a single list.
+   */
+  masteryAndAssessment: function (html) {
+    const parts = [];
+    const mastery = RADIUS_EXTRACTORS.masteryScores(html);
+    if (mastery) parts.push(mastery);
+    const assessment = RADIUS_EXTRACTORS.assessmentStatus(html);
+    if (assessment) parts.push(assessment);
+    return parts.join(', ');
   },
 
   /**
