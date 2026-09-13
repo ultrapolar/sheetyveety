@@ -584,8 +584,13 @@ function reviewSessionTiming_(signIn, signOut) {
     if (lateBy >= timing.LATE_AFTER) {
       notes.push('signed in ' + lateBy + ' minutes late');
     }
-    // A sign-out exactly on the hour is not early at all.
-    const earlyBy = (60 - (end % 60)) % 60;
+
+    // The session's slot ends at the top of the hour it began in, so how early
+    // someone left is measured against that, not against the next hour mark.
+    // A student who arrives at 5:20 and leaves at 6:01 has stayed past the end
+    // of their slot; reading the minutes to the following hour instead made
+    // that look like leaving 59 minutes early.
+    const earlyBy = Math.max(0, 60 - (start % 60) - duration);
     if (earlyBy >= timing.EARLY_BEFORE) {
       notes.push('left ' + earlyBy + ' minutes early');
     }
@@ -958,6 +963,29 @@ function buildRadiusPlan_(sheets, selection, log) {
             .join(' | ');
         }
       }
+
+      // Both times present means the session is over, so a DWP nobody
+      // finalised is a fact worth recording. Left blank it reads the same as a
+      // session still in progress, which is the one thing it is not.
+      if (review.known) {
+        const finalized = results.filter(function (r) {
+          return r.field.key === CONFIG.RADIUS.UNFINALIZED_FIELD;
+        })[0];
+        if (finalized && !String(finalized.value).trim()) {
+          finalized.value = CONFIG.RADIUS.UNFINALIZED_VALUE;
+        }
+      }
+
+      // Stamp the free-text columns so it is clear at a glance who typed them.
+      // Only those: the rest hold single values a person reads without asking
+      // where they came from, and a prefix there would only be noise.
+      results.forEach(function (r) {
+        if (!r.field.prefix) return;
+        const text = String(r.value == null ? '' : r.value).trim();
+        if (!text) return;   // never stamp a cell we are leaving empty
+        const mark = CONFIG.RADIUS.BOT_PREFIX;
+        r.value = text.indexOf(mark) === 0 ? text : mark + text;
+      });
 
       const values = {};
       const existing = {};

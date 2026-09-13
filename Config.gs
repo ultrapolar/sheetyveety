@@ -88,8 +88,10 @@ const CONFIG = {
         merge: 'statusLetters' },                                               // K
       { key: 'signedIn',             column: 12, label: 'Signed in' },           // L
       { key: 'signedOut',            column: 13, label: 'Signed out' },          // M
-      { key: 'sessionSummary',       column: 15, label: 'Session summary' },     // O
-      { key: 'internalNotes',        column: 16, label: 'Internal notes' }       // P
+      { key: 'sessionSummary',       column: 15, label: 'Session summary',
+        prefix: true },                                                         // O
+      { key: 'internalNotes',        column: 16, label: 'Internal notes',
+        prefix: true }                                                          // P
     ],
 
     // How long a session is expected to run, and what to say when it does not.
@@ -121,6 +123,15 @@ const CONFIG = {
     // What EOD does when a cell already holds something. It runs without a
     // dialog, so it defaults to the harmless option: fill the empties, leave
     // everything else be. 'append' or 'overwrite' if you would rather.
+    // Stamped on the front of every field marked prefix above, so a person
+    // reading those columns can tell at a glance what they did not type.
+    BOT_PREFIX: 'ALB: ',
+
+    // A session with both times filled in is finished. If its DWP was never
+    // finalised, say so rather than leaving the column looking untouched.
+    UNFINALIZED_FIELD: 'finalizedFlag',
+    UNFINALIZED_VALUE: 'N',
+
     EOD_CONFLICT_MODE: 'skip',
 
     // Run the import automatically as the first step of the EOD batch, so the

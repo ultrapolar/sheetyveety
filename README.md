@@ -92,17 +92,28 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 | F | Problem of the Week | `Y`, or blank |
 | G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
 | H | Pages completed | the number |
-| J | Finalized | `Y`, or blank |
+| J | Finalized | `Y`; `N` once the session is over and it still is not |
 | K | Deck update | `P`, folded into the existing cell |
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
-| O | Session summary | the note text |
-| P | Internal notes | the note text, plus timing notes, plus `MLS (3)` |
+| O | Session summary | `ALB: ` then the note text |
+| P | Internal notes | `ALB: ` then the note text, plus timing notes, plus `MLS (3)` |
 
 Yes/no answers write a bare **`Y`**, matching how the sheet is filled in by
 hand; a No writes nothing rather than the word "No". Times are plain times,
 blank until they happen. Rearranging is a `column:` change in
 `CONFIG.RADIUS.FIELDS`.
+
+**Column J is the exception to the blank-for-no rule.** Once a student has both
+signed in and signed out the session is over, so a DWP that still is not
+finalized gets an `N`. Blank there would read exactly like a session still in
+progress, which is the one thing it is not. A student still in the centre —
+signed in, no sign-out — leaves the column alone.
+
+The two free-text columns, **O and P**, are stamped with `ALB: ` so anyone
+reading them can see at a glance what they did not type. Only those two: the
+rest hold single values nobody wonders about the origin of. A cell the import
+leaves empty is never stamped, and re-importing does not stack the mark.
 
 An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
@@ -123,13 +134,19 @@ A session shorter than 53 minutes is then looked at more closely, because
 there are two ordinary reasons for one and they are worth telling apart:
 
 - signed in **10 or more minutes past the hour** → `signed in 12 minutes late`
-- signed out **10 or more minutes before the hour** → `left 20 minutes early`
+- signed out **10 or more minutes before the end of the slot** →
+  `left 20 minutes early`
+
+The slot ends at the top of the hour the session *began* in. So a student who
+signs in at 5:20 and leaves at 6:01 has stayed past the end of their slot and
+left early by nothing at all — measuring instead to the hour after the
+sign-out would have called that leaving 59 minutes early.
 
 Either earns a note in column P; both earn both. The notes are appended to
 whatever internal note Radius already held, separated by `|`:
 
 ```
-she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early
+ALB: she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early
 ```
 
 Some details that fall out of this:

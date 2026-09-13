@@ -1398,6 +1398,18 @@ const DECK_FILLER_ROWS = [
     ['signed in 12 minutes late']);
   check('timing: early out only', r('10:00 AM', '10:45 AM').notes,
     ['left 15 minutes early']);
+
+  // A late arrival who stays past the top of the hour has not left early: the
+  // slot ends on the hour it began in, not on the one after the sign-out.
+  check('timing: late in, out just past the hour, not early at all',
+    r('5:20 PM', '6:01 PM').notes, ['signed in 20 minutes late']);
+  check('timing: late in, out exactly on the hour, still not early',
+    r('5:20 PM', '6:00 PM').notes, ['signed in 20 minutes late']);
+  check('timing: late in and genuinely early out counts from the hour',
+    r('5:20 PM', '5:45 PM').notes,
+    ['signed in 20 minutes late', 'left 15 minutes early']);
+  check('timing: leaving well past the hour is never early',
+    r('5:30 PM', '6:10 PM').notes, ['signed in 30 minutes late']);
   check('timing: exactly 10 minutes late counts',
     r('10:10 AM', '10:50 AM').notes,
     ['signed in 10 minutes late', 'left 10 minutes early']);
@@ -1468,14 +1480,14 @@ const DECK_FILLER_ROWS = [
   check('sheet: normal session is not shaded', [out.Lbg, out.Mbg],
     ['#ffffff', '#ffffff']);
   check('sheet: normal session appends only the Mathlete score', out.P,
-    'she doesnt shut up big L | MLS (3)');
+    'ALB: she doesnt shut up big L | MLS (3)');
 
   // A short, late, early session: shaded and annotated.
   out = runTiming('10:12 AM', '10:40 AM');
   check('sheet: odd length shades sign-in and sign-out',
     [out.Lbg, out.Mbg], ['#ff9900', '#ff9900']);
   check('sheet: notes append in order, score last', out.P,
-    'she doesnt shut up big L | signed in 12 minutes late | ' +
+    'ALB: she doesnt shut up big L | signed in 12 minutes late | ' +
     'left 20 minutes early | MLS (3)');
   checkTruthy('sheet: the report explains the shading',
     out.html.includes('neither about an hour nor about two'));
@@ -1484,19 +1496,114 @@ const DECK_FILLER_ROWS = [
   out = runTiming('10:00 AM', '11:50 AM');
   check('sheet: a double is not shaded', [out.Lbg, out.Mbg], ['#ffffff', '#ffffff']);
   check('sheet: a double is noted', out.P,
-    'she doesnt shut up big L | 2 hour session | MLS (3)');
+    'ALB: she doesnt shut up big L | 2 hour session | MLS (3)');
 
   // Odd length with nothing to explain it: shaded, note untouched.
   out = runTiming('10:00 AM', '11:20 AM');
   check('sheet: 80 minutes shades without a timing note',
     [out.Lbg, out.Mbg, out.P],
-    ['#ff9900', '#ff9900', 'she doesnt shut up big L | MLS (3)']);
+    ['#ff9900', '#ff9900', 'ALB: she doesnt shut up big L | MLS (3)']);
 
   // Still in the centre: no sign-out, so nothing is judged.
   out = runTiming('10:30 AM', '');
   check('sheet: no sign-out means no shading and no timing note',
     [out.M, out.Lbg, out.Mbg, out.P],
-    ['', '#ffffff', '#ffffff', 'she doesnt shut up big L | MLS (3)']);
+    ['', '#ffffff', '#ffffff', 'ALB: she doesnt shut up big L | MLS (3)']);
+}
+
+// 52h2. The two free-text columns are stamped, column J records a session
+//       that finished without being finalised, and neither touches anything
+//       else on the row.
+{
+  function runCase(signIn, signOut, finalizedDate) {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+
+    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
+      .replace(/id="SessionStartTime" name="SessionStartTime" type="text" value="[^"]*"/,
+               'id="SessionStartTime" name="SessionStartTime" type="text" value="' +
+               signIn + '"')
+      .replace(/id="SessionEndTime" name="SessionEndTime" type="text" value="[^"]*"/,
+               'id="SessionEndTime" name="SessionEndTime" type="text" value="' +
+               signOut + '"')
+      .replace(/finalizedDate\s*=\s*'[^']*'/, "finalizedDate = '" + finalizedDate + "'");
+
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return {
+      F: String(s.wop.values[0][5]),  G: String(s.wop.values[0][6]),
+      H: String(s.wop.values[0][7]),  J: String(s.wop.values[0][9]),
+      O: String(s.wop.values[0][14]), P: String(s.wop.values[0][15])
+    };
+  }
+
+  const done = runCase('10:48 AM', '11:48 AM', '9/12/2026 11:49:00 AM');
+
+  checkTruthy('prefix: the summary column is stamped', done.O.indexOf('ALB: ') === 0);
+  checkTruthy('prefix: the notes column is stamped', done.P.indexOf('ALB: ') === 0);
+  checkTruthy('prefix: the text survives the stamp',
+    done.P.includes('she doesnt shut up big L'));
+
+  // Everything else is a single value read at a glance; a prefix there is noise.
+  checkTruthy('prefix: nowhere else', [done.F, done.G, done.H, done.J]
+    .every(v => v.indexOf('ALB:') === -1));
+  check('prefix: does not disturb the pages count', done.H, '33');
+
+  // Finalised, so column J keeps its plain Y.
+  check('finalized: a finalised session writes Y', done.J, 'Y');
+
+  // Signed in and out, never finalised: blank would read like an unfinished
+  // session, which is the one thing it is not.
+  const unfinalised = runCase('10:48 AM', '11:48 AM', '');
+  check('finalized: finished but not finalised writes N', unfinalised.J, 'N');
+
+  // Still in the centre: nothing to say yet either way.
+  const open = runCase('10:48 AM', '', '');
+  check('finalized: no sign-out leaves J alone', open.J, '');
+
+  // An empty summary or note is left empty. A cell holding nothing but the
+  // stamp would claim the bot wrote something when it wrote nothing.
+  const blank = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return { O: String(s.wop.values[0][14]), P: String(s.wop.values[0][15]) };
+  })();
+  check('prefix: an empty summary stays empty', blank.O, '');
+  check('prefix: an empty note stays empty', blank.P, '');
+
+  // Running it twice must not stack the stamp.
+  checkTruthy('prefix: re-importing does not double-stamp',
+    done.P.indexOf('ALB: ALB:') === -1);
+}
+
+// 52h3. A blank note column is left blank rather than stamped with a bare mark.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const prefixed = api.CONFIG.RADIUS.FIELDS.filter(f => f.prefix).map(f => f.key);
+  check('prefix: configured on exactly the two note columns',
+    prefixed.sort(), ['internalNotes', 'sessionSummary']);
+  check('prefix: the unfinalised field is a real field',
+    api.CONFIG.RADIUS.FIELDS.filter(
+      f => f.key === api.CONFIG.RADIUS.UNFINALIZED_FIELD).length, 1);
 }
 
 // 52i. The Mathlete score on the end of the note column.
@@ -1555,7 +1662,7 @@ const DECK_FILLER_ROWS = [
   check('EOD+import: the other columns landed too',
     [String(s.wop.values[0][7]), String(s.wop.values[0][11])], ['33', '10:48 AM']);
   check('EOD+import: notes and score reached column P',
-    String(s.wop.values[0][15]), 'she doesnt shut up big L | MLS (3)');
+    String(s.wop.values[0][15]), 'ALB: she doesnt shut up big L | MLS (3)');
   checkTruthy('EOD+import: the report counts the import',
     lastDialog(s).html.includes('Imported from Radius'));
 
