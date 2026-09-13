@@ -82,7 +82,7 @@ const CONFIG = {
       // the same thing as a P there. merge: 'statusLetters' folds the P into
       // whatever the cell already holds instead of replacing it, skips rows
       // EOD has already finished, and leaves EOD's markers untouched.
-      { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (P)',
+      { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (Y)',
         merge: 'statusLetters' },                                               // K
       { key: 'signedIn',             column: 12, label: 'Signed in' },           // L
       { key: 'signedOut',            column: 13, label: 'Signed out' },          // M

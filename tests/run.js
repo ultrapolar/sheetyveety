@@ -1204,9 +1204,8 @@ const REPAIR_FILLER_ROWS = [
   // hand. A No writes nothing at all rather than the word "No".
   check('flag: problem of the week done', get('problemOfTheWeekFlag'), 'Y');
   check('flag: finalized', get('finalizedFlag'), 'Y');
-  // P, not Y: a Y in column K would make EOD advance the student's task.
-  check('flag: deck needs update writes P, not Y',
-    get('deckNeedsUpdateFlag'), 'P');
+  // Y: EOD reads this as "advance the student's task".
+  check('flag: deck needs update writes Y', get('deckNeedsUpdateFlag'), 'Y');
   check('flag: an answered-No is blank, not "No"',
     api.RADIUS_EXTRACTORS.deckNeedsUpdateFlag(
       fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')), '');
@@ -1310,14 +1309,18 @@ const REPAIR_FILLER_ROWS = [
   }
 
   let s = runImport('');
-  check('import into K: empty cell gets the P', s.wopStatus(0), 'P');
+  check('import into K: empty cell gets the Y', s.wopStatus(0), 'Y');
   check('import into K: other columns still land', String(s.wop.values[0][7]), '33');
 
+  s = runImport('P');
+  check('import into K: a typed P becomes PY', s.wopStatus(0), 'PY');
+
   s = runImport('Y');
-  check('import into K: a typed Y becomes YP', s.wopStatus(0), 'YP');
+  check('import into K: an existing Y is not doubled', s.wopStatus(0), 'Y');
 
   s = runImport('YP');
-  check('import into K: an existing P is not doubled', s.wopStatus(0), 'YP');
+  check('import into K: a cell already carrying Y is untouched',
+    s.wopStatus(0), 'YP');
 
   // A row EOD has already finished is left exactly as it stands.
   s = runImport('YYP', '#00FF00');

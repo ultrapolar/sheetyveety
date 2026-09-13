@@ -539,14 +539,13 @@ const RADIUS_EXTRACTORS = {
   /**
    * Needs-deck-update as the letter column K already uses for it.
    *
-   * P, not Y. In this sheet pink means "this student needs new paperwork":
-   * EOD writes pink into Deck List column C, and SOD then moves their queue
-   * into column E. That is the same thing Radius calls a deck update. A Y
-   * would read as "finish a task" and make EOD advance the student's Deck
-   * List row instead.
+   * Y, meaning the student worked through their deck and EOD should advance
+   * them: archive column B to the history column and pull the next item out
+   * of column E. Change this to 'P' if a deck update should instead mark them
+   * pink for new paperwork without advancing the task.
    */
   deckNeedsUpdateFlag: function (html) {
-    return yesFlag_(RADIUS_EXTRACTORS.deckNeedsUpdate(html)) ? 'P' : '';
+    return yesFlag_(RADIUS_EXTRACTORS.deckNeedsUpdate(html)) ? 'Y' : '';
   },
 
   /** Session -> the learning-plan rows whose "Worked On" box is ticked. */
