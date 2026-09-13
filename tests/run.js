@@ -1030,16 +1030,24 @@ const REPAIR_FILLER_ROWS = [
 
 // 48c. The roster request itself: a signed-in POST carrying the centre.
 {
-  function rosterCase(body, code) {
+  const TOKEN_PAGE = '<html><body><form action="/Account/LogOff" method="post">' +
+    '<input name="__RequestVerificationToken" type="hidden" value="tok-123" />' +
+    '</form></body></html>';
+
+  function rosterCase(body, code, tokenPage) {
     const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
       Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = install(ctx, [], null);
     const api = loadScript(ctx);
     h.scriptProps.RADIUS_COOKIE = 'session=abc';
-    h.fetchHandler.value = () => ({ code: code === undefined ? 200 : code, body: body });
+    h.fetchHandler.value = url => url.indexOf('GetStudentDataSource') === -1
+      ? { code: 200, body: tokenPage === undefined ? TOKEN_PAGE : tokenPage }
+      : { code: code === undefined ? 200 : code, body: body };
     let err = '';
     try { api.loadRoster_(); } catch (e) { err = e.message; }
-    return { call: h.fetchLog[0], err: err, api: api, ctx: ctx, harness: h };
+    const posts = h.fetchLog.filter(c => c.params.method === 'post');
+    return { call: posts[0], gets: h.fetchLog.filter(c => c.params.method === 'get'),
+             err: err, api: api, ctx: ctx, harness: h };
   }
 
   const ok = rosterCase(rosterReply(['Jane Doe']));
@@ -1062,7 +1070,7 @@ const REPAIR_FILLER_ROWS = [
   checkTruthy('roster call: accepts JSON back',
     /application\/json/.test(String(ok.call.params.headers.Accept)));
 
-  // A 500 is just a number unless the page's own words come back with it.
+  // ASP.NET's own error page names the fault, and that is worth quoting.
   const boom = rosterCase(
     '<html><head><title>Error</title></head><body>' +
     "<h1>Server Error in '/' Application.</h1>" +
@@ -1070,14 +1078,44 @@ const REPAIR_FILLER_ROWS = [
     '<script>ignore me</script></body></html>', 500);
   checkTruthy('roster call: a 500 still names the status',
     boom.err.includes('HTTP 500'));
-  checkTruthy('roster call: a 500 quotes what the server said',
+  checkTruthy('roster call: a 500 quotes the exception',
     boom.err.includes('Object reference not set'));
   checkTruthy('roster call: markup is stripped out of the quote',
     !boom.err.includes('<h2>') && !boom.err.includes('ignore me'));
 
+  // A custom error page arrives wearing the normal site layout, which opens
+  // with hidden modals about billing dates that sit on every Radius page.
+  // Quoting those reads as a real complaint about billing and sends the
+  // reader somewhere that has nothing to do with the failure.
+  const dressed = rosterCase(
+    '<!DOCTYPE html><html><head><title>Instruction Manager</title></head><body>' +
+    '<div id="undoDeferBillingDayModal" class="hiddenPartial"><p>This will ' +
+    'change the upcoming payment\u2019s charge date back to the original ' +
+    'billing date (<span id="originalBillingDay"></span>). Proceed?</p></div>' +
+    '</body></html>', 500);
+  checkTruthy('dressed 500: names the status', dressed.err.includes('HTTP 500'));
+  checkTruthy('dressed 500: does not quote the billing boilerplate',
+    !dressed.err.includes('charge date'));
+  checkTruthy('dressed 500: says a page came back instead of data',
+    dressed.err.includes('web page') && dressed.err.includes('Instruction Manager'));
+
   // Nothing to quote is not a reason to fail differently.
   checkTruthy('roster call: an empty error body still reports the status',
     rosterCase('', 503).err.includes('HTTP 503'));
+
+  // ASP.NET rejects its antiforgery cookie arriving without the token that is
+  // rendered into the page, and does it as a 500 rather than a 403.
+  check('token: read from the page and sent with the POST',
+    ok.call.params.headers.__RequestVerificationToken, 'tok-123');
+  check('token: fetched from a page, once',
+    ok.gets.map(c => c.url), ['https://radius.mathnasium.com/AnswerKey/AnswerkeyCheckin']);
+
+  // A page with no token in it may simply mean none is needed. Going ahead
+  // without one lets the request answer that; refusing here would not.
+  const noToken = rosterCase(rosterReply(['Jane Doe']), 200, '<html><body>hi</body></html>');
+  check('token: absent means the header is left off', noToken.err, '');
+  checkTruthy('token: absent does not stop the request',
+    noToken.call.params.headers.__RequestVerificationToken === undefined);
 
   // An expired session can land on a page that is not the login form. That is
   // not JSON either, and guessing at it would be worse than saying so.
@@ -1431,7 +1469,7 @@ const REPAIR_FILLER_ROWS = [
       { start: 1, rows: 1 }, '2026-08-22');
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
     const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
@@ -1572,7 +1610,7 @@ const REPAIR_FILLER_ROWS = [
       [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
 
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
@@ -1662,7 +1700,7 @@ const REPAIR_FILLER_ROWS = [
     if (!opts.unconfigured) {
       s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
       vm.runInContext(
-        'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+        'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
         s.context);
     }
     if (opts.runOnEod === false) {
@@ -1803,7 +1841,7 @@ const REPAIR_FILLER_ROWS = [
     }
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
 
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
@@ -1875,7 +1913,7 @@ const REPAIR_FILLER_ROWS = [
     s.wop.values[0][7] = 'typed by hand';     // column H
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
@@ -1915,7 +1953,7 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
   clean.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
   vm.runInContext(
-    'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+    'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     clean.context);
   const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
   clean.harness.fetchHandler.value = url => ({ code: 200, body:
@@ -1963,7 +2001,7 @@ const REPAIR_FILLER_ROWS = [
     [{ name: '9:59 AM Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     s.context);
 
   const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
@@ -1989,7 +2027,7 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     s.context);
 
   const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');

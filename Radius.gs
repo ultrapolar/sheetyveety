@@ -57,16 +57,52 @@ function radiusCookie_() {
 /**
  * Pulls something readable out of a failed response.
  *
- * An ASP.NET error page is mostly markup, and the one sentence naming what
- * went wrong is buried in it. Without this a 500 is just a number, and the
- * next step would be guesswork.
+ * Three different things can come back, and quoting the wrong part of the
+ * wrong one is worse than saying nothing: a rendered Radius page opens with
+ * several hidden modals about billing dates that are present on every page,
+ * so the first few hundred characters of one read exactly like a real
+ * complaint about billing while having nothing to do with the failure.
  */
 function serverComplaint_(body) {
-  const text = decodeHtmlEntities_(String(body || '')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const raw = String(body || '');
+
+  // ASP.NET's own error page states the fault in an <h2><i>...</i></h2>.
+  const detail = raw.match(/<h2>\s*<i>([\s\S]*?)<\/i>\s*<\/h2>/i);
+  if (detail) return '\n\nRadius said: ' + shorten_(htmlCellText_(detail[1]), 300);
+
+  // Otherwise a whole page means the detail is behind a custom error page.
+  if (/<html|<!doctype/i.test(raw)) {
+    const title = raw.match(/<title>([\s\S]*?)<\/title>/i);
+    return '\n\nRadius sent back a web page' +
+      (title ? ' titled "' + htmlCellText_(title[1]) + '"' : '') +
+      ' instead of data, so it is hiding the reason behind its own error page.';
+  }
+
+  const text = htmlCellText_(raw);
   return text ? '\n\nRadius said: ' + shorten_(text, 300) : '';
+}
+
+/**
+ * ASP.NET pairs an antiforgery cookie with a token rendered into the page, and
+ * rejects a request that brings the cookie without its partner -- as an
+ * unhandled exception, so it surfaces as a 500 rather than a 403. Radius puts
+ * the token in a hidden field on every page, which is where the browser gets
+ * it too.
+ *
+ * A page we cannot read a token out of is not worth failing over: the request
+ * may not need one. Go without and let the request itself say.
+ */
+function radiusVerificationToken_() {
+  const url = String(CONFIG.RADIUS.TOKEN_PAGE_URL || '').trim();
+  if (!url) return '';
+
+  let html;
+  try { html = radiusFetch_(url); } catch (err) { return ''; }
+
+  const tag = html.match(/<input\b[^>]*__RequestVerificationToken[^>]*>/i);
+  if (!tag) return '';
+  const value = tag[0].match(/\bvalue="([^"]*)"/i);
+  return value ? value[1] : '';
 }
 
 /**
@@ -116,18 +152,19 @@ function radiusFetch_(url) {
  * user, whatever the status code claims.
  */
 function radiusPostJson_(url, payload) {
+  const token = radiusVerificationToken_();
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json; charset=utf-8',
     payload: JSON.stringify(payload),
-    headers: {
+    headers: Object.assign({
       Cookie: radiusCookie_(),
       // Radius reaches this endpoint through jQuery's $.ajax, and ASP.NET MVC
       // decides whether a request is an AJAX call by looking for these. A
       // controller written for the AJAX path can fail outright without them.
       'X-Requested-With': 'XMLHttpRequest',
       Accept: 'application/json, text/javascript, */*; q=0.01'
-    },
+    }, token ? { '__RequestVerificationToken': token } : {}),
     muteHttpExceptions: true,
     followRedirects: true
   });

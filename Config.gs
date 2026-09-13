@@ -74,6 +74,10 @@ const CONFIG = {
     // it at all. This endpoint answers with the roster itself.
     ROSTER_URL: 'https://radius.mathnasium.com/AnswerKey/GetStudentDataSource',
 
+    // Any normal Radius page. It is read once per run for the antiforgery
+    // token that ASP.NET expects alongside its cookie on a POST.
+    TOKEN_PAGE_URL: 'https://radius.mathnasium.com/AnswerKey/AnswerkeyCheckin',
+
     // Which values to pull out of each DWP page, and which Daily WOP column
     // each one lands in. Add entries here as more values are identified --
     // every one needs a matching extractor in RADIUS_EXTRACTORS.
