@@ -55,6 +55,21 @@ function radiusCookie_() {
 }
 
 /**
+ * Pulls something readable out of a failed response.
+ *
+ * An ASP.NET error page is mostly markup, and the one sentence naming what
+ * went wrong is buried in it. Without this a 500 is just a number, and the
+ * next step would be guesswork.
+ */
+function serverComplaint_(body) {
+  const text = decodeHtmlEntities_(String(body || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return text ? '\n\nRadius said: ' + shorten_(text, 300) : '';
+}
+
+/**
  * A logged-out request gets the sign-in page back with a perfectly normal 200,
  * so the status code alone cannot be trusted.
  */
@@ -83,7 +98,8 @@ function radiusFetch_(url) {
       '). Log in again and re-run Radius → Set session cookie.');
   }
   if (status >= 400) {
-    throw new Error('Radius returned HTTP ' + status + ' for ' + url);
+    throw new Error('Radius returned HTTP ' + status + ' for ' + url +
+      serverComplaint_(html));
   }
   if (looksLikeLoginPage_(html, url)) {
     throw new Error('Radius returned the sign-in page, so the stored cookie has ' +
@@ -104,7 +120,14 @@ function radiusPostJson_(url, payload) {
     method: 'post',
     contentType: 'application/json; charset=utf-8',
     payload: JSON.stringify(payload),
-    headers: { Cookie: radiusCookie_() },
+    headers: {
+      Cookie: radiusCookie_(),
+      // Radius reaches this endpoint through jQuery's $.ajax, and ASP.NET MVC
+      // decides whether a request is an AJAX call by looking for these. A
+      // controller written for the AJAX path can fail outright without them.
+      'X-Requested-With': 'XMLHttpRequest',
+      Accept: 'application/json, text/javascript, */*; q=0.01'
+    },
     muteHttpExceptions: true,
     followRedirects: true
   });
@@ -117,7 +140,8 @@ function radiusPostJson_(url, payload) {
       '). Log in again and re-run Radius → Set session cookie.');
   }
   if (status >= 400) {
-    throw new Error('Radius returned HTTP ' + status + ' for ' + url);
+    throw new Error('Radius returned HTTP ' + status + ' for ' + url +
+      serverComplaint_(body));
   }
   if (looksLikeLoginPage_(body, url)) {
     throw new Error('Radius returned the sign-in page, so the stored cookie has ' +

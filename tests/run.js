@@ -1054,6 +1054,31 @@ const REPAIR_FILLER_ROWS = [
   checkTruthy('roster call: asks for JSON',
     /json/i.test(String(ok.call.params.contentType)));
 
+  // Radius reaches this endpoint through jQuery. ASP.NET MVC decides whether a
+  // request is an AJAX call by looking for these, so a request without them is
+  // not the same request the server is written for.
+  check('roster call: identifies itself as an AJAX call',
+    ok.call.params.headers['X-Requested-With'], 'XMLHttpRequest');
+  checkTruthy('roster call: accepts JSON back',
+    /application\/json/.test(String(ok.call.params.headers.Accept)));
+
+  // A 500 is just a number unless the page's own words come back with it.
+  const boom = rosterCase(
+    '<html><head><title>Error</title></head><body>' +
+    "<h1>Server Error in '/' Application.</h1>" +
+    '<h2><i>Object reference not set to an instance of an object.</i></h2>' +
+    '<script>ignore me</script></body></html>', 500);
+  checkTruthy('roster call: a 500 still names the status',
+    boom.err.includes('HTTP 500'));
+  checkTruthy('roster call: a 500 quotes what the server said',
+    boom.err.includes('Object reference not set'));
+  checkTruthy('roster call: markup is stripped out of the quote',
+    !boom.err.includes('<h2>') && !boom.err.includes('ignore me'));
+
+  // Nothing to quote is not a reason to fail differently.
+  checkTruthy('roster call: an empty error body still reports the status',
+    rosterCase('', 503).err.includes('HTTP 503'));
+
   // An expired session can land on a page that is not the login form. That is
   // not JSON either, and guessing at it would be worse than saying so.
   checkTruthy('roster call: an HTML reply is reported, not parsed',
