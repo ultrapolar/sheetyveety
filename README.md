@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-333 assertions covering the parsing rules and both scripts end to end,
+378 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -56,7 +56,7 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
 | O | Session summary | the note text |
-| P | Internal notes | the note text |
+| P | Internal notes | the note text, plus any timing notes |
 
 Yes/no answers write a bare **`Y`**, matching how the sheet is filled in by
 hand; a No writes nothing rather than the word "No". Times are plain times,
@@ -66,6 +66,45 @@ blank until they happen. Rearranging is a `column:` change in
 An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
+
+### Session timing
+
+Sessions are booked on the hour, so a normal one runs about an hour and a
+double about two. `CONFIG.RADIUS.TIMING` sets the bands:
+
+| Length | Result |
+| --- | --- |
+| 53–67 min | normal — nothing said |
+| 106–134 min | normal double — `2 hour session` noted in P |
+| anything else | **sign-in and sign-out shaded orange** |
+
+A session shorter than 53 minutes is then looked at more closely, because
+there are two ordinary reasons for one and they are worth telling apart:
+
+- signed in **10 or more minutes past the hour** → `signed in 12 minutes late`
+- signed out **10 or more minutes before the hour** → `left 20 minutes early`
+
+Either earns a note in column P; both earn both. The notes are appended to
+whatever internal note Radius already held, separated by `|`:
+
+```
+she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early
+```
+
+Some details that fall out of this:
+
+- The shading is about **length alone**. A 52-minute session where the student
+  was punctual and left only 8 minutes early is shaded with nothing to
+  explain it — which is the point: it's asking for a human look.
+- Signing out exactly on the hour is not leaving early.
+- A **long** session is never examined for lateness; that rule is for short
+  ones only.
+- A student still in the centre has no sign-out time, so nothing is judged and
+  nothing is shaded.
+
+The field keys `TIMING` works from are asserted to resolve against the real
+field list, because a typo there fails silently — the review simply sees no
+times and does nothing.
 
 ### Column K is shared with the EOD script
 

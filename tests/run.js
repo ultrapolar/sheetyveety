@@ -32,7 +32,7 @@ function loadScript(context) {
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
   extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
-  yesFlag_, CONFIG, mergeStatusLetters_
+  yesFlag_, CONFIG, mergeStatusLetters_, parseClockTime_, reviewSessionTiming_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1259,6 +1259,15 @@ const REPAIR_FILLER_ROWS = [
     api.CONFIG.RADIUS.FIELDS.filter(f => f.merge).length === 1);
   checkTruthy('nothing targets the name column',
     api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.NAME));
+
+  // Every field key the timing review names must actually exist. A typo here
+  // does not throw -- the review just sees no times and quietly does nothing.
+  const fieldKeys = api.CONFIG.RADIUS.FIELDS.map(f => f.key);
+  const timingKeys = [api.CONFIG.RADIUS.TIMING.SIGN_IN_FIELD,
+    api.CONFIG.RADIUS.TIMING.SIGN_OUT_FIELD, api.CONFIG.RADIUS.TIMING.NOTE_FIELD]
+    .concat(api.CONFIG.RADIUS.TIMING.SHADE_FIELDS);
+  check('every timing field key resolves to a real field',
+    timingKeys.filter(k => fieldKeys.indexOf(k) === -1), []);
 }
 
 // 52d. Column K is shared with the EOD script, so the deck-update P is folded
@@ -1337,6 +1346,167 @@ const REPAIR_FILLER_ROWS = [
   check('import into K: marker text survives', s.wopStatus(0), 'YYP - B empty?');
   checkTruthy('import into K: marker is explained',
     s.harness.dialogs[0].html.includes('EOD marker'));
+}
+
+// 52f. Reading a clock time.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const t = api.parseClockTime_;
+
+  check('clock: morning', t('10:48 AM'), 648);
+  check('clock: afternoon', t('1:05 PM'), 785);
+  check('clock: noon stays noon', t('12:30 PM'), 750);
+  check('clock: midnight wraps to zero', t('12:30 AM'), 30);
+  check('clock: lowercase meridiem', t('9:59 am'), 599);
+  check('clock: dotted meridiem', t('9:59 a.m.'), 599);
+  check('clock: 24-hour with no meridiem', t('14:05'), 845);
+  check('clock: padded', t('  10:48 AM  '), 648);
+  check('clock: blank', t(''), null);
+  check('clock: not a time', t('No'), null);
+  check('clock: impossible minutes', t('10:75 AM'), null);
+}
+
+// 52g. Judging how long the session ran.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const r = (a, b) => api.reviewSessionTiming_(a, b);
+
+  // A normal hour, and the edges of the band.
+  check('timing: a real 60 minute session is fine',
+    [r('10:48 AM', '11:48 AM').shade, r('10:48 AM', '11:48 AM').notes], [false, []]);
+  check('timing: 53 minutes is the bottom of the band',
+    r('10:00 AM', '10:53 AM').shade, false);
+  check('timing: 52 minutes is not', r('10:00 AM', '10:52 AM').shade, true);
+  check('timing: 67 minutes is the top of the band',
+    r('10:00 AM', '11:07 AM').shade, false);
+  check('timing: 68 minutes is not', r('10:00 AM', '11:08 AM').shade, true);
+
+  // Doubles are fine, and say so.
+  check('timing: 106 minutes is the bottom of the double band',
+    [r('10:00 AM', '11:46 AM').shade, r('10:00 AM', '11:46 AM').notes],
+    [false, ['2 hour session']]);
+  check('timing: 134 minutes is the top',
+    [r('10:00 AM', '12:14 PM').shade, r('10:00 AM', '12:14 PM').notes],
+    [false, ['2 hour session']]);
+  check('timing: 105 minutes falls in the gap and is shaded',
+    [r('10:00 AM', '11:45 AM').shade, r('10:00 AM', '11:45 AM').notes], [true, []]);
+  check('timing: 135 minutes is over and is shaded',
+    [r('10:00 AM', '12:15 PM').shade, r('10:00 AM', '12:15 PM').notes], [true, []]);
+  check('timing: 80 minutes sits between the bands, shaded, no note',
+    [r('10:00 AM', '11:20 AM').shade, r('10:00 AM', '11:20 AM').notes], [true, []]);
+
+  // Short sessions get looked at more closely.
+  check('timing: late in', r('10:12 AM', '10:40 AM').notes,
+    ['signed in 12 minutes late', 'left 20 minutes early']);
+  check('timing: late in only', r('10:12 AM', '10:55 AM').notes,
+    ['signed in 12 minutes late']);
+  check('timing: early out only', r('10:00 AM', '10:45 AM').notes,
+    ['left 15 minutes early']);
+  check('timing: exactly 10 minutes late counts',
+    r('10:10 AM', '10:50 AM').notes,
+    ['signed in 10 minutes late', 'left 10 minutes early']);
+  check('timing: 9 minutes either side is not worth a note',
+    r('10:09 AM', '10:51 AM').notes, []);
+
+  // A short session can still be shaded with nothing to explain it.
+  check('timing: short but punctual is shaded without a note',
+    [r('10:00 AM', '10:52 AM').shade, r('10:00 AM', '10:52 AM').notes], [true, []]);
+
+  // Signing out on the hour is not leaving early -- the lateness note still
+  // fires, but nothing claims they left 60 minutes early.
+  checkTruthy('timing: out exactly on the hour earns no early note',
+    r('10:40 AM', '11:00 AM').notes.every(n => n.indexOf('early') === -1));
+  check('timing: and the late note still fires',
+    r('10:40 AM', '11:00 AM').notes, ['signed in 40 minutes late']);
+
+  // Long sessions are never examined for lateness -- the rule is short only.
+  check('timing: a long session gets no late note',
+    r('10:48 AM', '12:30 PM').notes, []);
+
+  // A student still in the centre is not late for anything.
+  check('timing: no sign-out yet',
+    [r('10:30 AM', '').known, r('10:30 AM', '').shade, r('10:30 AM', '').notes],
+    [false, false, []]);
+  check('timing: no sign-in either', r('', '').known, false);
+
+  check('timing: a session crossing noon',
+    r('11:30 AM', '12:30 PM').durationMinutes, 60);
+}
+
+// 52h. The timing review reaching the sheet: shading on L and M, notes on P.
+{
+  function runTiming(signInHtmlTime, signOutHtmlTime) {
+    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      s.context);
+
+    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
+      .replace(/id="SessionStartTime" name="SessionStartTime" type="text" value="[^"]*"/,
+               'id="SessionStartTime" name="SessionStartTime" type="text" value="' +
+               signInHtmlTime + '"')
+      .replace(/id="SessionEndTime" name="SessionEndTime" type="text" value="[^"]*"/,
+               'id="SessionEndTime" name="SessionEndTime" type="text" value="' +
+               signOutHtmlTime + '"');
+
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        : page });
+    s.api.importRadiusData();
+    return {
+      L: String(s.wop.values[0][11]), Lbg: String(s.wop.backgrounds[0][11]),
+      M: String(s.wop.values[0][12]), Mbg: String(s.wop.backgrounds[0][12]),
+      P: String(s.wop.values[0][15]),
+      html: s.harness.dialogs[0].html
+    };
+  }
+
+  // A normal hour: times written, nothing shaded, the note left as Radius had it.
+  let out = runTiming('10:48 AM', '11:48 AM');
+  check('sheet: normal session writes both times', [out.L, out.M],
+    ['10:48 AM', '11:48 AM']);
+  check('sheet: normal session is not shaded', [out.Lbg, out.Mbg],
+    ['#ffffff', '#ffffff']);
+  check('sheet: normal session leaves the note alone', out.P,
+    'she doesnt shut up big L');
+
+  // A short, late, early session: shaded and annotated.
+  out = runTiming('10:12 AM', '10:40 AM');
+  check('sheet: odd length shades sign-in and sign-out',
+    [out.Lbg, out.Mbg], ['#ff9900', '#ff9900']);
+  check('sheet: notes append to the existing internal note', out.P,
+    'she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early');
+  checkTruthy('sheet: the report explains the shading',
+    out.html.includes('neither about an hour nor about two'));
+
+  // A double: not shaded, but noted.
+  out = runTiming('10:00 AM', '11:50 AM');
+  check('sheet: a double is not shaded', [out.Lbg, out.Mbg], ['#ffffff', '#ffffff']);
+  check('sheet: a double is noted', out.P,
+    'she doesnt shut up big L | 2 hour session');
+
+  // Odd length with nothing to explain it: shaded, note untouched.
+  out = runTiming('10:00 AM', '11:20 AM');
+  check('sheet: 80 minutes shades without annotating',
+    [out.Lbg, out.Mbg, out.P],
+    ['#ff9900', '#ff9900', 'she doesnt shut up big L']);
+
+  // Still in the centre: no sign-out, so nothing is judged.
+  out = runTiming('10:30 AM', '');
+  check('sheet: no sign-out means no shading and no note',
+    [out.M, out.Lbg, out.Mbg, out.P],
+    ['', '#ffffff', '#ffffff', 'she doesnt shut up big L']);
 }
 
 // 53. A fully completed page. This is the one that exposed the textarea bug

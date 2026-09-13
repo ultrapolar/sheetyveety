@@ -423,6 +423,80 @@ function mergeStatusLetters_(existing, letter) {
   return { value: current.toUpperCase() + add, changed: true };
 }
 
+/**
+ * A clock time like "10:48 AM" as minutes since midnight, or null if it is
+ * not a time at all.
+ */
+function parseClockTime_(text) {
+  const match = String(text == null ? '' : text).trim()
+    .match(/^(\d{1,2}):(\d{2})\s*([AaPp])?\.?[Mm]?\.?$/);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+
+  const period = match[3] ? match[3].toUpperCase() : null;
+  if (period === 'A' && hours === 12) hours = 0;
+  if (period === 'P' && hours !== 12) hours += 12;
+  if (hours > 23) return null;
+
+  return hours * 60 + minutes;
+}
+
+/**
+ * Looks at how long a session actually ran.
+ *
+ * Sessions are booked on the hour, so a normal one is about an hour and a
+ * double about two. A length in neither band is worth a human glance, and the
+ * sign-in and sign-out cells are shaded to say so.
+ *
+ * A short session gets examined further, because there are two ordinary
+ * reasons for one and they are worth telling apart: the student arrived well
+ * after the hour started, or left well before it ended. Either earns a note;
+ * both earn both.
+ *
+ * Returns { known, durationMinutes, shade, notes }. known is false when either
+ * time is missing -- a student still in the centre is not late for anything.
+ */
+function reviewSessionTiming_(signIn, signOut) {
+  const timing = CONFIG.RADIUS.TIMING;
+  const start = parseClockTime_(signIn);
+  const end = parseClockTime_(signOut);
+
+  if (start === null || end === null) {
+    return { known: false, durationMinutes: null, shade: false, notes: [] };
+  }
+
+  let duration = end - start;
+  if (duration < 0) duration += 24 * 60;
+
+  const isSingle = duration >= timing.SINGLE_MIN && duration <= timing.SINGLE_MAX;
+  const isDouble = duration >= timing.DOUBLE_MIN && duration <= timing.DOUBLE_MAX;
+  const notes = [];
+
+  if (isDouble) notes.push('2 hour session');
+
+  if (duration < timing.SINGLE_MIN) {
+    const lateBy = start % 60;
+    if (lateBy >= timing.LATE_AFTER) {
+      notes.push('signed in ' + lateBy + ' minutes late');
+    }
+    // A sign-out exactly on the hour is not early at all.
+    const earlyBy = (60 - (end % 60)) % 60;
+    if (earlyBy >= timing.EARLY_BEFORE) {
+      notes.push('left ' + earlyBy + ' minutes early');
+    }
+  }
+
+  return {
+    known: true,
+    durationMinutes: duration,
+    shade: !isSingle && !isDouble,
+    notes: notes
+  };
+}
+
 /** "Yes" becomes a bare Y; anything else becomes blank. */
 function yesFlag_(label) {
   return String(label).trim().toLowerCase() === 'yes' ? 'Y' : '';
@@ -751,6 +825,27 @@ function importRadiusData() {
 
         const results = extractRadiusFields_(html);
 
+        // Timing review runs before anything is written, so its notes can be
+        // folded into the note column's value rather than written separately.
+        const valueOf = function (key) {
+          const hit = results.filter(function (r) { return r.field.key === key; })[0];
+          return hit ? hit.value : '';
+        };
+        const timing = CONFIG.RADIUS.TIMING;
+        const review = reviewSessionTiming_(
+          valueOf(timing.SIGN_IN_FIELD), valueOf(timing.SIGN_OUT_FIELD));
+
+        if (review.notes.length) {
+          const noteResult = results.filter(function (r) {
+            return r.field.key === timing.NOTE_FIELD;
+          })[0];
+          if (noteResult) {
+            noteResult.value = [noteResult.value].concat(review.notes)
+              .filter(function (part) { return String(part).trim() !== ''; })
+              .join(' | ');
+          }
+        }
+
         const skipped = [];
         results.forEach(function (result) {
           const column = columns[result.field.key];
@@ -775,6 +870,15 @@ function importRadiusData() {
           }
           if (merged.changed) column.setValue(i, merged.value);
         });
+
+        if (review.shade) {
+          timing.SHADE_FIELDS.forEach(function (key) {
+            if (columns[key]) columns[key].setBackground(i, CONFIG.COLOR.TIMING);
+          });
+          log.warn(name, 'session ran ' + review.durationMinutes +
+            ' minutes, which is neither about an hour nor about two — ' +
+            'sign-in and sign-out shaded for a look.');
+        }
 
         skipped.forEach(function (reason) { log.warn(name, reason); });
 

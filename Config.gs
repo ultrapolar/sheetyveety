@@ -30,7 +30,8 @@ const CONFIG = {
   COLOR: {
     DONE: '#00ff00',    // paperwork finished, row is skipped on future runs
     WARN: '#ffff00',    // needs a human before it can finish
-    ERROR: '#ffcccc'    // could not be processed at all
+    ERROR: '#ffcccc',   // could not be processed at all
+    TIMING: '#ff9900'   // session ran an odd length - see CONFIG.RADIUS.TIMING
   },
 
   // Backgrounds that count as "already done". Add any other greens your team
@@ -89,6 +90,32 @@ const CONFIG = {
       { key: 'sessionSummary',       column: 15, label: 'Session summary' },     // O
       { key: 'internalNotes',        column: 16, label: 'Internal notes' }       // P
     ],
+
+    // How long a session is expected to run, and what to say when it does not.
+    //
+    // A session that lands in neither band gets its sign-in and sign-out cells
+    // shaded, because the length itself is the thing worth looking at. A short
+    // one is examined further: signing in well after the hour starts, or
+    // leaving well before it ends, each earn a note.
+    TIMING: {
+      SINGLE_MIN: 53,
+      SINGLE_MAX: 67,
+      DOUBLE_MIN: 106,
+      DOUBLE_MAX: 134,
+
+      // Minutes past the hour before a sign-in counts as late, and minutes
+      // short of the hour before a sign-out counts as early.
+      LATE_AFTER: 10,
+      EARLY_BEFORE: 10,
+
+      // Field keys this works from and writes to. All four must name real
+      // entries in FIELDS above -- a test asserts it, because a typo here
+      // fails silently: the review just sees no times and does nothing.
+      SIGN_IN_FIELD: 'signedIn',
+      SIGN_OUT_FIELD: 'signedOut',
+      SHADE_FIELDS: ['signedIn', 'signedOut'],
+      NOTE_FIELD: 'internalNotes'
+    },
 
     // Pause between page fetches, in milliseconds. Radius is someone else's
     // server; there is no reason to hammer it.
