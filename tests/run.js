@@ -32,7 +32,9 @@ function loadScript(context) {
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
   extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
-  yesFlag_, CONFIG, mergeStatusLetters_, parseClockTime_, reviewSessionTiming_
+  yesFlag_, CONFIG, mergeStatusLetters_, parseClockTime_, reviewSessionTiming_,
+  buildRadiusPlan_, applyRadiusPlan_, applyRadiusPlan_FromUI,
+  storeRadiusPlan_, loadRadiusPlan_, runRadiusImport_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -73,6 +75,37 @@ function scenario(deckRows, wopRows, selection, today) {
     wopStatus: i => String(wop.values[selection.start - 1 + i][10]),
     wopStatusBg: i => String(wop.backgrounds[selection.start - 1 + i][10]),
     wopNameBg: i => String(wop.backgrounds[selection.start - 1 + i][0]) };
+}
+
+/**
+ * Drives the whole import: fetch, then answer the preview dialog. Returns the
+ * preview dialog so a test can assert on what the operator was shown.
+ */
+function confirmRadiusImport(s, options) {
+  const opts = options || {};
+  s.api.importRadiusData();
+
+  const preview = s.harness.dialogs[s.harness.dialogs.length - 1];
+  if (!preview || preview.title !== 'Confirm Radius import') return preview;
+
+  const token = (preview.html.match(/name="token" value="([^"]+)"/) || [])[1];
+  const form = { token: token, mode: opts.mode || 'overwrite' };
+
+  const picks = preview.html.match(/name="pick_(\d+)"/g) || [];
+  picks.forEach(function (m) {
+    const index = m.match(/\d+/)[0];
+    if (opts.only && opts.only.indexOf(Number(index)) === -1) return;
+    form['pick_' + index] = 'on';
+  });
+
+  if (opts.picked === false) { /* leave every box unticked */ }
+  s.api.applyRadiusPlan_FromUI(form);
+  return preview;
+}
+
+/** The report shown after the import, which is always the last dialog. */
+function lastDialog(s) {
+  return s.harness.dialogs[s.harness.dialogs.length - 1];
 }
 
 // ==========================================================================
@@ -232,7 +265,7 @@ const REPAIR_FILLER_ROWS = [
   check('EOD multi-P: one pink', s.deckCell(2, C.PINK), 'pink');
   check('EOD multi-P: K green', s.wopStatusBg(0), '#00ff00');
   checkTruthy('EOD multi-P: warned in report',
-    s.harness.dialogs[0].html.includes('only one pink was applied'));
+    lastDialog(s).html.includes('only one pink was applied'));
 }
 
 // 7. Unknown name is flagged red and changes nothing.
@@ -259,7 +292,7 @@ const REPAIR_FILLER_ROWS = [
   check('EOD duplicate: first row untouched', s.deckCell(2, C.CURRENT), 'T1');
   check('EOD duplicate: second row untouched', s.deckCell(3, C.CURRENT), 'T9');
   checkTruthy('EOD duplicate: explained',
-    s.harness.dialogs[0].html.includes('more than once'));
+    lastDialog(s).html.includes('more than once'));
 }
 
 // 9. Rows already green are skipped.
@@ -416,7 +449,7 @@ const REPAIR_FILLER_ROWS = [
   s.api.processSodPinks();
   check('SOD empty queue: A red', s.wopNameBg(0), '#ffcccc');
   checkTruthy('SOD empty queue: explained',
-    s.harness.dialogs[0].html.includes('queue is empty'));
+    lastDialog(s).html.includes('queue is empty'));
 }
 
 // 20. A student who is not pink is skipped and counted, not flagged.
@@ -469,7 +502,7 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Jane <b>Doe</b>' }],
     { start: 1, rows: 1 });
   s.api.processSodPinks();
-  const html = s.harness.dialogs[0].html;
+  const html = lastDialog(s).html;
   checkTruthy('SOD escaping: name escaped', html.includes('Jane &lt;b&gt;Doe&lt;/b&gt;'));
   checkTruthy('SOD escaping: no raw tag injected', !html.includes('Jane <b>Doe</b>'));
 }
@@ -703,9 +736,9 @@ const REPAIR_FILLER_ROWS = [
   s.api.applyHistoryColumnRepair();
   check('Cutoff: only post-8/1 moved', s.deckCell(4, C.ARCHIVE), 'New1 08/03 | New2 08/19');
   checkTruthy('Cutoff: doomed text reported',
-    s.harness.dialogs[0].html.includes('Old1 06/10 | Old2 07/28'));
+    lastDialog(s).html.includes('Old1 06/10 | Old2 07/28'));
   checkTruthy('Cutoff: warns it will be lost',
-    s.harness.dialogs[0].html.includes('lost when the column is deleted'));
+    lastDialog(s).html.includes('lost when the column is deleted'));
 }
 
 // 35. A row with nothing recent enough is left entirely alone.
@@ -729,7 +762,7 @@ const REPAIR_FILLER_ROWS = [
   check('Merge: existing text kept first',
     s.deckCell(4, C.ARCHIVE), 'PRE-INSERT 07/01 | T2 08/12');
   checkTruthy('Merge: flagged for review',
-    s.harness.dialogs[0].html.includes('worth an eyeball'));
+    lastDialog(s).html.includes('worth an eyeball'));
 }
 
 // 37. Running the repair twice does not duplicate anything.
@@ -754,7 +787,7 @@ const REPAIR_FILLER_ROWS = [
   s.api.applyHistoryColumnRepair();
   check('Undated: dated part moved', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
   checkTruthy('Undated: note flagged',
-    s.harness.dialogs[0].html.includes('scribbled note'));
+    lastDialog(s).html.includes('scribbled note'));
 }
 
 // 39. The delete step refuses while anything recent is still unmoved.
@@ -1313,7 +1346,7 @@ const REPAIR_FILLER_ROWS = [
         ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
           '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
         : DONE });
-    s.api.importRadiusData();
+    confirmRadiusImport(s);
     return s;
   }
 
@@ -1337,7 +1370,7 @@ const REPAIR_FILLER_ROWS = [
   // Untouched means untouched: the original casing survives too.
   check('import into K: a green row keeps its colour', s.wopStatusBg(0), '#00FF00');
   checkTruthy('import into K: and says why it was skipped',
-    s.harness.dialogs[0].html.includes('already processed by EOD'));
+    lastDialog(s).html.includes('already green'));
   check('import into K: the rest of the row still imports',
     String(s.wop.values[0][7]), '33');
 
@@ -1345,7 +1378,7 @@ const REPAIR_FILLER_ROWS = [
   s = runImport('YYP - B empty?', '#ffff00');
   check('import into K: marker text survives', s.wopStatus(0), 'YYP - B empty?');
   checkTruthy('import into K: marker is explained',
-    s.harness.dialogs[0].html.includes('EOD marker'));
+    lastDialog(s).html.includes('EOD marker'));
 }
 
 // 52f. Reading a clock time.
@@ -1463,12 +1496,12 @@ const REPAIR_FILLER_ROWS = [
         ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
           '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
         : page });
-    s.api.importRadiusData();
+    confirmRadiusImport(s);
     return {
       L: String(s.wop.values[0][11]), Lbg: String(s.wop.backgrounds[0][11]),
       M: String(s.wop.values[0][12]), Mbg: String(s.wop.backgrounds[0][12]),
       P: String(s.wop.values[0][15]),
-      html: s.harness.dialogs[0].html
+      html: lastDialog(s).html
     };
   }
 
@@ -1569,7 +1602,7 @@ const REPAIR_FILLER_ROWS = [
   check('EOD+import: notes and score reached column P',
     String(s.wop.values[0][15]), 'she doesnt shut up big L | MLS (3)');
   checkTruthy('EOD+import: the report counts the import',
-    s.harness.dialogs[0].html.includes('Imported from Radius'));
+    lastDialog(s).html.includes('Imported from Radius'));
 
   // An operator-typed P plus the imported Y means both happen in one pass.
   s = runEod({ status: 'P' });
@@ -1666,7 +1699,178 @@ const REPAIR_FILLER_ROWS = [
       '<input name="G" type="radio" value="2" checked />', 'G'), '2');
 }
 
-// 53. All eight fields land in their configured columns, Q through X.
+// 52k. The confirmation dialog: what it shows, and what it writes.
+{
+  function twoStudents(existingP) {
+    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+      ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', ''],
+      ['John Roe', 'Task A', '', '', 'Task B', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }, { name: 'John Roe' }],
+      { start: 1, rows: 2 }, '2026-08-22');
+
+    if (existingP !== undefined) {
+      s.wop.values[0][15] = existingP;   // column P on the first row
+    }
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      s.context);
+
+    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">a</a></td></tr>' +
+          '<tr><td>John Roe</td><td><a href="/DWP/Index?studentId=2">b</a></td></tr>' +
+          '</table>'
+        : page.replace(/<title>[^<]*<\/title>/,
+            url.indexOf('studentId=2') !== -1 ? '<title>John Roe</title>'
+                                             : '<title>Amalie Laz</title>') });
+    return s;
+  }
+
+  // The preview lists every student, writes nothing, and offers a checkbox each.
+  let s = twoStudents();
+  s.api.importRadiusData();
+  const preview = s.harness.dialogs[0];
+  check('preview: shown instead of writing', preview.title, 'Confirm Radius import');
+  checkTruthy('preview: names both students',
+    preview.html.includes('Amalie Laz') && preview.html.includes('John Roe'));
+  checkTruthy('preview: a checkbox each',
+    (preview.html.match(/class="pick"/g) || []).length === 2);
+  checkTruthy('preview: a confirm-all button',
+    preview.html.includes('Confirm changes for all 2'));
+  check('preview: nothing written yet',
+    [String(s.wop.values[0][7]), String(s.wop.values[1][7])], ['', '']);
+  checkTruthy('preview: shows the values it would write',
+    preview.html.includes('33'));
+
+  // Confirming everything writes both rows.
+  s = twoStudents();
+  confirmRadiusImport(s);
+  check('confirm all: both rows written',
+    [String(s.wop.values[0][7]), String(s.wop.values[1][7])], ['33', '33']);
+
+  // Ticking one writes only that one.
+  s = twoStudents();
+  confirmRadiusImport(s, { only: [0] });
+  check('confirm one: only the ticked row is written',
+    [String(s.wop.values[0][7]), String(s.wop.values[1][7])], ['33', '']);
+  checkTruthy('confirm one: the report counts the one left out',
+    lastDialog(s).html.includes('Left out'));
+
+  // Ticking nobody is refused rather than silently doing nothing.
+  s = twoStudents();
+  s.api.importRadiusData();
+  const token = (s.harness.dialogs[0].html.match(/name="token" value="([^"]+)"/) || [])[1];
+  let err = '';
+  try { s.api.applyRadiusPlan_FromUI({ token: token, mode: 'overwrite' }); }
+  catch (e) { err = e.message; }
+  checkTruthy('confirm none: refused with a reason', err.includes('nothing to write'));
+  check('confirm none: nothing written', String(s.wop.values[0][7]), '');
+
+  // An expired plan is refused rather than writing a stale one.
+  s = twoStudents();
+  s.api.importRadiusData();
+  err = '';
+  try { s.api.applyRadiusPlan_FromUI({ token: 'gone', mode: 'overwrite', pick_0: 'on' }); }
+  catch (e) { err = e.message; }
+  checkTruthy('expired plan: refused', err.includes('expired'));
+}
+
+// 52l. What happens when a cell already holds something.
+{
+  function withExisting(mode) {
+    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+      ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.wop.values[0][7] = 'typed by hand';     // column H
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      s.context);
+    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        : page });
+    return { s: s, preview: confirmRadiusImport(s, { mode: mode }) };
+  }
+
+  // The preview warns before anything happens.
+  let out = withExisting('overwrite');
+  checkTruthy('conflict: the preview says a cell already holds something',
+    out.preview.html.includes('already hold'));
+  checkTruthy('conflict: and shows what is in it',
+    out.preview.html.includes('typed by hand'));
+  checkTruthy('conflict: offers all three choices',
+    out.preview.html.includes('value="append"') &&
+    out.preview.html.includes('value="overwrite"') &&
+    out.preview.html.includes('value="skip"'));
+
+  check('overwrite: replaces what was there', String(out.s.wop.values[0][7]), '33');
+
+  out = withExisting('append');
+  check('append: keeps what was there and adds to it',
+    String(out.s.wop.values[0][7]), 'typed by hand | 33');
+
+  out = withExisting('skip');
+  check('skip: leaves it exactly as it was',
+    String(out.s.wop.values[0][7]), 'typed by hand');
+  check('skip: still fills the empty cells', String(out.s.wop.values[0][5]), 'Y');
+  checkTruthy('skip: the report counts what it left alone',
+    lastDialog(out.s).html.includes('Cells left alone'));
+
+  // With no clash there is no choice to make, so the block is not shown.
+  const clean = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', '']],
+    [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+  clean.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+  vm.runInContext(
+    'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+    clean.context);
+  const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+  clean.harness.fetchHandler.value = url => ({ code: 200, body:
+    url.indexOf('/IM') !== -1
+      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+        '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      : page });
+  clean.api.importRadiusData();
+  checkTruthy('no clash: no append-or-overwrite block',
+    !clean.harness.dialogs[0].html.includes('already hold'));
+}
+
+// 52m. A plan survives the round trip through the cache in one piece.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const long = new Array(400).join('x');   // a note near the real length cap
+  const plan = { startRow: 1, numRows: 3, problems: [], stoppedEarly: false,
+    students: [
+      { index: 0, name: 'Amalie Laz', values: { internalNotes: long },
+        existing: {}, conflicts: [], blocked: [], shade: true, durationMinutes: 28 },
+      { index: 2, name: 'John Roe', values: { internalNotes: long },
+        existing: {}, conflicts: ['internalNotes'], blocked: ['x'],
+        shade: false, durationMinutes: 60 }
+    ] };
+
+  const token = api.storeRadiusPlan_(plan);
+  const back = api.loadRadiusPlan_(token);
+  check('cache: both students come back', back.students.length, 2);
+  check('cache: indexes preserved',
+    back.students.map(s => s.index), [0, 2]);
+  check('cache: a long note survives',
+    back.students[0].values.internalNotes.length, long.length);
+  check('cache: conflicts and blocks survive',
+    [back.students[1].conflicts, back.students[1].blocked], [['internalNotes'], ['x']]);
+  check('cache: an unknown token yields nothing', api.loadRadiusPlan_('nope'), null);
+}
+
+// 53. Every field lands in its configured column, F through P.
 {
   const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
     ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
@@ -1683,14 +1887,14 @@ const REPAIR_FILLER_ROWS = [
         '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
       : LIVE });
 
-  s.api.importRadiusData();
+  confirmRadiusImport(s);
 
   // F G H J K L M O P, zero-indexed.
   check('configured columns written',
     [5, 6, 7, 9, 10, 11, 12, 14, 15].map(c => String(s.wop.values[0][c])),
     ['', '', '', '', '', '9:59 AM', '', '', '']);
   checkTruthy('import reports every column it wrote',
-    s.harness.dialogs[0].html.includes('F, G, H, J, K, L, M, O, P'));
+    lastDialog(s).html.includes('F, G, H, J, K, L, M, O, P'));
 }
 
 // 54. A roster link pointing at the wrong student writes nothing.
@@ -1710,10 +1914,12 @@ const REPAIR_FILLER_ROWS = [
         '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
       : LIVE });  // page is actually Amalie Laz
 
-  s.api.importRadiusData();
+  confirmRadiusImport(s);
   check('wrong student: nothing written to Q', String(s.wop.values[0][16]), '');
+  // Nothing was fetched, so there is no preview to show -- just an alert.
   checkTruthy('wrong student: explained',
-    s.harness.dialogs[0].html.includes('instead'));
+    s.harness.alerts.some(a => String(a).includes('instead')));
+  check('wrong student: no preview offered', s.harness.dialogs.length, 0);
 }
 
 
@@ -1724,10 +1930,10 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
   vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "";', s.context);
-  s.api.importRadiusData();
+  confirmRadiusImport(s);
   check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
   checkTruthy('unset roster URL: says what to set',
-    s.harness.dialogs[0].html.includes('INSTRUCTION_MANAGER_URL'));
+    s.harness.alerts.some(a => String(a).includes('INSTRUCTION_MANAGER_URL')));
 }
 
 

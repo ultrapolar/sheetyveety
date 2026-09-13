@@ -777,120 +777,202 @@ function testRadiusConnection() {
  * Writes are flushed before returning, so a caller that reads the same columns
  * afterwards sees what the import put there.
  */
-function runRadiusImport_(sheets, selection, log) {
+/**
+ * Phase one: fetch everything and work out what would be written.
+ *
+ * Writes nothing. Takes no lock and shows nothing -- the caller owns both, so
+ * this can feed the confirmation dialog or run straight into applyRadiusPlan_
+ * as EOD's first step.
+ */
+function buildRadiusPlan_(sheets, selection, log) {
   const started = Date.now();
-  const stats = { imported: 0, failed: 0 };
+  const timing = CONFIG.RADIUS.TIMING;
+  const plan = {
+    startRow: selection.startRow,
+    numRows: selection.numRows,
+    students: [],
+    problems: [],
+    stoppedEarly: false
+  };
+
+  const nameCol = WopColumn_(sheets.wop, selection.startRow, selection.numRows,
+    CONFIG.WOP_COL.NAME);
   const columns = {};
+  CONFIG.RADIUS.FIELDS.forEach(function (field) {
+    columns[field.key] = WopColumn_(sheets.wop, selection.startRow,
+      selection.numRows, field.column);
+  });
+
+  const roster = loadInstructionManager_();
+
+  for (let i = 0; i < selection.numRows; i++) {
+    if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
+      plan.stoppedEarly = true;
+      log.warn('Run stopped', 'Approaching the 6-minute limit after ' +
+        plan.students.length + ' student(s). Highlight the rest and run again.');
+      break;
+    }
+
+    const name = extractName_(nameCol.value(i));
+    if (!name) continue;
+
+    try {
+      const entry = lookupRosterEntry_(roster, name);
+      const html = radiusFetch_(entry.url);
+
+      // Guard against a mislinked roster row carrying another student's data
+      // into this row. The page names the student it belongs to.
+      const pageName = pageStudentName_(html);
+      if (pageName && normalizeStudentName_(pageName) !== normalizeStudentName_(name)) {
+        throw new Error('the roster link opened the DWP for "' + pageName +
+          '" instead. Nothing was written for this row.');
+      }
+
+      const results = extractRadiusFields_(html);
+      const valueOf = function (key) {
+        const hit = results.filter(function (r) { return r.field.key === key; })[0];
+        return hit ? hit.value : '';
+      };
+
+      const review = reviewSessionTiming_(
+        valueOf(timing.SIGN_IN_FIELD), valueOf(timing.SIGN_OUT_FIELD));
+
+      // Everything appended to the note column, in order: the timing
+      // observations, then the Mathlete score if one was given.
+      const appended = review.notes.slice();
+      const mathlete = RADIUS_EXTRACTORS.mathleteScore(html);
+      if (mathlete) appended.push('MLS (' + mathlete + ')');
+
+      if (appended.length) {
+        const noteResult = results.filter(function (r) {
+          return r.field.key === timing.NOTE_FIELD;
+        })[0];
+        if (noteResult) {
+          noteResult.value = [noteResult.value].concat(appended)
+            .filter(function (part) { return String(part).trim() !== ''; })
+            .join(' | ');
+        }
+      }
+
+      const values = {};
+      const existing = {};
+      const conflicts = [];
+      const blocked = [];
+
+      results.forEach(function (result) {
+        const field = result.field;
+        const column = columns[field.key];
+        const current = String(column.value(i)).trim();
+        values[field.key] = result.value;
+        existing[field.key] = current;
+
+        if (field.merge === 'statusLetters') {
+          // Column K has its own rules and is never part of the
+          // append-or-overwrite choice.
+          if (isDoneColor_(column.background(i))) {
+            blocked.push('column ' + columnLetter_(field.column) +
+              ' is already green — EOD has finished this row');
+            values[field.key] = null;
+            return;
+          }
+          const merged = mergeStatusLetters_(current, result.value);
+          if (merged.blocked) {
+            blocked.push('column ' + columnLetter_(field.column) + ' holds "' +
+              current + '", which is an EOD marker');
+            values[field.key] = null;
+            return;
+          }
+          values[field.key] = merged.changed ? merged.value : null;
+          return;
+        }
+
+        if (current && current !== String(result.value)) conflicts.push(field.key);
+      });
+
+      plan.students.push({
+        index: i,
+        name: name,
+        values: values,
+        existing: existing,
+        conflicts: conflicts,
+        blocked: blocked,
+        shade: review.shade,
+        durationMinutes: review.durationMinutes
+      });
+    } catch (err) {
+      plan.problems.push({ index: i, name: name, message: err.message });
+      log.error(name, err.message);
+    }
+
+    Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
+  }
+
+  return plan;
+}
+
+/**
+ * Phase two: write the plan for the chosen students.
+ *
+ * `picked` is a set of student indexes to apply; omit it to apply all of them.
+ * `mode` decides what happens where a cell already holds something:
+ * 'overwrite' replaces it, 'append' joins the two, 'skip' leaves it be.
+ * Column K is exempt -- it always uses its own merge.
+ */
+function applyRadiusPlan_(sheets, plan, picked, mode, log) {
+  const stats = { imported: 0, skippedCells: 0 };
+  const columns = {};
+  const timing = CONFIG.RADIUS.TIMING;
 
   try {
-    const nameCol = WopColumn_(sheets.wop, selection.startRow, selection.numRows,
-      CONFIG.WOP_COL.NAME);
     CONFIG.RADIUS.FIELDS.forEach(function (field) {
-      columns[field.key] = WopColumn_(sheets.wop, selection.startRow,
-        selection.numRows, field.column);
+      columns[field.key] = WopColumn_(sheets.wop, plan.startRow,
+        plan.numRows, field.column);
     });
 
-    const roster = loadInstructionManager_();
+    plan.students.forEach(function (student) {
+      if (picked && picked.indexOf(student.index) === -1) return;
 
-    for (let i = 0; i < selection.numRows; i++) {
-      if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
-        log.warn('Run stopped', 'Approaching the 6-minute limit after ' +
-          stats.imported + ' student(s). Everything fetched so far has been ' +
-          'saved — highlight the remaining rows and run it again.');
-        break;
-      }
+      const written = [];
+      CONFIG.RADIUS.FIELDS.forEach(function (field) {
+        const value = student.values[field.key];
+        if (value === null || value === undefined) return;
 
-      const name = extractName_(nameCol.value(i));
-      if (!name) continue;
+        const column = columns[field.key];
+        const current = String(column.value(student.index)).trim();
 
-      try {
-        const entry = lookupRosterEntry_(roster, name);
-        const html = radiusFetch_(entry.url);
-
-        // Guard against a mislinked roster row writing another student's data
-        // into this row. The page names the student it belongs to.
-        const pageName = pageStudentName_(html);
-        if (pageName && normalizeStudentName_(pageName) !== normalizeStudentName_(name)) {
-          throw new Error('the roster link opened the DWP for "' + pageName +
-            '" instead. Nothing was written for this row.');
+        if (field.merge === 'statusLetters') {
+          column.setValue(student.index, value);
+          written.push(field.label + ': ' + value);
+          return;
         }
 
-        const results = extractRadiusFields_(html);
-
-        // Timing review runs before anything is written, so its notes can be
-        // folded into the note column's value rather than written separately.
-        const valueOf = function (key) {
-          const hit = results.filter(function (r) { return r.field.key === key; })[0];
-          return hit ? hit.value : '';
-        };
-        const timing = CONFIG.RADIUS.TIMING;
-        const review = reviewSessionTiming_(
-          valueOf(timing.SIGN_IN_FIELD), valueOf(timing.SIGN_OUT_FIELD));
-
-        // Everything appended to the note column, in order: the timing
-        // observations, then the Mathlete score if one was given.
-        const appended = review.notes.slice();
-        const mathlete = RADIUS_EXTRACTORS.mathleteScore(html);
-        if (mathlete) appended.push('MLS (' + mathlete + ')');
-
-        if (appended.length) {
-          const noteResult = results.filter(function (r) {
-            return r.field.key === timing.NOTE_FIELD;
-          })[0];
-          if (noteResult) {
-            noteResult.value = [noteResult.value].concat(appended)
-              .filter(function (part) { return String(part).trim() !== ''; })
-              .join(' | ');
+        if (current && current !== String(value)) {
+          if (mode === 'skip') { stats.skippedCells++; return; }
+          if (mode === 'append') {
+            column.setValue(student.index, current + ' | ' + value);
+            written.push(field.label + ': ' + current + ' | ' + value);
+            return;
           }
         }
 
-        const skipped = [];
-        results.forEach(function (result) {
-          const column = columns[result.field.key];
+        column.setValue(student.index, value);
+        if (String(value) !== '') written.push(field.label + ': ' + value);
+      });
 
-          if (result.field.merge !== 'statusLetters') {
-            column.setValue(i, result.value);
-            return;
-          }
-
-          // EOD has already finished this row -- its record is the last word.
-          if (isDoneColor_(column.background(i))) {
-            skipped.push('already processed by EOD');
-            return;
-          }
-
-          const merged = mergeStatusLetters_(column.value(i), result.value);
-          if (merged.blocked) {
-            skipped.push('column ' + columnLetter_(result.field.column) +
-              ' holds "' + String(column.value(i)).trim() +
-              '", which is an EOD marker — left alone');
-            return;
-          }
-          if (merged.changed) column.setValue(i, merged.value);
+      if (student.shade) {
+        timing.SHADE_FIELDS.forEach(function (key) {
+          if (columns[key]) columns[key].setBackground(student.index, CONFIG.COLOR.TIMING);
         });
-
-        if (review.shade) {
-          timing.SHADE_FIELDS.forEach(function (key) {
-            if (columns[key]) columns[key].setBackground(i, CONFIG.COLOR.TIMING);
-          });
-          log.warn(name, 'session ran ' + review.durationMinutes +
-            ' minutes, which is neither about an hour nor about two — ' +
-            'sign-in and sign-out shaded for a look.');
-        }
-
-        skipped.forEach(function (reason) { log.warn(name, reason); });
-
-        stats.imported++;
-        log.ok(name, results.map(function (r) {
-          return r.field.label + ': ' + (r.value === '' ? '(blank)' : r.value);
-        }).join(', '));
-      } catch (err) {
-        stats.failed++;
-        log.error(name, err.message);
+        log.warn(student.name, 'session ran ' + student.durationMinutes +
+          ' minutes, which is neither about an hour nor about two — ' +
+          'sign-in and sign-out shaded for a look.');
       }
 
-      Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
-    }
+      student.blocked.forEach(function (reason) { log.warn(student.name, reason); });
+
+      stats.imported++;
+      log.ok(student.name, written.length ? written.join(', ') : 'nothing to write');
+    });
   } catch (err) {
     log.error('Run stopped', err.message);
   } finally {
@@ -902,6 +984,56 @@ function runRadiusImport_(sheets, selection, log) {
   }
 
   return stats;
+}
+
+// ------------------------------------------------------------------
+// Parking a plan between the dialog and the callback
+// ------------------------------------------------------------------
+
+/**
+ * Each student is cached under its own key. Notes can run to a thousand
+ * characters apiece, so a whole selection in one entry would risk the
+ * hundred-kilobyte ceiling on a busy day.
+ */
+function storeRadiusPlan_(plan) {
+  const cache = CacheService.getUserCache();
+  const token = Utilities.getUuid();
+  const entries = {};
+
+  entries['radiusPlan_' + token] = JSON.stringify({
+    startRow: plan.startRow,
+    numRows: plan.numRows,
+    count: plan.students.length,
+    problems: plan.problems,
+    stoppedEarly: plan.stoppedEarly
+  });
+  plan.students.forEach(function (student, n) {
+    entries['radiusPlan_' + token + '_' + n] = JSON.stringify(student);
+  });
+
+  cache.putAll(entries, CONFIG.RADIUS.CACHE_TTL_SECONDS);
+  return token;
+}
+
+function loadRadiusPlan_(token) {
+  const cache = CacheService.getUserCache();
+  const raw = cache.get('radiusPlan_' + token);
+  if (!raw) return null;
+
+  const plan = JSON.parse(raw);
+  plan.students = [];
+  for (let n = 0; n < plan.count; n++) {
+    const chunk = cache.get('radiusPlan_' + token + '_' + n);
+    if (!chunk) return null;
+    plan.students.push(JSON.parse(chunk));
+  }
+  return plan;
+}
+
+function clearRadiusPlan_(token, count) {
+  const keys = ['radiusPlan_' + token];
+  for (let n = 0; n < count; n++) keys.push('radiusPlan_' + token + '_' + n);
+  CacheService.getUserCache().removeAll(keys);
 }
 
 /** True when there is enough set up for the import to be worth attempting. */
@@ -918,41 +1050,245 @@ function radiusColumnList_() {
   }).join(', ');
 }
 
-/** Menu entry: imports values for the highlighted Daily WOP rows. */
-function importRadiusData() {
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
-    showError_('Someone else is running a batch on this spreadsheet right now.');
-    return;
+/**
+ * Runs the import without asking: build the plan, apply all of it.
+ * Used by EOD, where a modal part way through a batch would be a nuisance.
+ */
+function runRadiusImport_(sheets, selection, log) {
+  const plan = buildRadiusPlan_(sheets, selection, log);
+  return applyRadiusPlan_(sheets, plan, null, CONFIG.RADIUS.EOD_CONFLICT_MODE, log);
+}
+
+
+// ------------------------------------------------------------------
+// The confirmation dialog
+// ------------------------------------------------------------------
+
+function shorten_(text, limit) {
+  const value = String(text == null ? '' : text);
+  return value.length > limit ? value.slice(0, limit - 1) + '…' : value;
+}
+
+/** One student's block in the preview. */
+function renderPlanStudent_(student, position) {
+  const conflicts = student.conflicts || [];
+  let html = '<div style="border: 1px solid #e5e7eb; border-radius: 6px; ' +
+    'margin-bottom: 10px; background: ' + (conflicts.length ? '#fffbeb' : '#f9fafb') + ';">' +
+    '<label style="display: block; padding: 8px 10px; cursor: pointer; ' +
+    'border-bottom: 1px solid #e5e7eb;">' +
+    '<input type="checkbox" class="pick" name="pick_' + student.index + '" checked> ' +
+    '<b>' + escapeHtml_(student.name) + '</b>';
+
+  if (student.durationMinutes !== null && student.durationMinutes !== undefined) {
+    html += '<span style="color: ' + (student.shade ? '#b45309' : '#6b7280') +
+      '; font-size: 12px;"> · ' + student.durationMinutes + ' min' +
+      (student.shade ? ' (odd length)' : '') + '</span>';
+  }
+  html += '</label><table style="width: 100%; font-size: 12px; border-collapse: collapse;">';
+
+  CONFIG.RADIUS.FIELDS.forEach(function (field) {
+    const value = student.values[field.key];
+    if (value === null || value === undefined) return;
+
+    const letter = columnLetter_(field.column);
+    const clash = conflicts.indexOf(field.key) !== -1;
+    const current = student.existing[field.key];
+
+    html += '<tr style="border-top: 1px solid #f1f5f9;">' +
+      '<td style="padding: 3px 6px; width: 18px; color: #64748b;">' + letter + '</td>' +
+      '<td style="padding: 3px 6px; width: 130px; color: #64748b;">' +
+      escapeHtml_(field.label) + '</td>' +
+      '<td style="padding: 3px 6px;" title="' + escapeHtml_(value) + '">' +
+      (String(value) === ''
+        ? '<i style="color: #cbd5e1;">(blank)</i>'
+        : escapeHtml_(shorten_(value, 70))) +
+      (clash
+        ? '<div style="color: #b45309;">cell holds “' +
+          escapeHtml_(shorten_(current, 40)) + '”</div>'
+        : '') +
+      '</td></tr>';
+  });
+
+  html += '</table>';
+
+  (student.blocked || []).forEach(function (reason) {
+    html += '<div style="padding: 4px 10px; color: #b45309; font-size: 12px;">⚠️ ' +
+      escapeHtml_(reason) + '</div>';
+  });
+  return html + '</div>';
+}
+
+/** Phase one's output, put to the operator before anything is written. */
+function showRadiusPlanDialog_(plan, log) {
+  const token = storeRadiusPlan_(plan);
+  const clashing = plan.students.filter(function (s) {
+    return (s.conflicts || []).length > 0;
+  });
+
+  let html = '<div style="font-family: Arial, sans-serif; font-size: 13px; ' +
+    'padding: 10px; color: #1e293b;">' +
+    '<h3 style="margin-top: 0;">' + plan.students.length +
+    ' student(s) fetched from Radius</h3>' +
+    '<p style="color: #4b5563;">Nothing has been written yet. Untick anyone you ' +
+    'want to leave out.</p>' +
+    '<form id="radiusForm">' +
+    '<input type="hidden" name="token" value="' + escapeHtml_(token) + '">';
+
+  if (plan.problems.length) {
+    html += '<div style="background: #fef2f2; border: 1px solid #fecaca; ' +
+      'border-radius: 6px; padding: 8px; margin-bottom: 10px; color: #b91c1c;">' +
+      plan.problems.length + ' row(s) could not be fetched: ' +
+      plan.problems.map(function (p) { return escapeHtml_(p.name); }).join(', ') +
+      '. They are listed in the report afterwards.</div>';
   }
 
+  if (clashing.length) {
+    html += '<div style="background: #fffbeb; border: 1px solid #fde68a; ' +
+      'border-radius: 6px; padding: 10px; margin-bottom: 10px;">' +
+      '<b>' + clashing.length + ' student(s) have cells that already hold ' +
+      'something.</b><div style="margin-top: 6px;">' +
+      '<label style="display: block; padding: 2px 0;">' +
+      '<input type="radio" name="mode" value="append" checked> ' +
+      'Append — keep what is there and add the new value after it</label>' +
+      '<label style="display: block; padding: 2px 0;">' +
+      '<input type="radio" name="mode" value="overwrite"> ' +
+      'Overwrite — replace what is there</label>' +
+      '<label style="display: block; padding: 2px 0;">' +
+      '<input type="radio" name="mode" value="skip"> ' +
+      'Leave alone — only fill cells that are empty</label></div>' +
+      '<div style="margin-top: 6px; color: #92400e; font-size: 12px;">' +
+      'Column K is not affected by this choice — its letters are always ' +
+      'folded together.</div></div>';
+  } else {
+    html += '<input type="hidden" name="mode" value="overwrite">';
+  }
+
+  html += '<div style="max-height: 300px; overflow-y: auto; margin-bottom: 10px;">' +
+    plan.students.map(renderPlanStudent_).join('') + '</div>';
+
+  html += '<div id="err" style="display: none; margin: 10px 0; padding: 8px; ' +
+    'background: #fef2f2; border: 1px solid #fecaca; border-radius: 4px; ' +
+    'color: #b91c1c;"></div>' +
+    '<button type="button" id="all" onclick="submitAll()" style="width: 100%; ' +
+    'padding: 10px; background: #2563eb; color: white; border: none; ' +
+    'border-radius: 6px; cursor: pointer; font-weight: bold;">' +
+    'Confirm changes for all ' + plan.students.length + '</button>' +
+    '<button type="button" id="some" onclick="submitPicked()" style="width: 100%; ' +
+    'padding: 8px; margin-top: 6px; background: #f1f5f9; color: #1e293b; ' +
+    'border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer;">' +
+    'Apply only the ticked ones</button>' +
+    '<button type="button" onclick="google.script.host.close()" style="width: 100%; ' +
+    'padding: 8px; margin-top: 6px; background: none; color: #6b7280; ' +
+    'border: none; cursor: pointer;">Cancel — nothing will change</button>' +
+    '</form>' +
+    '<script>' +
+    'function lock(label) {' +
+    '  document.getElementById("err").style.display = "none";' +
+    '  ["all", "some"].forEach(function (id) {' +
+    '    var b = document.getElementById(id); b.disabled = true;' +
+    '  });' +
+    '  document.getElementById("all").textContent = label;' +
+    '}' +
+    'function unlock(e) {' +
+    '  ["all", "some"].forEach(function (id) {' +
+    '    document.getElementById(id).disabled = false;' +
+    '  });' +
+    '  document.getElementById("all").textContent = "Retry";' +
+    '  var box = document.getElementById("err");' +
+    '  box.textContent = "Nothing was changed. " + (e && e.message ? e.message : e);' +
+    '  box.style.display = "block";' +
+    '}' +
+    'function send() {' +
+    '  google.script.run.withFailureHandler(unlock)' +
+    '    .applyRadiusPlan_FromUI(document.getElementById("radiusForm"));' +
+    '}' +
+    'function submitAll() {' +
+    '  var boxes = document.querySelectorAll(".pick");' +
+    '  for (var i = 0; i < boxes.length; i++) boxes[i].checked = true;' +
+    '  lock("Writing..."); send();' +
+    '}' +
+    'function submitPicked() { lock("Writing..."); send(); }' +
+    '</script></div>';
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(560).setHeight(600),
+    'Confirm Radius import');
+}
+
+/** Callback from the dialog. */
+function applyRadiusPlan_FromUI(formObject) {
+  const plan = loadRadiusPlan_(formObject.token);
+  if (!plan) {
+    throw new Error('This dialog has expired. Re-run the import from the Radius menu.');
+  }
+
+  const picked = plan.students
+    .filter(function (s) { return formObject['pick_' + s.index] !== undefined; })
+    .map(function (s) { return s.index; });
+
+  if (!picked.length) {
+    throw new Error('No students were ticked, so there was nothing to write.');
+  }
+
+  const mode = ['append', 'overwrite', 'skip'].indexOf(formObject.mode) === -1
+    ? 'overwrite' : formObject.mode;
+
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    throw new Error('Someone else is running a batch on this spreadsheet right now.');
+  }
+
+  const log = ActionLog_();
+  let stats;
+  try {
+    stats = applyRadiusPlan_(getSheets_(), plan, picked, mode, log);
+    clearRadiusPlan_(formObject.token, plan.count);
+  } finally {
+    lock.releaseLock();
+  }
+
+  plan.problems.forEach(function (problem) { log.error(problem.name, problem.message); });
+
+  showReport_('Radius Import', '🔗 Import Summary', [
+    { label: 'Students written', value: stats.imported },
+    { label: 'Left out', value: plan.students.length - picked.length },
+    { label: 'Could not be fetched', value: plan.problems.length,
+      alert: plan.problems.length > 0 },
+    { label: 'Cells left alone', value: stats.skippedCells },
+    { label: 'Columns', value: radiusColumnList_() }
+  ], log);
+}
+
+/**
+ * Menu entry: fetches for the highlighted rows and puts the result to the
+ * operator before anything is written.
+ */
+function importRadiusData() {
   let sheets;
   let selection;
   try {
     sheets = getSheets_();
     selection = getSelection_(sheets.wop);
   } catch (err) {
-    lock.releaseLock();
     showError_(err.message);
     return;
   }
 
   const log = ActionLog_();
-  let stats;
+  let plan;
   try {
-    stats = runRadiusImport_(sheets, selection, log);
-  } finally {
-    lock.releaseLock();
-  }
-
-  if (log.isEmpty()) {
-    showError_('Nothing to import — no student names found in the highlighted rows.');
+    plan = buildRadiusPlan_(sheets, selection, log);
+  } catch (err) {
+    showError_(err.message);
     return;
   }
 
-  showReport_('Radius Import', '🔗 Import Summary', [
-    { label: 'Students imported', value: stats.imported },
-    { label: 'Failed', value: stats.failed, alert: stats.failed > 0 },
-    { label: 'Columns written', value: radiusColumnList_() }
-  ], log);
+  if (!plan.students.length) {
+    showError_(plan.problems.length
+      ? 'Nothing could be fetched. ' + plan.problems[0].message
+      : 'No student names found in the highlighted rows of column A.');
+    return;
+  }
+
+  showRadiusPlanDialog_(plan, log);
 }

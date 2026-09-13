@@ -28,7 +28,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-394 assertions covering the parsing rules and both scripts end to end,
+421 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -36,10 +36,33 @@ spreadsheet.
 
 ## Radius import
 
-**Runs automatically as the first step of the EOD batch**, then again on demand
-from **Radius → Import for highlighted rows**. Doing it inside EOD is what makes
-column K work: the import writes the instruction, and the rest of EOD then acts
-on it in the same pass, so there is no way to run the two the wrong way round.
+Highlight the students in **column A** of Daily WOP, then **Radius → Import for
+highlighted rows**. The import fetches everything first and shows you what it
+found before writing anything:
+
+- one block per student, listing the value destined for each column
+- a **checkbox each**, ticked by default — untick anyone to leave them out
+- **Confirm changes for all**, or **Apply only the ticked ones**
+- Cancel, which changes nothing
+
+Where a target cell already holds something, the preview says so, shows what is
+in it, and asks what to do about it — **append**, **overwrite**, or **leave
+alone** (fill only the empty cells). That block only appears when there is
+actually a clash. Column K is exempt from the choice; its letters are always
+folded together.
+
+The plan is parked in the cache between the two phases, one entry per student,
+because notes can run to a thousand characters and a whole selection in one
+entry would risk the hundred-kilobyte ceiling.
+
+It **also runs as the first step of the EOD batch**, without the dialog — a
+modal part way through a batch would be a nuisance, and EOD's own report says
+what happened. That is what makes column K work: the import writes the
+instruction and the rest of EOD acts on it in the same pass, so the two cannot
+be run the wrong way round. Because nobody is asked, EOD defaults to the
+harmless option for cells that already hold something —
+`CONFIG.RADIUS.EOD_CONFLICT_MODE` is `'skip'`, so it fills the empties and
+leaves everything else be.
 
 Set `CONFIG.RADIUS.RUN_ON_EOD` to `false` to keep it to its own menu item. If
 it is on but the cookie or the Instruction Manager URL is missing, EOD still

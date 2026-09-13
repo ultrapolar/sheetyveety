@@ -156,8 +156,10 @@ function install(globalObj, sheets, activeSheetName) {
   globalObj.CacheService = {
     getUserCache: () => ({
       put: (k, v) => { cache[k] = v; },
+      putAll: entries => { Object.keys(entries).forEach(k => { cache[k] = entries[k]; }); },
       get: k => (k in cache ? cache[k] : null),
-      remove: k => { delete cache[k]; }
+      remove: k => { delete cache[k]; },
+      removeAll: keys => { keys.forEach(k => { delete cache[k]; }); }
     })
   };
 

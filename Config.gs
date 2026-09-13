@@ -117,6 +117,11 @@ const CONFIG = {
       NOTE_FIELD: 'internalNotes'
     },
 
+    // What EOD does when a cell already holds something. It runs without a
+    // dialog, so it defaults to the harmless option: fill the empties, leave
+    // everything else be. 'append' or 'overwrite' if you would rather.
+    EOD_CONFLICT_MODE: 'skip',
+
     // Run the import automatically as the first step of the EOD batch, so the
     // instruction it writes into column K is in place before EOD reads it.
     // Set false to keep the import to its own menu item.
