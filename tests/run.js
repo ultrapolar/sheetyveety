@@ -23,7 +23,7 @@ function loadScript(context) {
 ;globalThis.__api = {
   CONFIG, parseStatus_, extractName_, splitList_, normalizeColor_, isDoneColor_,
   escapeHtml_, columnLetter_, processWopToDeck, processSodPinks,
-  executeSodOperations_FromUI, checkSheetSetup,
+  executeSodOperations_FromUI, checkSheetSetup, wopColumnPlan_, headerFor_,
   looksLikeLoginPage_, radiusFetch_, importRadiusData, RADIUS_EXTRACTORS,
   parseRoster_, loadRoster_, dwpUrl_, radiusPostJson_,
   normalizeStudentName_, htmlCellText_,
@@ -618,6 +618,98 @@ const DECK_FILLER_ROWS = [
   check('columnLetter 26', api.columnLetter_(26), 'Z');
   check('columnLetter 27', api.columnLetter_(27), 'AA');
   check('archive column is M', api.CONFIG.DECK_COL.ARCHIVE, 13);
+}
+
+// 45b. Check setup lists every column the script touches, and reads a
+//      heading from row 2 when row 1 has been left blank as a spacer.
+{
+  function setupDialog(wopHeaderRows) {
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wopRows = wopHeaderRows.map(r => {
+      const row = r.slice(); while (row.length < 26) row.push(''); return row;
+    });
+    wopRows.push(new Array(26).fill(''));
+    const wop = new FakeSheet('Daily WOP', wopRows, makeGrid(wopRows.length, 26, '#ffffff'));
+    wop.setSelection(1, 1);
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop], 'Daily WOP');
+    loadScript(ctx).checkSheetSetup();
+    return h.dialogs[h.dialogs.length - 1].html;
+  }
+
+  // Row 1 carries every heading.
+  // Deliberately unlike the config labels, so finding one in the dialog proves
+  // the sheet was read rather than the label echoed back.
+  const named = [];
+  named[0] = 'HDR-Student'; named[5] = 'HDR-POTW';  named[6] = 'HDR-Mastery';
+  named[7] = 'HDR-Pages';   named[9] = 'HDR-Final'; named[10] = 'HDR-Deck';
+  named[11] = 'HDR-In';     named[12] = 'HDR-Out';  named[14] = 'HDR-Summary';
+  named[15] = 'HDR-Internal';
+  const full = setupDialog([Array.from(named, v => v === undefined ? '' : v)]);
+
+  // Every Daily WOP column the import writes has to appear, not just the two
+  // that EOD uses. A column missing here is a column nobody is checking.
+  ['F', 'G', 'H', 'J', 'K', 'L', 'M', 'O', 'P'].forEach(function (letter) {
+    checkTruthy('check setup: lists column ' + letter,
+      full.includes('<b>' + letter + '</b>'));
+  });
+  checkTruthy('check setup: lists the name column', full.includes('<b>A</b>'));
+  checkTruthy('check setup: shows the headings found from the sheet',
+    full.includes('HDR-Pages') && full.includes('HDR-Summary'));
+
+  // K is configured twice -- once by EOD, once by the import -- and is one
+  // column, so it gets one row naming both uses.
+  check('check setup: K appears once', (full.match(/<b>K<\/b>/g) || []).length, 1);
+  checkTruthy('check setup: K names both of its uses',
+    full.includes('Deck update / paperwork') && full.includes('Deck update (Y)'));
+
+  // Row 1 left blank as a spacer: the heading is really in row 2.
+  const spacer = setupDialog([
+    new Array(26).fill(''),
+    Array.from(named, v => v === undefined ? '' : v)
+  ]);
+  checkTruthy('check setup: falls back to row 2 for a heading',
+    spacer.includes('HDR-Pages'));
+  checkTruthy('check setup: says which row it read',
+    spacer.includes('(row 2)'));
+  checkTruthy('check setup: does not call a row-2 heading missing',
+    !spacer.includes('no heading in row 1 or 2'));
+
+  // Blank in both rows is worth saying plainly.
+  const bare = setupDialog([new Array(26).fill(''), new Array(26).fill('')]);
+  checkTruthy('check setup: blank in both rows is reported',
+    bare.includes('no heading in row 1 or 2'));
+}
+
+// 45c. The column plan is built from the config, not written out by hand.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const plan = api.wopColumnPlan_();
+  const columns = plan.map(e => e.column);
+
+  check('plan: in sheet order', columns.slice().sort((a, b) => a - b), columns);
+  check('plan: one entry per column', new Set(columns).size, columns.length);
+  api.CONFIG.RADIUS.FIELDS.forEach(function (field) {
+    checkTruthy('plan: covers ' + field.label, columns.indexOf(field.column) !== -1);
+  });
+  checkTruthy('plan: covers the name column',
+    columns.indexOf(api.CONFIG.WOP_COL.NAME) !== -1);
+
+  // A blank cell is not a heading, and neither is a whitespace-only one.
+  check('header: row 1 wins when it has text',
+    api.headerFor_([['Pages'], ['Ignored']], 1), { text: 'Pages', row: 1 });
+  check('header: blank row 1 defers to row 2',
+    api.headerFor_([['   '], ['Pages']], 1), { text: 'Pages', row: 2 });
+  check('header: blank in both is no heading',
+    api.headerFor_([[''], ['']], 1), { text: '', row: 0 });
+  check('header: a single header row still works',
+    api.headerFor_([['Pages']], 1), { text: 'Pages', row: 1 });
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

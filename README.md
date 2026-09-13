@@ -9,7 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
-| `Setup.gs` | **Tools → Check setup**: which column every setting points at, next to the header actually sitting there. |
+| `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
