@@ -65,13 +65,22 @@ harmless option for cells that already hold something —
 leaves everything else be.
 
 Set `CONFIG.RADIUS.RUN_ON_EOD` to `false` to keep it to its own menu item. If
-it is on but the cookie or the Instruction Manager URL is missing, EOD still
-runs its own work and says in the report why the import did not.
+it is on but the cookie or the roster settings are missing, EOD still runs its
+own work and says in the report why the import did not.
 
-Fetches the **Instruction Manager** page (`/AnswerKey/AnswerkeyCheckin`), which
-lists today's checked-in students with a "DWP 2.0" link per row, matches those
-names against column A of the highlighted Daily WOP rows, and reads each
-student's DWP page from the link on their own row.
+Asks Radius for the **Instruction Manager roster**
+(`POST /AnswerKey/GetStudentDataSource`, with `CONFIG.RADIUS.CENTER_ID` as the
+centre), matches those names against column A of the highlighted Daily WOP
+rows, and reads each student's own DWP page.
+
+The Instruction Manager **page** is deliberately not what gets fetched. Its
+student grid is assembled in the browser out of `localStorage`, so the HTML
+that arrives over the wire carries the column definitions and not one student
+— there is nothing on it to scrape, however many students are checked in. The
+endpoint above is where that grid gets its data, and it hands over the four
+ids (`studentId`, `attendanceId`, `centerId`, `dwpEntryId`) that the DWP link
+is built from, rather than a rendered link. That is the same way the page
+itself builds the link, so no id is ever guessed.
 
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
@@ -238,15 +247,20 @@ Roster names and Daily WOP names are typed by different people, so matching
 ignores case and spacing and treats `Doe, Jane` as `Jane Doe`. The Daily WOP
 side reuses `extractName_`, so a leading appointment time is stripped first.
 
-A name that doesn't match is reported as *not checked in yet, or spelled
-differently* — distinct from a student who **is** on the roster but has no DWP
-link yet.
+A name that doesn't match is reported as *spelled differently, or the wrong
+centre* — kept distinct from a student who is on the roster but **has not
+checked in**, and from one who has checked in but **has no DWP 2.0 yet**.
+
+Two students whose names normalise to the same thing are refused rather than
+guessed at. A Daily WOP row cannot say which of them it means, and the
+student-name guard below would confirm either one, so neither is safe.
 
 ### Notes
 
-- Columns on the Instruction Manager are located by **header text**, not
-  position, so reordering them on the Radius side doesn't break the parser.
 - The roster is fetched once per run, then one page per matched student.
+- `CONFIG.RADIUS.CENTER_ID` is your centre number as Radius writes it. A
+  virtual centre is prefixed with `v`, and more than one can be listed:
+  `'2514,v972'`.
 - Nothing is written until every row has been attempted.
 - There is a `FETCH_DELAY_MS` pause between fetches. Radius is someone else's
   server.

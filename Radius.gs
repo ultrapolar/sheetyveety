@@ -1,12 +1,16 @@
 /**
  * Radius import.
  *
- * Fetches the Instruction Manager page, which lists today's checked-in
- * students and carries a "DWP 2.0" link on each row. That link already holds
- * every id the DWP page needs, so nothing has to be catalogued or derived --
- * the roster is fetched once, names are matched against column A of the
- * highlighted Daily WOP rows, and each student's DWP page is read from the
- * link on their own row.
+ * Asks Radius for the Instruction Manager's roster, which lists the centre's
+ * students along with the ids each "DWP 2.0" link is built from, so nothing
+ * has to be catalogued or derived. The roster is fetched once, names are
+ * matched against column A of the highlighted Daily WOP rows, and each
+ * student's own DWP page is read.
+ *
+ * Note that the Instruction Manager *page* is not what gets fetched. Its
+ * student grid is assembled in the browser out of localStorage, so the HTML
+ * that arrives over the wire holds the column definitions and not one
+ * student. The roster comes from the endpoint that grid is filled from.
  *
  * One piece is still unfinished, marked NEEDS HTML below: RADIUS_EXTRACTORS,
  * which pulls the actual values out of a DWP page. It fails with an
@@ -88,6 +92,47 @@ function radiusFetch_(url) {
   return html;
 }
 
+/**
+ * Posts a JSON body to Radius and hands back the decoded reply.
+ *
+ * Radius answers these with JSON, so anything else coming back -- an HTML page,
+ * an empty body -- means the request did not reach the endpoint as a signed-in
+ * user, whatever the status code claims.
+ */
+function radiusPostJson_(url, payload) {
+  const response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json; charset=utf-8',
+    payload: JSON.stringify(payload),
+    headers: { Cookie: radiusCookie_() },
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+
+  const status = response.getResponseCode();
+  const body = response.getContentText();
+
+  if (status === 401 || status === 403) {
+    throw new Error('Radius rejected the session cookie (HTTP ' + status +
+      '). Log in again and re-run Radius → Set session cookie.');
+  }
+  if (status >= 400) {
+    throw new Error('Radius returned HTTP ' + status + ' for ' + url);
+  }
+  if (looksLikeLoginPage_(body, url)) {
+    throw new Error('Radius returned the sign-in page, so the stored cookie has ' +
+      'expired. Log in again and re-run Radius → Set session cookie.');
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch (err) {
+    throw new Error('Radius did not return data for ' + url + '. The stored ' +
+      'cookie has most likely expired — log in again and re-run ' +
+      'Radius → Set session cookie.');
+  }
+}
+
 // ------------------------------------------------------------------
 // HTML helpers
 //
@@ -117,13 +162,6 @@ function htmlCellText_(cellHtml) {
   ).replace(/\s+/g, ' ').trim();
 }
 
-function absoluteRadiusUrl_(href) {
-  const url = decodeHtmlEntities_(String(href).trim());
-  if (/^https?:\/\//i.test(url)) return url;
-  if (url.charAt(0) === '/') return CONFIG.RADIUS.BASE_URL + url;
-  return CONFIG.RADIUS.BASE_URL + '/' + url;
-}
-
 /**
  * Names are compared loosely, because the roster and the Daily WOP sheet are
  * typed by different people. Case and spacing are ignored, and "Doe, Jane" is
@@ -148,100 +186,103 @@ function splitTableCells_(rowHtml) {
   return cells;
 }
 
-/** Pulls a DWP link out of a chunk of row HTML, href or onclick alike. */
-function findDwpLink_(html) {
-  const direct = String(html).match(/href\s*=\s*["']([^"']*\/DWP\/[^"']*)["']/i);
-  if (direct) return absoluteRadiusUrl_(direct[1]);
-
-  const loose = String(html).match(/((?:https?:\/\/[^\s"'<>]+)?\/DWP\/Index\?[^\s"'<>]+)/i);
-  if (loose) return absoluteRadiusUrl_(loose[1]);
-
-  return null;
-}
-
 // ------------------------------------------------------------------
 // The Instruction Manager roster
 // ------------------------------------------------------------------
 
 /**
- * Reads the Instruction Manager table into a name -> DWP link lookup.
+ * Builds the DWP 2.0 address for one roster entry.
  *
- * Columns are located by their header text rather than by position, so
- * reordering them on the Radius side does not break this.
+ * The four ids come straight from the roster, which is how the page itself
+ * builds this link. No id is derived or guessed.
  */
-function parseInstructionManager_(html) {
-  const rows = [];
-  const rowPattern = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let match;
-  while ((match = rowPattern.exec(html)) !== null) rows.push(match[1]);
+function dwpUrl_(row) {
+  if (!row.AttendanceId || !row.DWPEntryId) return null;
+  return CONFIG.RADIUS.BASE_URL + '/DWP/Index' +
+    '?studentId=' + encodeURIComponent(row.StudentId) +
+    '&attendanceId=' + encodeURIComponent(row.AttendanceId) +
+    '&centerId=' + encodeURIComponent(row.CenterId) +
+    '&dwpEntryId=' + encodeURIComponent(row.DWPEntryId);
+}
 
-  if (!rows.length) {
-    throw new Error('No table rows found on the Instruction Manager page. Check ' +
-      'that CONFIG.RADIUS.INSTRUCTION_MANAGER_URL points at the right page.');
+/**
+ * Turns the roster reply into a name -> DWP link lookup.
+ *
+ * The Instruction Manager *page* is no use for this. Its student grid is built
+ * in the browser out of localStorage, so the HTML that arrives over the wire
+ * carries the column definitions and not one student -- there is nothing to
+ * scrape. The grid is filled from this endpoint, so we ask it directly, and it
+ * hands over the ids rather than a rendered link.
+ */
+function parseRoster_(data) {
+  if (!data || String(data.Status || '') !== 'Success') {
+    throw new Error('The Instruction Manager roster came back without data' +
+      (data && data.Message ? ' (' + data.Message + ')' : '') +
+      '. Check that CONFIG.RADIUS.CENTER_ID is your centre number.');
   }
 
-  let nameIndex = -1;
-  let dwpIndex = -1;
-  let headerRow = -1;
-
-  for (let r = 0; r < rows.length && headerRow === -1; r++) {
-    const cells = splitTableCells_(rows[r]).map(htmlCellText_);
-    for (let c = 0; c < cells.length; c++) {
-      if (/student\s*name/i.test(cells[c])) nameIndex = c;
-      if (/dwp/i.test(cells[c])) dwpIndex = c;
-    }
-    if (nameIndex !== -1) headerRow = r;
-    else { nameIndex = -1; dwpIndex = -1; }
-  }
-
-  if (headerRow === -1) {
-    throw new Error('Could not find a "Student Name" column on the Instruction ' +
-      'Manager page. Its layout may have changed.');
-  }
-
+  const rows = data.DataSource || [];
   const byName = {};
   let withLink = 0;
   let withoutLink = 0;
 
-  for (let r = headerRow + 1; r < rows.length; r++) {
-    const cells = splitTableCells_(rows[r]);
-    if (cells.length <= nameIndex) continue;
+  rows.forEach(function (row) {
+    const name = String(row.StudentName || '').trim();
+    if (!name) return;
 
-    const name = htmlCellText_(cells[nameIndex]);
-    if (!name) continue;
+    const key = normalizeStudentName_(name);
 
-    // Prefer the DWP column, but fall back to anywhere in the row -- the link
-    // is unmistakable wherever it sits.
-    const url = (dwpIndex !== -1 && cells.length > dwpIndex
-      ? findDwpLink_(cells[dwpIndex])
-      : null) || findDwpLink_(rows[r]);
+    // Two students sharing a name cannot be told apart from a Daily WOP row,
+    // and the DWP page would confirm either of them, so neither is safe.
+    if (byName[key]) {
+      byName[key].ambiguous = true;
+      return;
+    }
 
+    const url = dwpUrl_(row);
     if (url) withLink++; else withoutLink++;
-    byName[normalizeStudentName_(name)] = { name: name, url: url };
-  }
+
+    byName[key] = {
+      name: name,
+      url: url,
+      checkedIn: Boolean(row.AttendanceId),
+      ambiguous: false
+    };
+  });
 
   return { byName: byName, withLink: withLink, withoutLink: withoutLink };
 }
 
-/** Fetches and parses the roster. One request, however many students. */
-function loadInstructionManager_() {
-  const url = String(CONFIG.RADIUS.INSTRUCTION_MANAGER_URL || '').trim();
+/** Fetches the roster. One request, however many students. */
+function loadRoster_() {
+  const url = String(CONFIG.RADIUS.ROSTER_URL || '').trim();
   if (!url) {
-    throw new Error('Set CONFIG.RADIUS.INSTRUCTION_MANAGER_URL in Config.gs to the ' +
-      'address of the Instruction Manager page, then run this again.');
+    throw new Error('Set CONFIG.RADIUS.ROSTER_URL in Config.gs, then run this again.');
   }
-  return parseInstructionManager_(radiusFetch_(url));
+  const centers = String(CONFIG.RADIUS.CENTER_ID || '').trim();
+  if (!centers) {
+    throw new Error('Set CONFIG.RADIUS.CENTER_ID in Config.gs to your centre ' +
+      'number, then run this again.');
+  }
+  return parseRoster_(radiusPostJson_(url, { centers: centers }));
 }
 
-/** Finds a Daily WOP name on the roster, and says why if it is not there. */
+/** Finds a Daily WOP name on the roster, and says why if it is not usable. */
 function lookupRosterEntry_(roster, name) {
   const entry = roster.byName[normalizeStudentName_(name)];
   if (!entry) {
-    throw new Error('not on the Instruction Manager — have they checked in yet, ' +
-      'and is the name spelled the same way in both places?');
+    throw new Error('not on the Instruction Manager — is the name spelled the ' +
+      'same way in both places, and is CONFIG.RADIUS.CENTER_ID the right centre?');
+  }
+  if (entry.ambiguous) {
+    throw new Error('matches more than one student on the Instruction Manager, ' +
+      'so there is no way to tell which session is theirs.');
+  }
+  if (!entry.checkedIn) {
+    throw new Error('is on the Instruction Manager but has not checked in.');
   }
   if (!entry.url) {
-    throw new Error('is on the Instruction Manager but has no DWP 2.0 link yet.');
+    throw new Error('has checked in but has no DWP 2.0 yet.');
   }
   return entry;
 }
@@ -751,11 +792,14 @@ function extractRadiusFields_(html) {
 /** Menu entry: checks the cookie and the roster without touching the sheet. */
 function testRadiusConnection() {
   try {
-    const roster = loadInstructionManager_();
+    const roster = loadRoster_();
     const total = roster.withLink + roster.withoutLink;
-    showError_('Connected to Radius. The Instruction Manager lists ' + total +
-      ' student(s), ' + roster.withLink + ' with a DWP 2.0 link' +
-      (roster.withoutLink ? ' and ' + roster.withoutLink + ' without one yet' : '') + '.');
+    showError_('Connected to Radius. Centre ' + CONFIG.RADIUS.CENTER_ID +
+      ' lists ' + total + ' student(s), ' + roster.withLink +
+      ' with a DWP 2.0 ready to read' +
+      (roster.withoutLink
+        ? ' and ' + roster.withoutLink + ' not checked in or without one yet'
+        : '') + '.');
   } catch (err) {
     showError_(err.message);
   }
@@ -803,7 +847,7 @@ function buildRadiusPlan_(sheets, selection, log) {
       selection.numRows, field.column);
   });
 
-  const roster = loadInstructionManager_();
+  const roster = loadRoster_();
 
   for (let i = 0; i < selection.numRows; i++) {
     if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
@@ -1040,7 +1084,8 @@ function clearRadiusPlan_(token, count) {
 function radiusIsConfigured_() {
   return Boolean(
     PropertiesService.getScriptProperties().getProperty(CONFIG.RADIUS.COOKIE_PROPERTY) &&
-    String(CONFIG.RADIUS.INSTRUCTION_MANAGER_URL || '').trim());
+    String(CONFIG.RADIUS.ROSTER_URL || '').trim() &&
+    String(CONFIG.RADIUS.CENTER_ID || '').trim());
 }
 
 /** The columns the import writes, as letters, for a report line. */

@@ -27,8 +27,9 @@ function loadScript(context) {
   deleteLegacyHistoryColumn, parseEntryMonthDay_, inferEntryDates_,
   splitHistoryEntries_, planHistoryColumnRepair_,
   looksLikeLoginPage_, radiusFetch_, importRadiusData, RADIUS_EXTRACTORS,
-  parseInstructionManager_, normalizeStudentName_, htmlCellText_,
-  findDwpLink_, lookupRosterEntry_, testRadiusConnection,
+  parseRoster_, loadRoster_, dwpUrl_, radiusPostJson_,
+  normalizeStudentName_, htmlCellText_,
+  lookupRosterEntry_, testRadiusConnection,
   inputValueById_, textareaContentById_, tripleSwitchRaw_, tripleSwitchLabel_,
   dwpAssignmentRows_, assignmentCheckboxChecked_, pageStudentName_,
   extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
@@ -162,6 +163,25 @@ function lastDialog(s) {
 // ==========================================================================
 // EOD
 // ==========================================================================
+// The roster arrives as JSON, not as a page. The Instruction Manager builds its
+// student grid in the browser, so its HTML carries no students at all -- this
+// is the call that grid is filled from, and it hands over ids, not links.
+function rosterReply(students) {
+  return JSON.stringify({
+    Status: 'Success',
+    DataSource: students.map((entry, i) => {
+      const row = typeof entry === 'string' ? { name: entry } : entry;
+      return {
+        StudentName: row.name,
+        StudentId: row.studentId === undefined ? 1000 + i : row.studentId,
+        AttendanceId: row.attendanceId === undefined ? 2000 + i : row.attendanceId,
+        DWPEntryId: row.dwpEntryId === undefined ? 3000 + i : row.dwpEntryId,
+        CenterId: 2514
+      };
+    })
+  });
+}
+
 const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Legacy', 'Archive'];
 const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHIVE: 14 };
 
@@ -941,77 +961,123 @@ const REPAIR_FILLER_ROWS = [
   check('fetch: a good page returns cleanly', fetchCase('<div>real page</div>', 200, 'abc=1'), null);
 }
 
-// 48. Parsing the Instruction Manager table.
+// 48. Reading the Instruction Manager roster.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
 
-  // Mirrors the real column layout, including the ones we ignore.
-  const ROSTER = `
-    <table>
-      <thead><tr>
-        <th>Pin</th><th>Student Name</th><th>PK &amp; FO Answer Keys</th>
-        <th>WOB<br>Answer Keys</th><th>Answer Key Decks</th><th>Duration</th>
-        <th>DWP 2.0</th><th>Start/End Schoolwork</th><th>Out</th>
-      </tr></thead>
-      <tbody>
-        <tr>
-          <td>1234</td><td>Jane Doe</td><td>-</td><td>-</td><td>-</td><td>60</td>
-          <td><a href="/DWP/Index?studentId=2942358&amp;attendanceId=86722299&amp;centerId=2514&amp;dwpEntryId=21711167">DWP 2.0</a></td>
-          <td>3:30</td><td></td>
-        </tr>
-        <tr>
-          <td>5678</td><td>John Roe</td><td>-</td><td>-</td><td>-</td><td>60</td>
-          <td><a href="https://radius.mathnasium.com/DWP/Index?studentId=111&amp;attendanceId=222&amp;centerId=2514&amp;dwpEntryId=333">DWP 2.0</a></td>
-          <td>4:00</td><td></td>
-        </tr>
-        <tr>
-          <td>9999</td><td>Not Checkedin</td><td>-</td><td>-</td><td>-</td><td>60</td>
-          <td></td><td></td><td></td>
-        </tr>
-      </tbody>
-    </table>`;
+  const roster = api.parseRoster_(JSON.parse(rosterReply([
+    { name: 'Jane Doe', studentId: 2942358, attendanceId: 86722299, dwpEntryId: 21711167 },
+    { name: 'John Roe' },
+    { name: 'Not Checkedin', attendanceId: null, dwpEntryId: null },
+    { name: 'No Dwp Yet', dwpEntryId: null }
+  ])));
 
-  const roster = api.parseInstructionManager_(ROSTER);
-
-  check('roster: counts links', [roster.withLink, roster.withoutLink], [2, 1]);
-  check('roster: relative href made absolute',
+  check('roster: counts usable links', [roster.withLink, roster.withoutLink], [2, 2]);
+  check('roster: link built from the four ids',
     roster.byName['jane doe'].url,
-    'https://radius.mathnasium.com/DWP/Index?studentId=2942358&attendanceId=86722299' +
-    '&centerId=2514&dwpEntryId=21711167');
-  check('roster: absolute href left alone',
-    roster.byName['john roe'].url,
-    'https://radius.mathnasium.com/DWP/Index?studentId=111&attendanceId=222' +
-    '&centerId=2514&dwpEntryId=333');
-  check('roster: student with no link is recorded but has no url',
-    roster.byName['not checkedin'].url, null);
+    'https://radius.mathnasium.com/DWP/Index?studentId=2942358' +
+    '&attendanceId=86722299&centerId=2514&dwpEntryId=21711167');
   check('roster: display name preserved', roster.byName['jane doe'].name, 'Jane Doe');
-  checkTruthy('roster: header row is not treated as a student',
-    roster.byName['student name'] === undefined);
 
-  // Columns are found by header text, so reordering them changes nothing.
-  const REORDERED = ROSTER
-    .replace('<th>Student Name</th><th>PK &amp; FO Answer Keys</th>',
-             '<th>PK &amp; FO Answer Keys</th><th>Student Name</th>')
-    .replace(/<td>1234<\/td><td>Jane Doe<\/td><td>-<\/td>/,
-             '<td>1234</td><td>-</td><td>Jane Doe</td>');
-  check('roster: survives a reordered Student Name column',
-    api.parseInstructionManager_(REORDERED).byName['jane doe'].url,
-    roster.byName['jane doe'].url);
+  // Two different reasons for having no link, told apart rather than merged.
+  check('roster: never checked in has no url',
+    roster.byName['not checkedin'].url, null);
+  checkTruthy('roster: never checked in is marked as such',
+    !roster.byName['not checkedin'].checkedIn);
+  check('roster: checked in without a DWP has no url',
+    roster.byName['no dwp yet'].url, null);
+  checkTruthy('roster: checked in without a DWP is still checked in',
+    roster.byName['no dwp yet'].checkedIn);
 
-  // A page without the expected table should say so, not return nothing.
+  // A reply that is not a success is a failure to say out loud.
   let err = '';
-  try { api.parseInstructionManager_('<div>no tables here</div>'); }
+  try { api.parseRoster_({ Status: 'Error', Message: 'no centre' }); }
   catch (e) { err = e.message; }
-  checkTruthy('roster: empty page explains itself', err.includes('No table rows'));
+  checkTruthy('roster: a failed reply explains itself', err.includes('no centre'));
 
   err = '';
-  try { api.parseInstructionManager_('<table><tr><td>a</td></tr></table>'); }
-  catch (e) { err = e.message; }
-  checkTruthy('roster: missing Student Name column explains itself',
-    err.includes('Student Name'));
+  try { api.parseRoster_(null); } catch (e) { err = e.message; }
+  checkTruthy('roster: an empty reply explains itself', err.includes('CENTER_ID'));
+
+  // An empty roster is a real answer, not an error.
+  const none = api.parseRoster_({ Status: 'Success', DataSource: [] });
+  check('roster: nobody checked in is not an error',
+    [none.withLink, none.withoutLink], [0, 0]);
+}
+
+// 48b. Two students sharing a name cannot be told apart, so neither is used.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const roster = api.parseRoster_(JSON.parse(rosterReply([
+    { name: 'Jane Doe', studentId: 1 },
+    { name: 'jane  doe', studentId: 2 }
+  ])));
+
+  checkTruthy('duplicate: flagged', roster.byName['jane doe'].ambiguous);
+
+  let err = '';
+  try { api.lookupRosterEntry_(roster, 'Jane Doe'); } catch (e) { err = e.message; }
+  checkTruthy('duplicate: refused rather than guessed',
+    err.includes('more than one student'));
+}
+
+// 48c. The roster request itself: a signed-in POST carrying the centre.
+{
+  function rosterCase(body, code) {
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [], null);
+    const api = loadScript(ctx);
+    h.scriptProps.RADIUS_COOKIE = 'session=abc';
+    h.fetchHandler.value = () => ({ code: code === undefined ? 200 : code, body: body });
+    let err = '';
+    try { api.loadRoster_(); } catch (e) { err = e.message; }
+    return { call: h.fetchLog[0], err: err, api: api, ctx: ctx, harness: h };
+  }
+
+  const ok = rosterCase(rosterReply(['Jane Doe']));
+  check('roster call: no error', ok.err, '');
+  check('roster call: hits the data source', ok.call.url,
+    'https://radius.mathnasium.com/AnswerKey/GetStudentDataSource');
+  check('roster call: posted', ok.call.params.method, 'post');
+  check('roster call: sends the centre',
+    JSON.parse(ok.call.params.payload).centers, '2514');
+  check('roster call: sends the session cookie',
+    ok.call.params.headers.Cookie, 'session=abc');
+  checkTruthy('roster call: asks for JSON',
+    /json/i.test(String(ok.call.params.contentType)));
+
+  // An expired session can land on a page that is not the login form. That is
+  // not JSON either, and guessing at it would be worse than saying so.
+  checkTruthy('roster call: an HTML reply is reported, not parsed',
+    rosterCase('<html><body>Session timed out</body></html>').err.includes('cookie'));
+  checkTruthy('roster call: the sign-in page is still caught',
+    rosterCase('<form action="/Account/Login"></form>').err.includes('expired'));
+  checkTruthy('roster call: a rejected cookie is reported',
+    rosterCase('{}', 403).err.includes('rejected'));
+
+  // Without a centre there is nothing to ask for, and no request is made.
+  const noCentre = (() => {
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [], null);
+    const api = loadScript(ctx);
+    h.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext('CONFIG.RADIUS.CENTER_ID = "";', ctx);
+    let err = '';
+    try { api.loadRoster_(); } catch (e) { err = e.message; }
+    return { err: err, calls: h.fetchLog.length };
+  })();
+  checkTruthy('roster call: no centre says what to set',
+    noCentre.err.includes('CENTER_ID'));
+  check('roster call: no centre asks Radius for nothing', noCentre.calls, 0);
 }
 
 // 49. Name matching is forgiving about case, spacing and "Last, First".
@@ -1029,34 +1095,36 @@ const REPAIR_FILLER_ROWS = [
 
   check('cell text: tags and entities stripped',
     api.htmlCellText_('<td><b>Jane</b>&nbsp;&amp;&nbsp;<i>Doe</i></td>'), 'Jane & Doe');
-
-  check('link: found via onclick rather than href',
-    api.findDwpLink_('<td onclick="go(\'/DWP/Index?studentId=5&attendanceId=6\')">x</td>'),
-    'https://radius.mathnasium.com/DWP/Index?studentId=5&attendanceId=6');
-  check('link: absent', api.findDwpLink_('<td>nothing</td>'), null);
 }
 
-// 50. Roster lookup failures distinguish "not checked in" from "no link yet".
+// 50. Roster lookup failures each say something different.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const roster = { byName: {
-    'jane doe': { name: 'Jane Doe', url: 'https://x/DWP/Index?a=1' },
-    'no link': { name: 'No Link', url: null }
-  } };
+  const roster = api.parseRoster_(JSON.parse(rosterReply([
+    { name: 'Jane Doe', studentId: 7, attendanceId: 8, dwpEntryId: 9 },
+    { name: 'No Dwp', dwpEntryId: null },
+    { name: 'Not In Yet', attendanceId: null, dwpEntryId: null }
+  ])));
 
   check('lookup: found', api.lookupRosterEntry_(roster, 'JANE DOE').url,
-    'https://x/DWP/Index?a=1');
+    'https://radius.mathnasium.com/DWP/Index?studentId=7&attendanceId=8' +
+    '&centerId=2514&dwpEntryId=9');
 
   let err = '';
   try { api.lookupRosterEntry_(roster, 'Ghost Student'); } catch (e) { err = e.message; }
-  checkTruthy('lookup: absent says check-in', err.includes('checked in'));
+  checkTruthy('lookup: absent points at the name and the centre',
+    err.includes('spelled') && err.includes('CENTER_ID'));
 
   err = '';
-  try { api.lookupRosterEntry_(roster, 'No Link'); } catch (e) { err = e.message; }
-  checkTruthy('lookup: no link says so', err.includes('no DWP 2.0 link'));
+  try { api.lookupRosterEntry_(roster, 'Not In Yet'); } catch (e) { err = e.message; }
+  checkTruthy('lookup: not checked in says so', err.includes('has not checked in'));
+
+  err = '';
+  try { api.lookupRosterEntry_(roster, 'No Dwp'); } catch (e) { err = e.message; }
+  checkTruthy('lookup: no DWP yet says so', err.includes('no DWP 2.0 yet'));
 }
 
 // 51. Extracting from a real DWP page. This one is a live session with
@@ -1338,13 +1406,12 @@ const REPAIR_FILLER_ROWS = [
       { start: 1, rows: 1 }, '2026-08-22');
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
       s.context);
     const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
-        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        ? rosterReply(['Amalie Laz'])
         : DONE });
     confirmRadiusImport(s);
     return s;
@@ -1480,7 +1547,7 @@ const REPAIR_FILLER_ROWS = [
       [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
       s.context);
 
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
@@ -1493,8 +1560,7 @@ const REPAIR_FILLER_ROWS = [
 
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
-        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        ? rosterReply(['Amalie Laz'])
         : page });
     confirmRadiusImport(s);
     return {
@@ -1571,7 +1637,7 @@ const REPAIR_FILLER_ROWS = [
     if (!opts.unconfigured) {
       s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
       vm.runInContext(
-        'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+        'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
         s.context);
     }
     if (opts.runOnEod === false) {
@@ -1581,8 +1647,7 @@ const REPAIR_FILLER_ROWS = [
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
-        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        ? rosterReply(['Amalie Laz'])
         : page });
 
     s.api.processWopToDeck();
@@ -1713,16 +1778,14 @@ const REPAIR_FILLER_ROWS = [
     }
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
       s.context);
 
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
-        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">a</a></td></tr>' +
-          '<tr><td>John Roe</td><td><a href="/DWP/Index?studentId=2">b</a></td></tr>' +
-          '</table>'
+        ? rosterReply([{ name: 'Amalie Laz', studentId: 1 },
+                       { name: 'John Roe', studentId: 2 }])
         : page.replace(/<title>[^<]*<\/title>/,
             url.indexOf('studentId=2') !== -1 ? '<title>John Roe</title>'
                                              : '<title>Amalie Laz</title>') });
@@ -1787,13 +1850,12 @@ const REPAIR_FILLER_ROWS = [
     s.wop.values[0][7] = 'typed by hand';     // column H
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
-      'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
       s.context);
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
-        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        ? rosterReply(['Amalie Laz'])
         : page });
     return { s: s, preview: confirmRadiusImport(s, { mode: mode }) };
   }
@@ -1828,13 +1890,12 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
   clean.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
   vm.runInContext(
-    'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+    'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
     clean.context);
   const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
   clean.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
-      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-        '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      ? rosterReply(['Amalie Laz'])
       : page });
   clean.api.importRadiusData();
   checkTruthy('no clash: no append-or-overwrite block',
@@ -1877,14 +1938,13 @@ const REPAIR_FILLER_ROWS = [
     [{ name: '9:59 AM Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
     s.context);
 
   const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
   s.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
-      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-        '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      ? rosterReply(['Amalie Laz'])
       : LIVE });
 
   confirmRadiusImport(s);
@@ -1904,14 +1964,13 @@ const REPAIR_FILLER_ROWS = [
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
 
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM";',
     s.context);
 
   const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
   s.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
-      ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
-        '<tr><td>Jane Doe</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+      ? rosterReply(['Jane Doe'])
       : LIVE });  // page is actually Amalie Laz
 
   confirmRadiusImport(s);
@@ -1929,11 +1988,11 @@ const REPAIR_FILLER_ROWS = [
     ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-  vm.runInContext('CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "";', s.context);
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "";', s.context);
   confirmRadiusImport(s);
   check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
   checkTruthy('unset roster URL: says what to set',
-    s.harness.alerts.some(a => String(a).includes('INSTRUCTION_MANAGER_URL')));
+    s.harness.alerts.some(a => String(a).includes('ROSTER_URL')));
 }
 
 

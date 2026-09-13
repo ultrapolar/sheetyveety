@@ -59,6 +59,8 @@ const CONFIG = {
   // ------------------------------------------------------------------
   RADIUS: {
     BASE_URL: 'https://radius.mathnasium.com',
+    // Your centre number, as Radius writes it. A virtual centre is prefixed
+    // with v, and more than one can be listed: '2514,v972'.
     CENTER_ID: '2514',
 
     // Script Property holding a session cookie copied from a logged-in
@@ -66,10 +68,11 @@ const CONFIG = {
     // here, or it ends up in the repo.
     COOKIE_PROPERTY: 'RADIUS_COOKIE',
 
-    // The Instruction Manager page, which lists today's checked-in students
-    // and carries a DWP 2.0 link per row. Paste its address here -- open the
-    // page in a browser and copy the URL from the address bar.
-    INSTRUCTION_MANAGER_URL: 'https://radius.mathnasium.com/AnswerKey/AnswerkeyCheckin',
+    // Where the Instruction Manager gets its student list, and the ids each
+    // DWP 2.0 link is built from. This is not the page you visit: that page
+    // builds its grid in the browser, so it arrives here with no students on
+    // it at all. This endpoint answers with the roster itself.
+    ROSTER_URL: 'https://radius.mathnasium.com/AnswerKey/GetStudentDataSource',
 
     // Which values to pull out of each DWP page, and which Daily WOP column
     // each one lands in. Add entries here as more values are identified --
