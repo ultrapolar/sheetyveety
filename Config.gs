@@ -117,6 +117,11 @@ const CONFIG = {
       NOTE_FIELD: 'internalNotes'
     },
 
+    // Run the import automatically as the first step of the EOD batch, so the
+    // instruction it writes into column K is in place before EOD reads it.
+    // Set false to keep the import to its own menu item.
+    RUN_ON_EOD: true,
+
     // Pause between page fetches, in milliseconds. Radius is someone else's
     // server; there is no reason to hammer it.
     FETCH_DELAY_MS: 300,

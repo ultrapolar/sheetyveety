@@ -28,13 +28,22 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-378 assertions covering the parsing rules and both scripts end to end,
+394 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
 ---
 
 ## Radius import
+
+**Runs automatically as the first step of the EOD batch**, then again on demand
+from **Radius → Import for highlighted rows**. Doing it inside EOD is what makes
+column K work: the import writes the instruction, and the rest of EOD then acts
+on it in the same pass, so there is no way to run the two the wrong way round.
+
+Set `CONFIG.RADIUS.RUN_ON_EOD` to `false` to keep it to its own menu item. If
+it is on but the cookie or the Instruction Manager URL is missing, EOD still
+runs its own work and says in the report why the import did not.
 
 Fetches the **Instruction Manager** page (`/AnswerKey/AnswerkeyCheckin`), which
 lists today's checked-in students with a "DWP 2.0" link per row, matches those
@@ -56,7 +65,7 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
 | O | Session summary | the note text |
-| P | Internal notes | the note text, plus any timing notes |
+| P | Internal notes | the note text, plus timing notes, plus `MLS (3)` |
 
 Yes/no answers write a bare **`Y`**, matching how the sheet is filled in by
 hand; a No writes nothing rather than the word "No". Times are plain times,
@@ -105,6 +114,16 @@ Some details that fall out of this:
 The field keys `TIMING` works from are asserted to resolve against the real
 field list, because a typo there fails silently — the review simply sees no
 times and does nothing.
+
+### What column P ends up holding
+
+The internal note from Radius, then anything the run worked out, joined by `|`:
+
+```
+she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early | MLS (3)
+```
+
+The Mathlete score is last and only appears when Radius carries one.
 
 ### Column K is shared with the EOD script
 

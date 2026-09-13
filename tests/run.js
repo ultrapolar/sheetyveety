@@ -1478,15 +1478,16 @@ const REPAIR_FILLER_ROWS = [
     ['10:48 AM', '11:48 AM']);
   check('sheet: normal session is not shaded', [out.Lbg, out.Mbg],
     ['#ffffff', '#ffffff']);
-  check('sheet: normal session leaves the note alone', out.P,
-    'she doesnt shut up big L');
+  check('sheet: normal session appends only the Mathlete score', out.P,
+    'she doesnt shut up big L | MLS (3)');
 
   // A short, late, early session: shaded and annotated.
   out = runTiming('10:12 AM', '10:40 AM');
   check('sheet: odd length shades sign-in and sign-out',
     [out.Lbg, out.Mbg], ['#ff9900', '#ff9900']);
-  check('sheet: notes append to the existing internal note', out.P,
-    'she doesnt shut up big L | signed in 12 minutes late | left 20 minutes early');
+  check('sheet: notes append in order, score last', out.P,
+    'she doesnt shut up big L | signed in 12 minutes late | ' +
+    'left 20 minutes early | MLS (3)');
   checkTruthy('sheet: the report explains the shading',
     out.html.includes('neither about an hour nor about two'));
 
@@ -1494,19 +1495,100 @@ const REPAIR_FILLER_ROWS = [
   out = runTiming('10:00 AM', '11:50 AM');
   check('sheet: a double is not shaded', [out.Lbg, out.Mbg], ['#ffffff', '#ffffff']);
   check('sheet: a double is noted', out.P,
-    'she doesnt shut up big L | 2 hour session');
+    'she doesnt shut up big L | 2 hour session | MLS (3)');
 
   // Odd length with nothing to explain it: shaded, note untouched.
   out = runTiming('10:00 AM', '11:20 AM');
-  check('sheet: 80 minutes shades without annotating',
+  check('sheet: 80 minutes shades without a timing note',
     [out.Lbg, out.Mbg, out.P],
-    ['#ff9900', '#ff9900', 'she doesnt shut up big L']);
+    ['#ff9900', '#ff9900', 'she doesnt shut up big L | MLS (3)']);
 
   // Still in the centre: no sign-out, so nothing is judged.
   out = runTiming('10:30 AM', '');
-  check('sheet: no sign-out means no shading and no note',
+  check('sheet: no sign-out means no shading and no timing note',
     [out.M, out.Lbg, out.Mbg, out.P],
-    ['', '#ffffff', '#ffffff', 'she doesnt shut up big L']);
+    ['', '#ffffff', '#ffffff', 'she doesnt shut up big L | MLS (3)']);
+}
+
+// 52i. The Mathlete score on the end of the note column.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  check('score: present on the completed page',
+    api.RADIUS_EXTRACTORS.mathleteScore(
+      fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')), '3');
+  check('score: absent on an untouched page',
+    api.RADIUS_EXTRACTORS.mathleteScore(
+      fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8')), '');
+}
+
+// 52j. EOD runs the import first, then acts on what it wrote.
+{
+  function runEod(options) {
+    const opts = options || {};
+    const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+      ['Amalie Laz', 'Task One', '', '', 'Task Two, Task Three', '',
+       '', '', '', '', '', '', '', '']];
+    const s = scenario(deckRows,
+      [{ name: 'Amalie Laz', status: opts.status === undefined ? '' : opts.status }],
+      { start: 1, rows: 1 }, '2026-08-22');
+
+    if (!opts.unconfigured) {
+      s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+      vm.runInContext(
+        'CONFIG.RADIUS.INSTRUCTION_MANAGER_URL = "https://radius.mathnasium.com/IM";',
+        s.context);
+    }
+    if (opts.runOnEod === false) {
+      vm.runInContext('CONFIG.RADIUS.RUN_ON_EOD = false;', s.context);
+    }
+
+    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? '<table><tr><th>Student Name</th><th>DWP 2.0</th></tr>' +
+          '<tr><td>Amalie Laz</td><td><a href="/DWP/Index?studentId=1">go</a></td></tr></table>'
+        : page });
+
+    s.api.processWopToDeck();
+    return s;
+  }
+
+  // The completed fixture reports a deck update, so the import writes Y into
+  // column K and EOD then advances the student on the strength of it.
+  let s = runEod();
+  check('EOD+import: column K carries the imported Y', s.wopStatus(0), 'Y');
+  check('EOD+import: and EOD marked it done', s.wopStatusBg(0), '#00ff00');
+  check('EOD+import: the student was advanced', s.deckCell(4, C.CURRENT), 'Task Two');
+  check('EOD+import: the finished task was archived',
+    s.deckCell(4, C.ARCHIVE), 'Task One 08/22');
+  check('EOD+import: the other columns landed too',
+    [String(s.wop.values[0][7]), String(s.wop.values[0][11])], ['33', '10:48 AM']);
+  check('EOD+import: notes and score reached column P',
+    String(s.wop.values[0][15]), 'she doesnt shut up big L | MLS (3)');
+  checkTruthy('EOD+import: the report counts the import',
+    s.harness.dialogs[0].html.includes('Imported from Radius'));
+
+  // An operator-typed P plus the imported Y means both happen in one pass.
+  s = runEod({ status: 'P' });
+  check('EOD+import: typed P and imported Y both act',
+    [s.deckCell(4, C.CURRENT), s.deckCell(4, C.PINK)], ['Task Two', 'pink']);
+
+  // Turned off, EOD behaves exactly as it did before.
+  s = runEod({ runOnEod: false });
+  check('RUN_ON_EOD off: nothing fetched', s.harness.fetchLog.length, 0);
+  check('RUN_ON_EOD off: column K untouched', s.wopStatus(0), '');
+  check('RUN_ON_EOD off: student not advanced', s.deckCell(4, C.CURRENT), 'Task One');
+
+  // On but not set up: EOD still runs, and says why the import did not.
+  s = runEod({ unconfigured: true });
+  check('unconfigured: nothing fetched', s.harness.fetchLog.length, 0);
+  checkTruthy('unconfigured: EOD says the import was skipped',
+    s.harness.alerts.concat(s.harness.dialogs.map(d => d.html))
+      .some(t => String(t).includes('Radius')));
+  check('unconfigured: EOD did not invent a status', s.wopStatus(0), '');
 }
 
 // 53. A fully completed page. This is the one that exposed the textarea bug

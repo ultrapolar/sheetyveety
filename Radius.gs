@@ -767,26 +767,18 @@ function testRadiusConnection() {
  * Nothing is written until every row has been attempted, so a failure part way
  * through does not leave half the selection filled in.
  */
-function importRadiusData() {
+/**
+ * The import itself.
+ *
+ * Takes no lock, looks up no sheets and shows nothing -- the caller owns all
+ * three, so this can run on its own from the Radius menu or as EOD's first
+ * step without the two fighting over the document lock.
+ *
+ * Writes are flushed before returning, so a caller that reads the same columns
+ * afterwards sees what the import put there.
+ */
+function runRadiusImport_(sheets, selection, log) {
   const started = Date.now();
-  const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
-    showError_('Someone else is running a batch on this spreadsheet right now.');
-    return;
-  }
-
-  let sheets;
-  let selection;
-  try {
-    sheets = getSheets_();
-    selection = getSelection_(sheets.wop);
-  } catch (err) {
-    lock.releaseLock();
-    showError_(err.message);
-    return;
-  }
-
-  const log = ActionLog_();
   const stats = { imported: 0, failed: 0 };
   const columns = {};
 
@@ -835,12 +827,18 @@ function importRadiusData() {
         const review = reviewSessionTiming_(
           valueOf(timing.SIGN_IN_FIELD), valueOf(timing.SIGN_OUT_FIELD));
 
-        if (review.notes.length) {
+        // Everything appended to the note column, in order: the timing
+        // observations, then the Mathlete score if one was given.
+        const appended = review.notes.slice();
+        const mathlete = RADIUS_EXTRACTORS.mathleteScore(html);
+        if (mathlete) appended.push('MLS (' + mathlete + ')');
+
+        if (appended.length) {
           const noteResult = results.filter(function (r) {
             return r.field.key === timing.NOTE_FIELD;
           })[0];
           if (noteResult) {
-            noteResult.value = [noteResult.value].concat(review.notes)
+            noteResult.value = [noteResult.value].concat(appended)
               .filter(function (part) { return String(part).trim() !== ''; })
               .join(' | ');
           }
@@ -901,6 +899,49 @@ function importRadiusData() {
     } catch (flushErr) {
       log.error('Save failed', 'Could not write values back: ' + flushErr.message);
     }
+  }
+
+  return stats;
+}
+
+/** True when there is enough set up for the import to be worth attempting. */
+function radiusIsConfigured_() {
+  return Boolean(
+    PropertiesService.getScriptProperties().getProperty(CONFIG.RADIUS.COOKIE_PROPERTY) &&
+    String(CONFIG.RADIUS.INSTRUCTION_MANAGER_URL || '').trim());
+}
+
+/** The columns the import writes, as letters, for a report line. */
+function radiusColumnList_() {
+  return CONFIG.RADIUS.FIELDS.map(function (f) {
+    return columnLetter_(f.column);
+  }).join(', ');
+}
+
+/** Menu entry: imports values for the highlighted Daily WOP rows. */
+function importRadiusData() {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    showError_('Someone else is running a batch on this spreadsheet right now.');
+    return;
+  }
+
+  let sheets;
+  let selection;
+  try {
+    sheets = getSheets_();
+    selection = getSelection_(sheets.wop);
+  } catch (err) {
+    lock.releaseLock();
+    showError_(err.message);
+    return;
+  }
+
+  const log = ActionLog_();
+  let stats;
+  try {
+    stats = runRadiusImport_(sheets, selection, log);
+  } finally {
     lock.releaseLock();
   }
 
@@ -912,9 +953,6 @@ function importRadiusData() {
   showReport_('Radius Import', '🔗 Import Summary', [
     { label: 'Students imported', value: stats.imported },
     { label: 'Failed', value: stats.failed, alert: stats.failed > 0 },
-    { label: 'Columns written',
-      value: CONFIG.RADIUS.FIELDS.map(function (f) {
-        return columnLetter_(f.column);
-      }).join(', ') }
+    { label: 'Columns written', value: radiusColumnList_() }
   ], log);
 }

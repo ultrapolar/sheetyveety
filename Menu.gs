@@ -13,7 +13,7 @@ function onOpen() {
     .addToUi();
 
   ui.createMenu('Radius')
-    .addItem('Import for highlighted rows', 'importRadiusData')
+    .addItem('Import for highlighted rows (also runs inside EOD)', 'importRadiusData')
     .addSeparator()
     .addItem('Set session cookie', 'setRadiusCookie')
     .addItem('Test connection', 'testRadiusConnection')
