@@ -454,15 +454,3 @@ function checkSheetSetup() {
   SpreadsheetApp.getUi().showModalDialog(
     HtmlService.createHtmlOutput(html).setWidth(460).setHeight(420), 'Check Setup');
 }
-
-/** 1 -> "A", 14 -> "N". */
-function columnLetter_(index) {
-  let letter = '';
-  let n = index;
-  while (n > 0) {
-    const remainder = (n - 1) % 26;
-    letter = String.fromCharCode(65 + remainder) + letter;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letter;
-}

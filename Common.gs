@@ -235,6 +235,24 @@ function extractName_(raw) {
   return text.replace(LEADING_TIME_, '').trim();
 }
 
+/**
+ * 1 -> "A", 14 -> "N".
+ *
+ * Lives here rather than with the repair tools because the Radius import
+ * needs it to name columns, and the import must not depend on a maintenance
+ * file that a project might reasonably not have.
+ */
+function columnLetter_(index) {
+  let letter = '';
+  let n = index;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    letter = String.fromCharCode(65 + remainder) + letter;
+    n = Math.floor((n - 1) / 26);
+  }
+  return letter;
+}
+
 /** Splits a comma-separated task list, dropping blanks. */
 function splitList_(raw) {
   const text = String(raw == null ? '' : raw).trim();

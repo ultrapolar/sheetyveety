@@ -1148,6 +1148,38 @@ const REPAIR_FILLER_ROWS = [
   check('roster call: no centre asks Radius for nothing', noCentre.calls, 0);
 }
 
+// 48d. The import must not reach into another feature's file.
+//
+//      Every .gs file shares one global scope, and this suite loads all of
+//      them, so a call across files looks fine here and fails in a project
+//      that does not happen to have that file. Radius.gs may use its own
+//      helpers and the shared ones, nothing else.
+{
+  const names = src => (src.match(/^function\s+([A-Za-z0-9_$]+)/gm) || [])
+    .map(m => m.replace(/^function\s+/, ''));
+
+  const shared = names(fs.readFileSync('Common.gs', 'utf8'))
+    .concat(names(fs.readFileSync('Radius.gs', 'utf8')));
+
+  const radiusSrc = fs.readFileSync('Radius.gs', 'utf8');
+  const strays = [];
+
+  ['Repair.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs'].forEach(function (file) {
+    names(fs.readFileSync(file, 'utf8')).forEach(function (name) {
+      if (shared.indexOf(name) !== -1) return;
+      if (new RegExp('\\b' + name + '\\s*\\(').test(radiusSrc)) {
+        strays.push(file + ':' + name);
+      }
+    });
+  });
+
+  check('import calls nothing from another feature file', strays, []);
+
+  // The helper that caught this: it was defined at the bottom of Repair.gs.
+  checkTruthy('columnLetter_ is shared, not a repair tool',
+    names(fs.readFileSync('Common.gs', 'utf8')).indexOf('columnLetter_') !== -1);
+}
+
 // 49. Name matching is forgiving about case, spacing and "Last, First".
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
