@@ -24,7 +24,7 @@ const CONFIG = {
     PINK: 3,     // C - "pink" flag, set at EOD, consumed at SOD
     LOADED: 5,   // E - tasks printed and ready to hand out
     QUEUE: 6,    // F - upcoming tasks, waiting to be printed
-    ARCHIVE: 14  // N - running history of completed tasks
+    ARCHIVE: 13  // M - running history of completed tasks
   },
 
   COLOR: {
@@ -41,12 +41,6 @@ const CONFIG = {
   PINK_VALUE: 'pink',
   ARCHIVE_SEPARATOR: ' | ',
   DATE_FORMAT: 'MM/dd',
-
-  // Used only by the one-off history column repair. History entries dated on
-  // or after this move across to the new column; anything older is left
-  // behind. Entries store no year, so the repair infers one from their order
-  // within the cell -- see inferEntryDates_ in Repair.gs.
-  HISTORY_CUTOFF: '2026-08-01',
 
   // How long a pending SOD dialog stays valid, in seconds.
   CACHE_TTL_SECONDS: 3600,

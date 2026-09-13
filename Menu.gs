@@ -21,8 +21,5 @@ function onOpen() {
 
   ui.createMenu('Tools')
     .addItem('Check setup', 'checkSheetSetup')
-    .addSeparator()
-    .addItem('1. Repair history column (M → N)', 'repairHistoryColumn')
-    .addItem('2. Delete leftover column M', 'deleteLegacyHistoryColumn')
     .addToUi();
 }

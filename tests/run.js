@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Repair.gs', 'Radius.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -23,9 +23,7 @@ function loadScript(context) {
 ;globalThis.__api = {
   CONFIG, parseStatus_, extractName_, splitList_, normalizeColor_, isDoneColor_,
   escapeHtml_, columnLetter_, processWopToDeck, processSodPinks,
-  executeSodOperations_FromUI, repairHistoryColumn, applyHistoryColumnRepair,
-  deleteLegacyHistoryColumn, parseEntryMonthDay_, inferEntryDates_,
-  splitHistoryEntries_, planHistoryColumnRepair_,
+  executeSodOperations_FromUI, checkSheetSetup,
   looksLikeLoginPage_, radiusFetch_, importRadiusData, RADIUS_EXTRACTORS,
   parseRoster_, loadRoster_, dwpUrl_, radiusPostJson_,
   normalizeStudentName_, htmlCellText_,
@@ -44,7 +42,7 @@ function loadScript(context) {
 function scenario(deckRows, wopRows, selection, today) {
   const deckValues = deckRows.map(r => {
     const row = r.slice();
-    while (row.length < 14) row.push('');
+    while (row.length < 13) row.push('');
     return row;
   });
   // A real sheet is 26 columns wide by default; the Radius import writes as
@@ -187,16 +185,15 @@ function rosterReply(students) {
   });
 }
 
-const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Legacy', 'Archive'];
-const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, LEGACY: 13, ARCHIVE: 14 };
+const HEADER = ['Name', 'Current', 'Pink', '', 'Loaded', 'Queue', '', '', '', '', '', '', 'Archive'];
+const C = { NAME: 1, CURRENT: 2, PINK: 3, LOADED: 5, QUEUE: 6, ARCHIVE: 13 };
 
-// The history repair treats the Deck List's first 3 rows as headers (row 1
-// is the real header; rows 2-3 are a legend/instructions row that also holds
-// no student). Repair tests below insert these two ahead of any real data so
-// row numbers line up with a real Deck List.
-const REPAIR_FILLER_ROWS = [
-  ['LEGEND', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-  ['(instructions)', '', '', '', '', '', '', '', '', '', '', '', '', '']
+// The Deck List's first 3 rows carry no student: row 1 is the header and
+// rows 2-3 are a legend. Tests that care about row numbers put these ahead of
+// any real data so the numbering matches a real sheet.
+const DECK_FILLER_ROWS = [
+  ['LEGEND', '', '', '', '', '', '', '', '', '', '', ''],
+  ['(instructions)', '', '', '', '', '', '', '', '', '', '', '']
 ];
 
 // 1. Single Y advances one task.
@@ -216,7 +213,7 @@ const REPAIR_FILLER_ROWS = [
 // 2. Two Y's advance twice.
 {
   const s = scenario(
-    [HEADER, ['Jane Doe', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', '', 'OLD 01/01']],
+    [HEADER, ['Jane Doe', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', 'OLD 01/01']],
     [{ name: 'Jane Doe', status: 'YY' }],
     { start: 1, rows: 1 });
   s.api.processWopToDeck();
@@ -270,7 +267,7 @@ const REPAIR_FILLER_ROWS = [
 // 5b. Re-running that row after topping up does exactly 1 more, not 2.
 {
   const s = scenario(
-    [HEADER, ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', '', 'T1 08/22 | T2 08/22']],
+    [HEADER, ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', 'T1 08/22 | T2 08/22']],
     [{ name: 'Jane Doe', status: 'Y (2 of 3 done, ran out)', statusBg: '#ffff00' }],
     { start: 1, rows: 1 });
   s.api.processWopToDeck();
@@ -360,7 +357,7 @@ const REPAIR_FILLER_ROWS = [
 {
   const narrowDeck = [['Name', 'Current'], ['Jane Doe', 'T1']];
   const deck = new FakeSheet('Deck List', narrowDeck.map(r => {
-    const row = r.slice(); while (row.length < 14) row.push(''); return row;
+    const row = r.slice(); while (row.length < 13) row.push(''); return row;
   }));
   // Simulate getDataRange() stopping at column B by shrinking the reported grid.
   deck.getDataRange = function () {
@@ -376,9 +373,11 @@ const REPAIR_FILLER_ROWS = [
   const api = loadScript(context);
   api.processWopToDeck();
   check('EOD narrow deck: archive written cleanly',
-    String(deck.values[1][13]), 'T1 08/22');
-  check('EOD narrow deck: no "undefined" leaked into padded cells',
-    String(deck.values[1][12]), '');
+    String(deck.values[1][12]), 'T1 08/22');
+  // Everything between where the read stopped and the archive column had to be
+  // padded to get there. Padding with undefined would write the word.
+  check('EOD narrow deck: no "undefined" leaked into the padded cells',
+    deck.values[1].slice(2, 12).join('|'), '|||||||||');
 }
 
 // ==========================================================================
@@ -618,309 +617,8 @@ const REPAIR_FILLER_ROWS = [
   check('columnLetter 14', api.columnLetter_(14), 'N');
   check('columnLetter 26', api.columnLetter_(26), 'Z');
   check('columnLetter 27', api.columnLetter_(27), 'AA');
-  check('archive column is N', api.CONFIG.DECK_COL.ARCHIVE, 14);
+  check('archive column is M', api.CONFIG.DECK_COL.ARCHIVE, 13);
 }
-
-// 29. Reading the date off an entry.
-{
-  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
-    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  install(ctx, [], null);
-  const api = loadScript(ctx);
-  const p = e => { const r = api.parseEntryMonthDay_(e); return r ? [r.month, r.day, r.year] : null; };
-
-  check('parseEntry "Fractions 08/20"', p('Fractions 08/20'), [8, 20, null]);
-  check('parseEntry single digits "Task 8/2"', p('Task 8/2'), [8, 2, null]);
-  check('parseEntry with 2-digit year', p('Task 08/20/26'), [8, 20, 2026]);
-  check('parseEntry with 4-digit year', p('Task 08/20/2026'), [8, 20, 2026]);
-  check('parseEntry no date', p('Just a task name'), null);
-  check('parseEntry impossible month', p('Task 13/40'), null);
-  check('parseEntry date not at the end', p('08/20 Task'), null);
-}
-
-// 30. Inferring the year: entries run oldest to newest, so reading backwards
-//     the dates never move forward. When one does, the year rolls back.
-{
-  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
-    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  install(ctx, [], null);
-  const api = loadScript(ctx);
-  const TODAY = new Date(2026, 7, 22); // 22 Aug 2026
-  const iso = d => d === null ? null :
-    d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
-    String(d.getDate()).padStart(2, '0');
-  const infer = list => api.inferEntryDates_(list, TODAY).map(r => iso(r.date));
-
-  check('infer: all within this year',
-    infer(['a 07/15', 'b 08/02', 'c 08/20']),
-    ['2026-07-15', '2026-08-02', '2026-08-20']);
-
-  check('infer: rolls back across the new year',
-    infer(['a 11/30', 'b 12/20', 'c 01/15', 'd 08/20']),
-    ['2025-11-30', '2025-12-20', '2026-01-15', '2026-08-20']);
-
-  check('infer: newest entry cannot be in the future',
-    infer(['a 09/30', 'b 10/05']),
-    ['2025-09-30', '2025-10-05']);
-
-  // Same-day repeats are ordinary: a "YY" archives two tasks on one date.
-  check('infer: same-day entries stay in the same year',
-    infer(['a 08/20', 'b 08/20', 'c 08/20']),
-    ['2026-08-20', '2026-08-20', '2026-08-20']);
-
-  // A genuine multi-year gap only rolls back when the date moves forward.
-  check('infer: rolls back once per forward jump',
-    infer(['a 09/01', 'b 03/01', 'c 09/01', 'd 08/20']),
-    ['2024-09-01', '2025-03-01', '2025-09-01', '2026-08-20']);
-
-  check('infer: an explicit year is trusted as given',
-    infer(['a 03/01/2024', 'b 08/20']),
-    ['2024-03-01', '2026-08-20']);
-
-  check('infer: undated entries come back null',
-    infer(['no date here', 'b 08/20']), [null, '2026-08-20']);
-}
-
-// 31. Splitting a cell at the cutoff.
-{
-  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
-    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  install(ctx, [], null);
-  const api = loadScript(ctx);
-  const TODAY = new Date(2026, 7, 22);
-  const CUTOFF = new Date(2026, 7, 1); // 1 Aug 2026
-  const split = text => {
-    const r = api.splitHistoryEntries_(text, CUTOFF, TODAY);
-    return [r.keep, r.move, r.undatedKept];
-  };
-
-  check('split: everything recent',
-    split('a 08/05 | b 08/20'), [[], ['a 08/05', 'b 08/20'], []]);
-
-  check('split: everything old',
-    split('a 06/05 | b 07/20'), [['a 06/05', 'b 07/20'], [], []]);
-
-  check('split: mixed, cut at the boundary',
-    split('a 07/28 | b 08/01 | c 08/20'),
-    [['a 07/28'], ['b 08/01', 'c 08/20'], []]);
-
-  check('split: same day as the cutoff counts as recent',
-    split('a 08/01'), [[], ['a 08/01'], []]);
-
-  check('split: last year August is old, not recent',
-    split('a 08/15 | b 12/01 | c 08/20'),
-    [['a 08/15', 'b 12/01'], ['c 08/20'], []]);
-
-  check('split: undated text left behind is reported',
-    split('handwritten note | a 07/01 | b 08/10'),
-    [['handwritten note', 'a 07/01'], ['b 08/10'], ['handwritten note']]);
-
-  check('split: empty', split(''), [[], [], []]);
-}
-
-// 32. Rows 2-3 are treated as headers, same as row 1, and are never touched
-//     -- even when they hold stray text that looks like recent history.
-{
-  const deckRows = [HEADER,
-    ['LEGEND', '', '', '', '', '', '', '', '', '', '', '', 'ignore me 08/10', ''],
-    ['(instructions)', '', '', '', '', '', '', '', '', '', '', '', 'also ignore 08/12', ''],
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/15', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Header skip: row 2 M untouched', s.deckCell(2, C.LEGACY), 'ignore me 08/10');
-  check('Header skip: row 2 N untouched', s.deckCell(2, C.ARCHIVE), '');
-  check('Header skip: row 3 M untouched', s.deckCell(3, C.LEGACY), 'also ignore 08/12');
-  check('Header skip: row 3 N untouched', s.deckCell(3, C.ARCHIVE), '');
-  check('Header skip: real row 4 still moved', s.deckCell(4, C.ARCHIVE), 'T1 08/15');
-}
-
-// 33. Repair moves post-cutoff history into an empty N and leaves M alone.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/05 | T2 08/20', ''],
-    ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'T7 08/12', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.repairHistoryColumn();
-  check('Repair: preview changes nothing', s.deckCell(4, C.ARCHIVE), '');
-  checkTruthy('Repair: preview opens',
-    s.harness.dialogs[0].title === 'Repair History Column');
-
-  s.api.applyHistoryColumnRepair();
-  check('Repair: Jane history now in N', s.deckCell(4, C.ARCHIVE), 'T1 08/05 | T2 08/20');
-  check('Repair: John history now in N', s.deckCell(5, C.ARCHIVE), 'T7 08/12');
-  check('Repair: M deliberately left intact', s.deckCell(4, C.LEGACY), 'T1 08/05 | T2 08/20');
-  check('Repair: header row untouched', s.deckCell(1, C.LEGACY), 'Legacy');
-}
-
-// 34. Pre-cutoff entries stay put, post-cutoff ones move.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '',
-     'Old1 06/10 | Old2 07/28 | New1 08/03 | New2 08/19', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Cutoff: only post-8/1 moved', s.deckCell(4, C.ARCHIVE), 'New1 08/03 | New2 08/19');
-  checkTruthy('Cutoff: doomed text reported',
-    lastDialog(s).html.includes('Old1 06/10 | Old2 07/28'));
-  checkTruthy('Cutoff: warns it will be lost',
-    lastDialog(s).html.includes('lost when the column is deleted'));
-}
-
-// 35. A row with nothing recent enough is left entirely alone.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'Old 05/10 | Older 04/02', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.repairHistoryColumn();
-  checkTruthy('All-old row: preview declines',
-    s.harness.alerts.length === 1 && s.harness.alerts[0].includes('Nothing to move'));
-  check('All-old row: N untouched', s.deckCell(4, C.ARCHIVE), '');
-  check('All-old row: M untouched', s.deckCell(4, C.LEGACY), 'Old 05/10 | Older 04/02');
-}
-
-// 36. Where N already holds text, it keeps its place and the moved text follows.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T2 08/12', 'PRE-INSERT 07/01']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Merge: existing text kept first',
-    s.deckCell(4, C.ARCHIVE), 'PRE-INSERT 07/01 | T2 08/12');
-  checkTruthy('Merge: flagged for review',
-    lastDialog(s).html.includes('worth an eyeball'));
-}
-
-// 37. Running the repair twice does not duplicate anything.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Idempotent: first pass', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
-  s.api.applyHistoryColumnRepair();
-  check('Idempotent: second pass unchanged', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
-  s.api.applyHistoryColumnRepair();
-  check('Idempotent: third pass unchanged', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
-}
-
-// 38. Undated text left behind is called out, since M is about to be deleted.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '',
-     'scribbled note | T1 08/10', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Undated: dated part moved', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
-  checkTruthy('Undated: note flagged',
-    lastDialog(s).html.includes('scribbled note'));
-}
-
-// 39. The delete step refuses while anything recent is still unmoved.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.deleteLegacyHistoryColumn();
-  checkTruthy('Delete guard: refuses',
-    s.harness.alerts.some(a => String(a).includes('Not deleting column M')));
-  check('Delete guard: column still there', s.deck.values[0].length, 14);
-}
-
-// 40. After the move, deleting M shifts N back into M.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', ''],
-    ['John Roe', 'T9', '', '', '', '', '', '', '', '', '', '', 'T7 08/12', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  check('Delete: history staged in N', s.deckCell(4, C.ARCHIVE), 'T1 08/10');
-
-  s.api.deleteLegacyHistoryColumn();
-  check('Delete: column removed', s.deck.values[0].length, 13);
-  check('Delete: history now sits in M', String(s.deck.values[3][12]), 'T1 08/10');
-  check('Delete: second row too', String(s.deck.values[4][12]), 'T7 08/12');
-  checkTruthy('Delete: reminds about the config change',
-    s.harness.alerts.some(a => String(a).includes('DECK_COL.ARCHIVE')));
-}
-
-// 41. Cancelling the delete confirmation leaves the column in place.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  s.harness.uiAnswer.value = 'CANCEL';
-  s.api.deleteLegacyHistoryColumn();
-  check('Delete cancelled: column intact', s.deck.values[0].length, 14);
-}
-
-// 42. Deleting with pre-cutoff text still in M warns that it will be destroyed.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'Old 05/01', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
-  s.api.deleteLegacyHistoryColumn();
-  checkTruthy('Delete with doomed text: warns',
-    s.harness.alerts.some(a => String(a).includes('permanently deleted')));
-  check('Delete with doomed text: went ahead on OK', s.deck.values[0].length, 13);
-}
-
-// 43. After the repair, a fresh EOD run appends alongside the moved history.
-{
-  const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T3', '', '', 'T4', '', '', '', '', '', '', '', 'T1 08/05 | T2 08/12', '']];
-  const s = scenario(deckRows, [{ name: 'Jane Doe', status: 'Y' }],
-    { start: 1, rows: 1 }, '2026-08-22');
-  s.api.applyHistoryColumnRepair();
-  s.api.processWopToDeck();
-  check('Post-repair EOD: appends to moved history',
-    s.deckCell(4, C.ARCHIVE), 'T1 08/05 | T2 08/12 | T3 08/22');
-  check('Post-repair EOD: student advanced', s.deckCell(4, C.CURRENT), 'T4');
-}
-
-// 44. The repair works while looking at the Deck List, not just the WOP sheet.
-{
-  const deckValues = [HEADER, ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10', '']]
-    .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
-  const deck = new FakeSheet('Deck List', deckValues);
-  const wop = new FakeSheet('Daily WOP', [new Array(11).fill('')], makeGrid(1, 11, '#ffffff'));
-  wop.setSelection(1, 1);
-  const context = vm.createContext({ console, Buffer, JSON, Math, Date: fixedDate('2026-08-22'),
-    String, Number, Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  const harness = install(context, [deck, wop], 'Deck List');
-  const api = loadScript(context);
-  api.repairHistoryColumn();
-  checkTruthy('Repair from Deck List: preview opens',
-    harness.dialogs.length === 1 && harness.dialogs[0].title === 'Repair History Column');
-  api.applyHistoryColumnRepair();
-  check('Repair from Deck List: moved', String(deck.values[3][13]), 'T1 08/10');
-}
-
-// 45. Column N being entirely empty makes getDataRange() stop at M.
-{
-  const deckValues = [
-    ['Name', 'Current', '', '', '', '', '', '', '', '', '', '', 'History'],
-    ...REPAIR_FILLER_ROWS,
-    ['Jane Doe', 'T5', '', '', '', '', '', '', '', '', '', '', 'T1 08/10']]
-    .map(r => { const row = r.slice(); while (row.length < 14) row.push(''); return row; });
-  const deck = new FakeSheet('Deck List', deckValues);
-  deck.getDataRange = function () {
-    const Ctor = Object.getPrototypeOf(this.getRange(1, 1, 1, 1)).constructor;
-    return new Ctor(this, 1, 1, this.values.length, 13);
-  };
-  const wop = new FakeSheet('Daily WOP', [new Array(11).fill('')], makeGrid(1, 11, '#ffffff'));
-  wop.setSelection(1, 1);
-  const context = vm.createContext({ console, Buffer, JSON, Math, Date: fixedDate('2026-08-22'),
-    String, Number, Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
-  install(context, [deck, wop], 'Deck List');
-  const api = loadScript(context);
-  api.applyHistoryColumnRepair();
-  check('Narrow range repair: landed in N', String(deck.values[3][13]), 'T1 08/10');
-  check('Narrow range repair: no "undefined"',
-    String(deck.values[3][13]).includes('undefined'), false);
-}
-
 
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
@@ -1164,7 +862,7 @@ const REPAIR_FILLER_ROWS = [
   const radiusSrc = fs.readFileSync('Radius.gs', 'utf8');
   const strays = [];
 
-  ['Repair.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs'].forEach(function (file) {
+  ['Setup.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs'].forEach(function (file) {
     names(fs.readFileSync(file, 'utf8')).forEach(function (name) {
       if (shared.indexOf(name) !== -1) return;
       if (new RegExp('\\b' + name + '\\s*\\(').test(radiusSrc)) {
@@ -1175,8 +873,8 @@ const REPAIR_FILLER_ROWS = [
 
   check('import calls nothing from another feature file', strays, []);
 
-  // The helper that caught this: it was defined at the bottom of Repair.gs.
-  checkTruthy('columnLetter_ is shared, not a repair tool',
+  // The helper that caught this: it was defined in a feature file, not here.
+  checkTruthy('columnLetter_ is shared, not tucked into a feature file',
     names(fs.readFileSync('Common.gs', 'utf8')).indexOf('columnLetter_') !== -1);
 }
 
@@ -1500,7 +1198,7 @@ const REPAIR_FILLER_ROWS = [
 // 52e. The import writing into column K for real.
 {
   function runImport(existingStatus, statusBg) {
-    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
       [{ name: 'Amalie Laz', status: existingStatus, statusBg: statusBg }],
       { start: 1, rows: 1 }, '2026-08-22');
@@ -1642,7 +1340,7 @@ const REPAIR_FILLER_ROWS = [
 // 52h. The timing review reaching the sheet: shading on L and M, notes on P.
 {
   function runTiming(signInHtmlTime, signOutHtmlTime) {
-    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
       [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
@@ -1727,7 +1425,7 @@ const REPAIR_FILLER_ROWS = [
 {
   function runEod(options) {
     const opts = options || {};
-    const deckRows = [HEADER, ...REPAIR_FILLER_ROWS,
+    const deckRows = [HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', 'Task One', '', '', 'Task Two, Task Three', '',
        '', '', '', '', '', '', '', '']];
     const s = scenario(deckRows,
@@ -1867,7 +1565,7 @@ const REPAIR_FILLER_ROWS = [
 // 52k. The confirmation dialog: what it shows, and what it writes.
 {
   function twoStudents(existingP) {
-    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', ''],
       ['John Roe', 'Task A', '', '', 'Task B', '', '', '', '', '', '', '', '', '']],
       [{ name: 'Amalie Laz' }, { name: 'John Roe' }],
@@ -1944,7 +1642,7 @@ const REPAIR_FILLER_ROWS = [
 // 52l. What happens when a cell already holds something.
 {
   function withExisting(mode) {
-    const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', '']],
       [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
     s.wop.values[0][7] = 'typed by hand';     // column H
@@ -1985,7 +1683,7 @@ const REPAIR_FILLER_ROWS = [
     lastDialog(out.s).html.includes('Cells left alone'));
 
   // With no clash there is no choice to make, so the block is not shown.
-  const clean = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+  const clean = scenario([HEADER, ...DECK_FILLER_ROWS,
     ['Amalie Laz', 'Task One', '', '', 'Task Two', '', '', '', '', '', '', '', '', '']],
     [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
   clean.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
@@ -2033,7 +1731,7 @@ const REPAIR_FILLER_ROWS = [
 
 // 53. Every field lands in its configured column, F through P.
 {
-  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+  const s = scenario([HEADER, ...DECK_FILLER_ROWS,
     ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
     [{ name: '9:59 AM Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
 
@@ -2059,7 +1757,7 @@ const REPAIR_FILLER_ROWS = [
 
 // 54. A roster link pointing at the wrong student writes nothing.
 {
-  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+  const s = scenario([HEADER, ...DECK_FILLER_ROWS,
     ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
 
@@ -2084,7 +1782,7 @@ const REPAIR_FILLER_ROWS = [
 
 // 53. An unset Instruction Manager URL is reported, not fetched.
 {
-  const s = scenario([HEADER, ...REPAIR_FILLER_ROWS,
+  const s = scenario([HEADER, ...DECK_FILLER_ROWS,
     ['Jane Doe', '', '', '', '', '', '', '', '', '', '', '', '', '']],
     [{ name: 'Jane Doe' }], { start: 1, rows: 1 }, '2026-08-22');
   s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
