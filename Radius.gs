@@ -1116,7 +1116,7 @@ function storeRadiusPlan_(plan) {
     entries['radiusPlan_' + token + '_' + n] = JSON.stringify(student);
   });
 
-  cache.putAll(entries, CONFIG.RADIUS.CACHE_TTL_SECONDS);
+  cache.putAll(entries, CONFIG.CACHE_TTL_SECONDS);
   return token;
 }
 

@@ -153,10 +153,28 @@ function install(globalObj, sheets, activeSheetName) {
   };
 
   const cache = {};
+  // Apps Script rejects a non-numeric expiry outright rather than ignoring it,
+  // so a mistyped CONFIG path reaching here is a runtime failure in the real
+  // thing. A fake that shrugs at it hides exactly the bug it exists to catch.
+  function checkTtl(method, shape, ttl, given) {
+    if (!given) return;
+    if (typeof ttl !== 'number' || isNaN(ttl)) {
+      throw new Error('The parameters (' + shape +
+        (ttl === undefined || ttl === null ? ',null' : ',' + typeof ttl) +
+        ") don't match the method signature for CacheService.Cache." + method + '.');
+    }
+  }
+
   globalObj.CacheService = {
     getUserCache: () => ({
-      put: (k, v) => { cache[k] = v; },
-      putAll: entries => { Object.keys(entries).forEach(k => { cache[k] = entries[k]; }); },
+      put: function (k, v, ttl) {
+        checkTtl('put', 'string,string', ttl, arguments.length > 2);
+        cache[k] = v;
+      },
+      putAll: function (entries, ttl) {
+        checkTtl('putAll', '(class)', ttl, arguments.length > 1);
+        Object.keys(entries).forEach(k => { cache[k] = entries[k]; });
+      },
       get: k => (k in cache ? cache[k] : null),
       remove: k => { delete cache[k]; },
       removeAll: keys => { keys.forEach(k => { delete cache[k]; }); }

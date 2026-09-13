@@ -218,7 +218,12 @@ function isDoneColor_(color) {
 const TIME_PATTERN_ = '\\d{1,2}(?::\\d{2})?\\s*(?:[ap]\\.?m\\.?)?';
 const TIME_JOIN_ = '(?:\\s*(?:-|–|—|to)\\s*)';
 const LEADING_TIME_ = new RegExp(
-  '^\\s*' + TIME_PATTERN_ + '(?:' + TIME_JOIN_ + TIME_PATTERN_ + ')?\\s*[-–—:]?\\s*', 'i');
+  // The time has to actually end for this to be a time: something must
+  // separate it from the name, or the leading digit of a name that begins
+  // with one gets eaten and the lookup quietly goes looking for a
+  // different student.
+  '^\\s*' + TIME_PATTERN_ + '(?:' + TIME_JOIN_ + TIME_PATTERN_ + ')?' +
+  '(?:\\s*[-–—:]\\s*|\\s+|$)', 'i');
 
 /**
  * Strips a leading appointment time from a Daily WOP name cell.

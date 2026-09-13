@@ -142,6 +142,11 @@ function lastDialog(s) {
   check('extractName "9 - 10 Jane Doe"', api.extractName_('9 - 10 Jane Doe'), 'Jane Doe');
   check('extractName "3:15 PM - Jane Doe"', api.extractName_('3:15 PM - Jane Doe'), 'Jane Doe');
   check('extractName "9:00 to 9:45 Jane Doe"', api.extractName_('9:00 to 9:45 Jane Doe'), 'Jane Doe');
+  // The Daily WOP is typed as "H:MM Student Name", with no am/pm.
+  check('extractName "3:30 Jane Doe"', api.extractName_('3:30 Jane Doe'), 'Jane Doe');
+  check('extractName "11:00 JANE DOE"', api.extractName_('11:00 JANE DOE'), 'JANE DOE');
+  check('extractName keeps a name that merely starts with a digit',
+    api.extractName_('4Kids Doe'), '4Kids Doe');
   check('extractName blank', api.extractName_('   '), '');
   check('extractName time only', api.extractName_('10:30 AM'), '');
 
