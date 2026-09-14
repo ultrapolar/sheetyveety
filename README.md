@@ -222,6 +222,25 @@ An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
 
+### Only today's session
+
+The roster lists a student's **most recent** session, not today's — so on a
+quiet day a link on today's roster opens last week's page, and importing it
+writes a session the student never had. Every DWP page states the day it
+belongs to, from the moment it opens, so that is checked against the day the
+script is run (in the spreadsheet's own timezone, not the server's).
+
+A page from another day is refused per student, with the date it actually
+found:
+
+> *their most recent session is 8/15/2026, not today. They have not checked in
+> yet, so nothing was written.*
+
+A page that states no date at all is refused too — a date that cannot be read
+must not be allowed to pass for today's. Set
+`CONFIG.RADIUS.REQUIRE_SESSION_TODAY` to `false` only to backfill a past day,
+and put it back afterwards.
+
 ### Session timing
 
 Sessions are booked on the hour, so a normal one runs about an hour and a

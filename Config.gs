@@ -129,6 +129,12 @@ const CONFIG = {
 
     // A session with both times filled in is finished. If its DWP was never
     // finalised, say so rather than leaving the column looking untouched.
+    // The roster hands back a student's most recent session whether or not it
+    // is today's, so the page is asked what day it belongs to and a row from
+    // another day is refused. Turn this off only to backfill a past day, and
+    // remember to turn it back on.
+    REQUIRE_SESSION_TODAY: true,
+
     UNFINALIZED_FIELD: 'finalizedFlag',
     UNFINALIZED_VALUE: 'N',
 

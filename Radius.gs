@@ -365,6 +365,29 @@ function escapeForRegex_(text) {
 }
 
 /** The whole <input> tag carrying a given id, or null. */
+/** The text inside a <span id="..."> -- the page states its date in one. */
+function spanTextById_(html, id) {
+  const match = String(html).match(
+    new RegExp('<span\\b[^>]*\\bid="' + escapeForRegex_(id) + '"[^>]*>([\\s\\S]*?)<\\/span>', 'i'));
+  return match ? htmlCellText_(match[1]) : '';
+}
+
+/**
+ * A date as y/m/d numbers, from the M/d/yyyy the page writes.
+ *
+ * Returns null for anything it cannot read rather than a guess: a date we
+ * cannot understand must not be allowed to pass for today's.
+ */
+function parseSessionDate_(text) {
+  const match = String(text || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (!match) return null;
+  return { month: Number(match[1]), day: Number(match[2]), year: Number(match[3]) };
+}
+
+function sameCalendarDay_(a, b) {
+  return Boolean(a && b && a.year === b.year && a.month === b.month && a.day === b.day);
+}
+
 function inputTagById_(html, id) {
   const match = String(html).match(
     new RegExp('<input\\b[^>]*\\bid="' + escapeForRegex_(id) + '"[^>]*>', 'i'));
@@ -709,6 +732,14 @@ const RADIUS_EXTRACTORS = {
    * Yes/no answers as the sheet writes them by hand: a bare Y when true,
    * blank otherwise, to match the Y/P convention already used in column K.
    */
+  /**
+   * The date the session belongs to. Stated on the page from the moment it
+   * opens, unlike the finalised stamp, which only appears at the end.
+   */
+  sessionDate: function (html) {
+    return spanTextById_(html, 'SessionDate');
+  },
+
   finalizedFlag: function (html) {
     return yesFlag_(RADIUS_EXTRACTORS.finalized(html));
   },
@@ -915,6 +946,13 @@ function buildRadiusPlan_(sheets, selection, log) {
 
   const roster = loadRoster_();
 
+  // The centre's day, not the server's: a run just before midnight in one
+  // timezone is the previous afternoon in another.
+  const stamp = Utilities.formatDate(new Date(),
+    sheets.ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy').split('/');
+  const today = { month: Number(stamp[0]), day: Number(stamp[1]),
+    year: Number(stamp[2]) };
+
   for (let i = 0; i < selection.numRows; i++) {
     if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
       plan.stoppedEarly = true;
@@ -936,6 +974,22 @@ function buildRadiusPlan_(sheets, selection, log) {
       if (pageName && normalizeStudentName_(pageName) !== normalizeStudentName_(name)) {
         throw new Error('the roster link opened the DWP for "' + pageName +
           '" instead. Nothing was written for this row.');
+      }
+
+      // The roster lists a student's most recent session, which on a quiet day
+      // is one from last week. Their page states the day it belongs to, so ask
+      // it rather than trusting that a link on today's roster means today.
+      if (CONFIG.RADIUS.REQUIRE_SESSION_TODAY) {
+        const pageDate = parseSessionDate_(RADIUS_EXTRACTORS.sessionDate(html));
+        if (!pageDate) {
+          throw new Error('the DWP page does not state a session date, so there ' +
+            'is no way to tell whether it is today\'s. Nothing was written.');
+        }
+        if (!sameCalendarDay_(pageDate, today)) {
+          throw new Error('their most recent session is ' + pageDate.month + '/' +
+            pageDate.day + '/' + pageDate.year + ', not today. They have not ' +
+            'checked in yet, so nothing was written.');
+        }
       }
 
       const results = extractRadiusFields_(html);

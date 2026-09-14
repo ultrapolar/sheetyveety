@@ -239,7 +239,19 @@ function install(globalObj, sheets, activeSheetName) {
   globalObj.Utilities = {
     sleep: () => {},
     getUuid: () => 'uuid-' + (++uuid),
-    formatDate: () => '08/22',
+    // Was a hard-coded '08/22', which happened to be right while EOD was the
+    // only caller and only ever asked for MM/dd. Anything else got that same
+    // string back, so a yyyy in the pattern came out as no year at all.
+    formatDate: (date, timeZone, pattern) => {
+      const d = date instanceof Date ? date : new Date();
+      const pad = (n, width) => String(n).padStart(width, '0');
+      return String(pattern)
+        .replace(/yyyy/g, pad(d.getFullYear(), 4))
+        .replace(/MM/g, pad(d.getMonth() + 1, 2))
+        .replace(/dd/g, pad(d.getDate(), 2))
+        .replace(/HH/g, pad(d.getHours(), 2))
+        .replace(/mm/g, pad(d.getMinutes(), 2));
+    },
     base64Encode: s => Buffer.from(s, 'utf8').toString('base64'),
     base64Decode: s => Buffer.from(s, 'base64'),
     Charset: { UTF_8: 'utf8' }

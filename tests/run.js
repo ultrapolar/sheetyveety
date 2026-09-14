@@ -68,8 +68,11 @@ function scenario(deckRows, wopRows, selection, today) {
   const wop = new FakeSheet('Daily WOP', wopValues, wopBg);
   wop.setSelection(selection.start, selection.rows);
 
+  // Pinned by default. These tests assert dated archive entries, and used to
+  // pass on the real clock only because the fake's formatDate ignored its
+  // pattern and handed back the day they happened to be written on.
   const context = vm.createContext({ console, Buffer, JSON, Math,
-    Date: today ? fixedDate(today) : Date, String, Number,
+    Date: fixedDate(today || '2026-08-22'), String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   const harness = install(context, [deck, wop], 'Daily WOP');
   const api = loadScript(context);
@@ -170,6 +173,17 @@ function lastDialog(s) {
 // ==========================================================================
 // EOD
 // ==========================================================================
+// The DWP fixtures are real pages from 09/12/2026, but the sheet-level tests
+// run on a pinned clock. The import refuses a session from another day, so the
+// page is stamped with the day under test; 45i below is where the refusal
+// itself is exercised, using the fixture's real date against another day.
+const DWP_TODAY = '8/22/2026';
+function dwp(which, onDate) {
+  return fs.readFileSync('tests/fixtures/dwp-' + which + '.html', 'utf8')
+    .replace(/<span id="SessionDate">[^<]*<\/span>/,
+      '<span id="SessionDate">' + (onDate || DWP_TODAY) + '</span>');
+}
+
 // The roster arrives as JSON, not as a page. The Instruction Manager builds its
 // student grid in the browser, so its HTML carries no students at all -- this
 // is the call that grid is filled from, and it hands over ids, not links.
@@ -371,7 +385,8 @@ const DECK_FILLER_ROWS = [
   const wopValues = [['Jane Doe', '', '', '', '', '', '', '', '', '', 'Y']];
   const wop = new FakeSheet('Daily WOP', wopValues, makeGrid(1, 11, '#ffffff'));
   wop.setSelection(1, 1);
-  const context = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+  const context = vm.createContext({ console, Buffer, JSON, Math,
+    Date: fixedDate('2026-08-22'), String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(context, [deck, wop], 'Daily WOP');
   const api = loadScript(context);
@@ -1049,6 +1064,67 @@ const DECK_FILLER_ROWS = [
     r.wop.values.some(v => String(v[0]).indexOf('Amalie Lazeration') !== -1));
 }
 
+// 45i. A session from another day is refused.
+//
+//      The roster hands back a student's most recent session whether or not it
+//      is today's, so on a quiet day a link on today's roster opens last
+//      week's page. Importing that writes a session the student never had.
+{
+  function importOn(pageDate, options) {
+    const opts = options || {};
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    if (opts.allowAnyDay) {
+      vm.runInContext('CONFIG.RADIUS.REQUIRE_SESSION_TODAY = false;', s.context);
+    }
+    let page = dwp('complete', pageDate);
+    if (opts.stripDate) {
+      page = page.replace(/<span id="SessionDate">[^<]*<\/span>/, '');
+    }
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return { s: s, H: () => String(s.wop.values[0][7]),
+      said: () => s.harness.alerts.concat(
+        s.harness.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Today's session imports as it always did.
+  let r = importOn('8/22/2026');
+  check('session date: today imports', r.H(), '33');
+
+  // Last week's does not, and says which day it actually found.
+  r = importOn('8/15/2026');
+  check('session date: another day writes nothing', r.H(), '');
+  checkTruthy('session date: and names the day it found',
+    r.said().includes('8/15/2026'));
+  checkTruthy('session date: and says they have not checked in',
+    r.said().includes('not checked in'));
+
+  // Same day, differently padded, is still the same day.
+  r = importOn('08/22/2026');
+  check('session date: a padded date is the same date', r.H(), '33');
+
+  // Tomorrow is no more today than last week is.
+  r = importOn('8/23/2026');
+  check('session date: a later day is refused too', r.H(), '');
+
+  // A page that states no date cannot be vouched for, so it is not guessed at.
+  r = importOn('8/22/2026', { stripDate: true });
+  check('session date: an undated page writes nothing', r.H(), '');
+  checkTruthy('session date: and says the page did not state one',
+    r.said().includes('does not state a session date'));
+
+  // Turned off to backfill a past day, the old behaviour is back.
+  r = importOn('8/15/2026', { allowAnyDay: true });
+  check('session date: the check can be turned off for a backfill', r.H(), '33');
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {
@@ -1362,7 +1438,7 @@ const DECK_FILLER_ROWS = [
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const LIVE = dwp('live');
   const get = key => api.RADIUS_EXTRACTORS[key](LIVE);
 
   check('live page: student name read from title', api.pageStudentName_(LIVE), 'Amalie Laz');
@@ -1401,7 +1477,7 @@ const DECK_FILLER_ROWS = [
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const FILLED = fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8');
+  const FILLED = dwp('filled');
   const get = key => api.RADIUS_EXTRACTORS[key](FILLED);
 
   check('filled: pages completed', get('pagesCompleted'), '12');
@@ -1524,8 +1600,8 @@ const DECK_FILLER_ROWS = [
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
-  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const DONE = dwp('complete');
+  const LIVE = dwp('live');
   const get = (key, html) => api.RADIUS_EXTRACTORS[key](html || DONE);
 
   // Boolean-ish answers write a bare Y, matching how column K is filled in by
@@ -1536,7 +1612,7 @@ const DECK_FILLER_ROWS = [
   check('flag: deck needs update writes Y', get('deckNeedsUpdateFlag'), 'Y');
   check('flag: an answered-No is blank, not "No"',
     api.RADIUS_EXTRACTORS.deckNeedsUpdateFlag(
-      fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')), '');
+      dwp('filled')), '');
   check('flag: an untouched switch is blank',
     get('problemOfTheWeekFlag', LIVE), '');
   check('yesFlag: only "yes" counts', [
@@ -1559,7 +1635,7 @@ const DECK_FILLER_ROWS = [
     get('masteryAndAssessment', LIVE), '');
   check('column G: mastery alone when no assessment was given',
     api.RADIUS_EXTRACTORS.masteryAndAssessment(
-      fs.readFileSync('tests/fixtures/dwp-filled.html', 'utf8')),
+      dwp('filled')),
     'PK3909(100), PK3902(0)');
 
   // The layout itself, so a stray edit to Config.gs shows up here.
@@ -1635,7 +1711,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
-    const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    const DONE = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
         ? rosterReply(['Amalie Laz'])
@@ -1789,7 +1865,7 @@ const DECK_FILLER_ROWS = [
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
 
-    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
+    const page = dwp('complete')
       .replace(/id="SessionStartTime" name="SessionStartTime" type="text" value="[^"]*"/,
                'id="SessionStartTime" name="SessionStartTime" type="text" value="' +
                signInHtmlTime + '"')
@@ -1861,7 +1937,7 @@ const DECK_FILLER_ROWS = [
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
       'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
 
-    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')
+    const page = dwp('complete')
       .replace(/id="SessionStartTime" name="SessionStartTime" type="text" value="[^"]*"/,
                'id="SessionStartTime" name="SessionStartTime" type="text" value="' +
                signIn + '"')
@@ -1914,7 +1990,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
       'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
-    const page = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+    const page = dwp('live');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
     confirmRadiusImport(s);
@@ -1951,10 +2027,10 @@ const DECK_FILLER_ROWS = [
   const api = loadScript(ctx);
   check('score: present on the completed page',
     api.RADIUS_EXTRACTORS.mathleteScore(
-      fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8')), '3');
+      dwp('complete')), '3');
   check('score: absent on an untouched page',
     api.RADIUS_EXTRACTORS.mathleteScore(
-      fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8')), '');
+      dwp('live')), '');
 }
 
 // 52j. EOD reaches Radius only when asked. Import and EOD are two clicks now,
@@ -1971,7 +2047,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
       'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
-    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    const page = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
     return s;
@@ -2018,7 +2094,7 @@ const DECK_FILLER_ROWS = [
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const DONE = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+  const DONE = dwp('complete');
   const get = key => api.RADIUS_EXTRACTORS[key](DONE);
 
   check('complete: pages completed', get('pagesCompleted'), '33');
@@ -2072,7 +2148,7 @@ const DECK_FILLER_ROWS = [
   check('complete: assessment status read from its label',
     get('assessmentStatus'), 'Pre completed');
 
-  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const LIVE = dwp('live');
   check('untouched page: no mathlete score',
     api.RADIUS_EXTRACTORS.mathleteScore(LIVE), '');
   check('untouched page: no assessment status',
@@ -2103,7 +2179,7 @@ const DECK_FILLER_ROWS = [
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
 
-    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    const page = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
         ? rosterReply([{ name: 'Amalie Laz', studentId: 1 },
@@ -2174,7 +2250,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
-    const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+    const page = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
         ? rosterReply(['Amalie Laz'])
@@ -2214,7 +2290,7 @@ const DECK_FILLER_ROWS = [
   vm.runInContext(
     'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     clean.context);
-  const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
+  const page = dwp('complete');
   clean.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
       ? rosterReply(['Amalie Laz'])
@@ -2263,7 +2339,7 @@ const DECK_FILLER_ROWS = [
   vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     s.context);
 
-  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const LIVE = dwp('live');
   s.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
       ? rosterReply(['Amalie Laz'])
@@ -2289,7 +2365,7 @@ const DECK_FILLER_ROWS = [
   vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
     s.context);
 
-  const LIVE = fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8');
+  const LIVE = dwp('live');
   s.harness.fetchHandler.value = url => ({ code: 200, body:
     url.indexOf('/IM') !== -1
       ? rosterReply(['Jane Doe'])
