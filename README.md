@@ -253,6 +253,18 @@ that changed shape — those are reported as problems and write nothing at all.
 Marking them `?` would put a confident answer in a cell where nobody actually
 knows one.
 
+### One student, several rows
+
+The SOD organiser writes a row per student per hour, so the same name twice in
+a selection is ordinary. Radius offers only their **most recent** session, so
+those rows cannot all receive it — writing it to each would give the noon row
+the afternoon's pages, times and notes.
+
+The session goes to the row whose hour sits closest to its sign-in time; the
+others are left empty and named in the report. Where the rows carry no hour to
+tell them apart, **nothing is written to any of them**, because a guess here
+records one hour's work against another.
+
 ### A row that already says they are not coming
 
 If any of `CONFIG.RADIUS.SKIP_MARKERS` — `LM cancel`, `no show` — appears

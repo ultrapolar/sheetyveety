@@ -253,6 +253,19 @@ function columnLetter_(index) {
   return letter;
 }
 
+/**
+ * The appointment time a name cell starts with, or '' if it has none.
+ *
+ * The counterpart to extractName_: that throws the time away to get the name,
+ * this keeps it to tell one of a student's rows from another.
+ */
+function leadingTimeOf_(raw) {
+  const text = String(raw == null ? '' : raw).trim();
+  if (!text) return '';
+  const match = text.match(LEADING_TIME_);
+  return match ? match[0].trim().replace(/[-–—:]\s*$/, '').trim() : '';
+}
+
 /** Splits a comma-separated task list, dropping blanks. */
 function splitList_(raw) {
   const text = String(raw == null ? '' : raw).trim();

@@ -1410,6 +1410,74 @@ const DECK_FILLER_ROWS = [
     said.includes('CONFIG.SEATING.PODS'));
 }
 
+// 45o. One student, several rows, one session.
+//
+//      The SOD organiser writes a row per student per hour, so the same name
+//      in the selection twice is ordinary. Radius offers only their most
+//      recent session, and it used to be written into every one of those rows
+//      -- the noon row receiving the afternoon's pages, times and notes, with
+//      nothing to say it had happened.
+{
+  function run(names) {
+    const wopRows = names.map(function (n) {
+      const row = [n]; while (row.length < 26) row.push(''); return row;
+    });
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(names.length, 26, '#ffffff'));
+    wop.setSelection(1, names.length);
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-22'), String, Number, Object, Array, RegExp,
+      Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop], 'Daily WOP');
+    h.scriptProps.RADIUS_COOKIE = 'session=abc';
+    const api = loadScript(ctx);
+    vm.runInContext('CONFIG.RADIUS.ROSTER_URL = ' +
+      '"https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";', ctx);
+    const page = dwp('complete', '8/22/2026');   // signs in at 10:48 AM
+    h.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+
+    api.importRadiusData();
+    const preview = h.dialogs[h.dialogs.length - 1];
+    if (preview && preview.title === 'Confirm Radius import') {
+      const token = (preview.html.match(/name="token" value="([^"]+)"/) || [])[1];
+      const form = { token: token, mode: 'overwrite' };
+      (preview.html.match(/name="pick_(\d+)"/g) || []).forEach(function (m) {
+        form['pick_' + m.match(/\d+/)[0]] = 'on';
+      });
+      api.applyRadiusPlan_FromUI(form);
+    }
+    return { wop: wop, pages: i => String(wop.values[i][7]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Signed in at 10:48: nearer the 11:00 slot than the 10:00 one.
+  let r = run(['10:00 Amalie Laz', '11:00 Amalie Laz']);
+  check('one session: it goes to the hour it belongs to',
+    [r.pages(0), r.pages(1)], ['', '33']);
+  checkTruthy('one session: the empty row is explained',
+    r.said().includes('only their most recent session'));
+
+  // Order on the sheet does not decide it; the hour does.
+  r = run(['11:00 Amalie Laz', '2:00 Amalie Laz']);
+  check('one session: the nearer hour wins wherever it sits',
+    [r.pages(0), r.pages(1)], ['33', '']);
+
+  // No hours to tell the rows apart: a guess would write one hour's work
+  // against another, so nothing is written and the reason is given.
+  r = run(['Amalie Laz', 'Amalie Laz']);
+  check('one session: without hours, neither row is filled',
+    [r.pages(0), r.pages(1)], ['', '']);
+  checkTruthy('one session: and it says why',
+    r.said().includes('no hours to tell them apart'));
+
+  // A single row for a student is untouched by any of this.
+  r = run(['10:00 Amalie Laz']);
+  check('one session: a lone row still imports', r.pages(0), '33');
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {

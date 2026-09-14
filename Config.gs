@@ -43,6 +43,11 @@ const CONFIG = {
   DATE_FORMAT: 'MM/dd',
 
   // How long a pending SOD dialog stays valid, in seconds.
+  // The centre runs mornings or afternoons, never small hours, so a bare hour
+  // at or below this is read as afternoon: 4:00 comes after 12:00, not eight
+  // hours before 9:00, and a row headed "1:00" means the early afternoon.
+  AFTERNOON_AT_OR_BELOW: 7,
+
   CACHE_TTL_SECONDS: 3600,
 
   // How long to wait for another user's run to finish, in milliseconds.
@@ -204,8 +209,5 @@ const CONFIG = {
     ORGANIZE_START_ROW: 1,
     INSTRUCTOR_COLUMN: 2,   // B
 
-    // The centre runs mornings or afternoons, never small hours, so an hour at
-    // or below this is read as afternoon: 4:00 sorts after 12:00, not before 9.
-    AFTERNOON_AT_OR_BELOW: 7
   }
 };

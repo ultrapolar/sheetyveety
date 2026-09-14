@@ -171,7 +171,7 @@ function hourSortKey_(label) {
   const match = String(label).match(/^(\d{1,2}):(\d{2})/);
   if (!match) return Number.MAX_SAFE_INTEGER;
   let hours = Number(match[1]);
-  if (hours <= CONFIG.SEATING.AFTERNOON_AT_OR_BELOW) hours += 12;
+  if (hours <= CONFIG.AFTERNOON_AT_OR_BELOW) hours += 12;
   return hours * 60 + Number(match[2]);
 }
 

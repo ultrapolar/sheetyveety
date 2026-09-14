@@ -366,6 +366,45 @@ function escapeForRegex_(text) {
 
 /** The whole <input> tag carrying a given id, or null. */
 /**
+ * The minute of the day a slot label means.
+ *
+ * parseClockTime_ reads "1:00" as one in the morning, which is right for a
+ * clock and wrong for a row heading on a sheet whose day runs into the
+ * evening. A bare hour with no am or pm on it is read the way the centre runs.
+ */
+function slotMinutes_(text) {
+  const value = parseClockTime_(text);
+  if (value === null) return null;
+  if (/[ap]\.?m/i.test(String(text))) return value;
+  return value <= CONFIG.AFTERNOON_AT_OR_BELOW * 60 ? value + 12 * 60 : value;
+}
+
+/**
+ * Which of a student's rows the one session Radius offers belongs to.
+ *
+ * Radius hands back a student's most recent session and nothing else, so when
+ * the same student sits in the selection more than once -- which the start of
+ * day organiser produces as a matter of course, a row per hour -- those rows
+ * cannot all be right. The row whose hour sits closest to the session's
+ * sign-in is the one it belongs to. Returns null when the rows carry no hours
+ * to tell them apart by, because a guess here writes one hour's work against
+ * another and says nothing.
+ */
+function sessionRowOwner_(siblings, signInText) {
+  const signIn = parseClockTime_(signInText);
+  if (signIn === null) return null;
+  if (siblings.some(function (row) { return row.slot === null; })) return null;
+
+  let best = null;
+  let bestDistance = Infinity;
+  siblings.forEach(function (row) {
+    const distance = Math.abs(row.slot - signIn);
+    if (distance < bestDistance) { bestDistance = distance; best = row.index; }
+  });
+  return best;
+}
+
+/**
  * A student who simply was not here today.
  *
  * Kept apart from every other failure on purpose. "No session today" is
@@ -985,6 +1024,7 @@ function buildRadiusPlan_(sheets, selection, log) {
     students: [],
     problems: [],
     skipped: [],
+    unreachable: [],
     stoppedEarly: false
   };
 
@@ -997,6 +1037,20 @@ function buildRadiusPlan_(sheets, selection, log) {
   });
 
   const roster = loadRoster_();
+
+  // Where each student sits in the selection, and at what hour. The organiser
+  // writes a row per student per hour, so the same name appearing more than
+  // once is ordinary rather than a mistake -- but Radius offers only their
+  // most recent session, so those rows cannot all receive it.
+  const rowsByName = {};
+  for (let i = 0; i < selection.numRows; i++) {
+    const raw = nameCol.value(i);
+    const rowName = extractName_(raw);
+    if (!rowName) continue;
+    const key = normalizeStudentName_(rowName);
+    if (!rowsByName[key]) rowsByName[key] = [];
+    rowsByName[key].push({ index: i, slot: slotMinutes_(leadingTimeOf_(raw)) });
+  }
 
   // The whole of each row, so a "no show" written wherever the pen landed is
   // still found.
@@ -1067,6 +1121,28 @@ function buildRadiusPlan_(sheets, selection, log) {
 
       const review = reviewSessionTiming_(
         valueOf(timing.SIGN_IN_FIELD), valueOf(timing.SIGN_OUT_FIELD));
+
+      // One session, several rows wanting it. Give it to the row whose hour it
+      // actually belongs to, and leave the others empty rather than filling
+      // them with an hour of work that happened at a different one.
+      const siblings = rowsByName[normalizeStudentName_(name)] || [];
+      if (siblings.length > 1) {
+        const owner = sessionRowOwner_(siblings, valueOf(timing.SIGN_IN_FIELD));
+        if (owner !== i) {
+          const reason = owner === null
+            ? 'is in the selection ' + siblings.length + ' times and the rows ' +
+              'carry no hours to tell them apart, so there is no saying which ' +
+              'of them this session belongs to.'
+            : 'is in the selection ' + siblings.length + ' times. Radius offers ' +
+              'only their most recent session, which belongs to row ' +
+              (selection.startRow + owner) + '.';
+          plan.unreachable.push({ index: i, name: name, message: reason });
+          log.warn(name, reason + ' Nothing written to row ' +
+            (selection.startRow + i) + '.');
+          Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
+          continue;
+        }
+      }
 
       // Everything appended to the note column, in order: the timing
       // observations, then the Mathlete score if one was given.
@@ -1286,6 +1362,7 @@ function storeRadiusPlan_(plan) {
     count: plan.students.length,
     problems: plan.problems,
     skipped: plan.skipped,
+    unreachable: plan.unreachable,
     stoppedEarly: plan.stoppedEarly
   });
   plan.students.forEach(function (student, n) {
@@ -1409,6 +1486,16 @@ function showRadiusPlanDialog_(plan, log) {
     'want to leave out.</p>' +
     '<form id="radiusForm">' +
     '<input type="hidden" name="token" value="' + escapeHtml_(token) + '">';
+
+  if (plan.unreachable && plan.unreachable.length) {
+    html += '<div style="background: #fffbeb; border: 1px solid #fde68a; ' +
+      'border-radius: 6px; padding: 8px; margin-bottom: 10px; color: #92400e;">' +
+      plan.unreachable.length + ' row(s) are a second appearance of a student ' +
+      'Radius only offers one session for: ' +
+      plan.unreachable.map(function (row) { return escapeHtml_(row.name); })
+        .join(', ') + '. They are left empty — the session goes to the row ' +
+      'whose hour it belongs to.</div>';
+  }
 
   if (plan.skipped && plan.skipped.length) {
     html += '<div style="background: #f3f4f6; border: 1px solid #e5e7eb; ' +
@@ -1540,6 +1627,9 @@ function applyRadiusPlan_FromUI(formObject) {
   (plan.skipped || []).forEach(function (row) {
     log.ok(row.name, 'row says "' + row.marker + '" — Radius was not asked.');
   });
+  (plan.unreachable || []).forEach(function (row) {
+    log.warn(row.name, row.message);
+  });
   plan.students.forEach(function (student) {
     if (!student.absent) return;
     if (picked.indexOf(student.index) === -1) return;
@@ -1553,6 +1643,9 @@ function applyRadiusPlan_FromUI(formObject) {
     { label: 'Not in today', value: plan.students.filter(function (st) {
       return st.absent; }).length },
     { label: 'Already marked not coming', value: (plan.skipped || []).length },
+    { label: 'Another row holds that session',
+      value: (plan.unreachable || []).length,
+      alert: (plan.unreachable || []).length > 0 },
     { label: 'Could not be fetched', value: plan.problems.length,
       alert: plan.problems.length > 0 },
     { label: 'Cells left alone', value: stats.skippedCells },
@@ -1593,6 +1686,11 @@ function importRadiusData() {
           return row.name + ': "' + row.marker + '"';
         }).join('; ') + '), and there is nobody else in the selection to ask ' +
         'Radius about. Nothing was written.');
+      return;
+    }
+    if (plan.unreachable.length) {
+      showError_('Nothing could be written. ' + plan.unreachable[0].name + ' ' +
+        plan.unreachable[0].message);
       return;
     }
     showError_(plan.problems.length
