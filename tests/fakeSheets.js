@@ -274,13 +274,18 @@ function install(globalObj, sheets, activeSheetName) {
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */
-function fixedDate(iso) {
+// `tickMs` advances the clock a little on every reading, for the one thing a
+// frozen clock cannot show: a run that takes too long. The default of 0 leaves
+// every other test looking at a single fixed instant.
+function fixedDate(iso, tickMs) {
   const pinned = new Date(iso + 'T12:00:00').getTime();
+  const step = tickMs || 0;
+  let elapsed = 0;
   return class PinnedDate extends Date {
     constructor(...args) {
-      if (args.length === 0) super(pinned); else super(...args);
+      if (args.length === 0) super(pinned + elapsed); else super(...args);
     }
-    static now() { return pinned; }
+    static now() { elapsed += step; return pinned + elapsed; }
   };
 }
 

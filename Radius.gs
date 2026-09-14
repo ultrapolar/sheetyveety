@@ -1025,7 +1025,8 @@ function buildRadiusPlan_(sheets, selection, log) {
     problems: [],
     skipped: [],
     unreachable: [],
-    stoppedEarly: false
+    stoppedEarly: false,
+    stoppedAtRow: null
   };
 
   const nameCol = WopColumn_(sheets.wop, selection.startRow, selection.numRows,
@@ -1068,6 +1069,7 @@ function buildRadiusPlan_(sheets, selection, log) {
   for (let i = 0; i < selection.numRows; i++) {
     if (Date.now() - started > CONFIG.RADIUS.MAX_RUNTIME_MS) {
       plan.stoppedEarly = true;
+      plan.stoppedAtRow = selection.startRow + i;
       log.warn('Run stopped', 'Approaching the 6-minute limit after ' +
         plan.students.length + ' student(s). Highlight the rest and run again.');
       break;
@@ -1296,6 +1298,19 @@ function applyRadiusPlan_(sheets, plan, picked, mode, log) {
         const column = columns[field.key];
         const current = String(column.value(student.index)).trim();
 
+        // The absent mark is not a value from Radius; it is our own note that
+        // there was no session to read. Appending it to a time gives a cell
+        // saying both at once, and replacing one asserts an absence against a
+        // person who was here to write the time down. It fills an empty cell
+        // or it stays out of the way.
+        if (student.absent && current) {
+          stats.skippedCells++;
+          log.warn(student.name, 'column ' + columnLetter_(field.column) +
+            ' already holds "' + current + '", which says they were here. ' +
+            'Left as it is rather than marked "' + value + '".');
+          return;
+        }
+
         if (field.merge === 'statusLetters') {
           column.setValue(student.index, value);
           written.push(field.label + ': ' + value);
@@ -1363,7 +1378,9 @@ function storeRadiusPlan_(plan) {
     problems: plan.problems,
     skipped: plan.skipped,
     unreachable: plan.unreachable,
-    stoppedEarly: plan.stoppedEarly
+    stoppedEarly: plan.stoppedEarly,
+    stoppedAtRow: plan.stoppedAtRow,
+    numRows: plan.numRows
   });
   plan.students.forEach(function (student, n) {
     entries['radiusPlan_' + token + '_' + n] = JSON.stringify(student);
@@ -1486,6 +1503,22 @@ function showRadiusPlanDialog_(plan, log) {
     'want to leave out.</p>' +
     '<form id="radiusForm">' +
     '<input type="hidden" name="token" value="' + escapeHtml_(token) + '">';
+
+  // Apps Script kills a run at six minutes, so a long selection is fetched as
+  // far as it gets and no further. Saying only how many were fetched leaves the
+  // rest looking done: the report afterwards counts what was written, agrees
+  // with itself, and never mentions the rows nobody ever asked about.
+  if (plan.stoppedEarly) {
+    const left = plan.stoppedAtRow === null ? null
+      : plan.startRow + plan.numRows - plan.stoppedAtRow;
+    html += '<div style="background: #fef2f2; border: 1px solid #fecaca; ' +
+      'border-radius: 6px; padding: 8px; margin-bottom: 10px; color: #b91c1c;">' +
+      '<b>This run stopped early.</b> Apps Script allows six minutes, and the ' +
+      'selection was longer than that allows' +
+      (left ? ' — ' + left + ' row(s) from row ' + plan.stoppedAtRow +
+        ' down were never asked about' : '') +
+      '. Deal with these, then highlight the rest and run again.</div>';
+  }
 
   if (plan.unreachable && plan.unreachable.length) {
     html += '<div style="background: #fffbeb; border: 1px solid #fde68a; ' +
@@ -1630,6 +1663,14 @@ function applyRadiusPlan_FromUI(formObject) {
   (plan.unreachable || []).forEach(function (row) {
     log.warn(row.name, row.message);
   });
+  if (plan.stoppedEarly) {
+    const left = plan.stoppedAtRow === null || plan.numRows === undefined
+      ? null : plan.startRow + plan.numRows - plan.stoppedAtRow;
+    log.error('Run stopped early', 'Six minutes is all Apps Script allows' +
+      (left ? ', and ' + left + ' row(s) from row ' + plan.stoppedAtRow +
+        ' down were never asked about' : '') +
+      '. Highlight the rest and run again.');
+  }
   plan.students.forEach(function (student) {
     if (!student.absent) return;
     if (picked.indexOf(student.index) === -1) return;

@@ -1240,6 +1240,7 @@ const DECK_FILLER_ROWS = [
       [wopRow], { start: 1, rows: 1 }, '2026-08-22');
     if (opts.rowNote) s.wop.values[0][opts.rowNoteColumn || 16] = opts.rowNote;
     if (opts.signedIn) s.wop.values[0][11] = opts.signedIn;
+    s.mode = opts.mode || 'overwrite';
     s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
@@ -1253,7 +1254,7 @@ const DECK_FILLER_ROWS = [
       }
       return opts.dwpFails ? { code: 500, body: 'boom' } : { code: 200, body: page };
     };
-    confirmRadiusImport(s);
+    confirmRadiusImport(s, { mode: opts.mode || 'overwrite' });
     return { s: s,
       L: () => String(s.wop.values[0][11]), M: () => String(s.wop.values[0][12]),
       H: () => String(s.wop.values[0][7]),
@@ -1327,11 +1328,19 @@ const DECK_FILLER_ROWS = [
   checkTruthy('mixed: and the preview accounts for them',
     r.said().includes('not coming'));
 
-  // A time already in the sign-in column is a clash like any other, not
-  // something to be quietly overwritten with a question mark.
+  // A time already in the sign-in column says a person was here to write it.
+  // The absent mark is our own note that there was no session to read, so it
+  // fills an empty cell or stays out of the way -- under every mode. Appending
+  // gave "10:48 AM | ?", a cell claiming both at once.
+  ['append', 'overwrite', 'skip'].forEach(function (mode) {
+    const t = run({ pageDate: '8/15/2026', signedIn: '10:48 AM', mode: mode });
+    check('absent (' + mode + '): the time written by a person stands',
+      t.L(), '10:48 AM');
+  });
   r = run({ pageDate: '8/15/2026', signedIn: '10:48 AM' });
-  checkTruthy('absent: an existing time is treated as a clash',
-    r.said().includes('10:48 AM'));
+  checkTruthy('absent: and the contradiction is reported',
+    r.said().includes('says they were here'));
+  check('absent: the empty column beside it is still marked', r.M(), '?');
 }
 
 // 45m. Edge cases that had no rule, and now do.
@@ -1603,6 +1612,70 @@ const DECK_FILLER_ROWS = [
   r = sod('T2, , T3');
   check('blanks: ignored', [r.E(), r.F()], ['T2', 'T3']);
   checkTruthy('blanks: not reported as a repeat', !r.said().includes('more than once'));
+}
+
+// 45s. A selection longer than six minutes allows.
+//
+//      Apps Script stops a run at six minutes, so a long selection is fetched
+//      as far as it gets. The preview used to say only how many students it
+//      had, which leaves the rest looking done -- and the report afterwards
+//      counts what was written, agrees with itself, and never mentions the
+//      rows nobody ever asked about.
+{
+  const names = [];
+  for (let n = 0; n < 6; n++) names.push('Student ' + n);
+
+  const wopRows = names.map(function (n) {
+    const row = [n]; while (row.length < 26) row.push(''); return row;
+  });
+  const deck = new FakeSheet('Deck List',
+    [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+  const wop = new FakeSheet('Daily WOP', wopRows, makeGrid(6, 26, '#ffffff'));
+  wop.setSelection(1, 6);
+
+  // Two minutes pass on every reading of the clock, so the run gives up partway.
+  const ctx = vm.createContext({ console, Buffer, JSON, Math,
+    Date: fixedDate('2026-08-22', 120000), String, Number, Object, Array,
+    RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [deck, wop], 'Daily WOP');
+  h.scriptProps.RADIUS_COOKIE = 'session=abc';
+  const api = loadScript(ctx);
+  vm.runInContext('CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+    'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', ctx);
+  // Each page has to name the student it was asked for, or the mislinked-page
+  // guard turns every row into a problem and there is no plan to preview.
+  const page = dwp('complete');
+  h.fetchHandler.value = url => {
+    if (url.indexOf('/IM') !== -1) return { code: 200, body: rosterReply(names) };
+    const id = Number((url.match(/studentId=(\d+)/) || [])[1]);
+    const who = names[id - 1000] || names[0];
+    return { code: 200, body:
+      page.replace(/<title>[^<]*<\/title>/, '<title>' + who + '</title>') };
+  };
+
+  api.importRadiusData();
+  const preview = h.dialogs[h.dialogs.length - 1];
+
+  checkTruthy('ceiling: the preview says the run stopped early',
+    preview.html.includes('This run stopped early'));
+  checkTruthy('ceiling: and how many rows went unasked',
+    /row\(s\) from row \d+ down were never asked about/.test(preview.html));
+  checkTruthy('ceiling: it does not simply report a smaller success',
+    preview.html.indexOf('stopped early') < preview.html.indexOf('Confirm changes for all'));
+
+  // Confirming what was fetched must not make the report look complete.
+  const token = (preview.html.match(/name="token" value="([^"]+)"/) || [])[1];
+  const form = { token: token, mode: 'overwrite' };
+  (preview.html.match(/name="pick_(\d+)"/g) || []).forEach(function (m) {
+    form['pick_' + m.match(/\d+/)[0]] = 'on';
+  });
+  api.applyRadiusPlan_FromUI(form);
+
+  const report = h.dialogs[h.dialogs.length - 1].html;
+  checkTruthy('ceiling: the report says so too',
+    report.includes('Run stopped early'));
+  checkTruthy('ceiling: and tells you what to do about it',
+    report.includes('Highlight the rest and run again'));
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

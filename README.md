@@ -262,6 +262,12 @@ sign-out columns, so it reads as asked-and-answered rather than as one nobody
 got to. That covers every way of not being here: not on the roster, on it but
 never checked in, checked in with no DWP, or a DWP from another day.
 
+The mark only ever fills an **empty** cell, whichever conflict mode is chosen.
+A time already sitting in the sign-in column says a person was there to write
+it down; appending gave `10:48 AM | ?`, a cell claiming both at once, and
+replacing it asserted an absence against somebody better placed to know. The
+contradiction is reported instead.
+
 **A failure to find out is kept separate.** A dead cookie, an HTTP 500, a page
 that changed shape — those are reported as problems and write nothing at all.
 Marking them `?` would put a confident answer in a cell where nobody actually
@@ -471,8 +477,11 @@ lower case and stray spaces.
 - Nothing is written until every row has been attempted.
 - There is a `FETCH_DELAY_MS` pause between fetches. Radius is someone else's
   server.
-- The run stops itself before the 6-minute Apps Script ceiling, saves what it
-  has, and tells you to highlight the rest and run again.
+- Apps Script stops a run at six minutes. A selection longer than that is
+  fetched as far as it gets, and **both the preview and the report say so** —
+  naming the row it stopped at and how many were never asked about. Without
+  that, the report counts what was written, agrees with itself, and leaves the
+  rest looking done.
 
 
 ## How Column K is read
