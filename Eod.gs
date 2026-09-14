@@ -38,20 +38,6 @@ function processWopToDeck() {
   const dateStr = Utilities.formatDate(
     new Date(), sheets.ss.getSpreadsheetTimeZone(), CONFIG.DATE_FORMAT);
 
-  // Pull from Radius first. It fills in the Column K instruction that the rest
-  // of this function then acts on, and flushes before returning, so the reads
-  // below see what it wrote. Doing it here rather than as a separate menu item
-  // removes any chance of running the two the wrong way round.
-  let importStats = null;
-  if (CONFIG.RADIUS.RUN_ON_EOD) {
-    if (radiusIsConfigured_()) {
-      importStats = runRadiusImport_(sheets, selection, log);
-    } else {
-      log.warn('Radius', 'skipped — set the session cookie and the Instruction ' +
-        'Manager URL, or turn CONFIG.RADIUS.RUN_ON_EOD off to stop this notice.');
-    }
-  }
-
   try {
     nameCol = WopColumn_(sheets.wop, selection.startRow, selection.numRows, CONFIG.WOP_COL.NAME);
     statusCol = WopColumn_(sheets.wop, selection.startRow, selection.numRows, CONFIG.WOP_COL.STATUS);
@@ -178,12 +164,6 @@ function processWopToDeck() {
   }
 
   const summary = [];
-  if (importStats) {
-    summary.push({ label: 'Imported from Radius', value: importStats.imported });
-    if (importStats.failed) {
-      summary.push({ label: 'Radius rows failed', value: importStats.failed, alert: true });
-    }
-  }
   summary.push(
     { label: 'Students processed', value: stats.students },
     { label: "Total 'Y' actions", value: stats.yActions },

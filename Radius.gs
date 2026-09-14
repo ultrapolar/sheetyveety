@@ -1184,16 +1184,6 @@ function radiusColumnList_() {
   }).join(', ');
 }
 
-/**
- * Runs the import without asking: build the plan, apply all of it.
- * Used by EOD, where a modal part way through a batch would be a nuisance.
- */
-function runRadiusImport_(sheets, selection, log) {
-  const plan = buildRadiusPlan_(sheets, selection, log);
-  return applyRadiusPlan_(sheets, plan, null, CONFIG.RADIUS.EOD_CONFLICT_MODE, log);
-}
-
-
 // ------------------------------------------------------------------
 // The confirmation dialog
 // ------------------------------------------------------------------

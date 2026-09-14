@@ -9,6 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
+| `Seating.gs` | **EOD → Seating chart**: where each student sat, and who sat with them. |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
 | `Menu.gs` | Menu construction. |
@@ -36,8 +37,10 @@ spreadsheet.
 
 ## Radius import
 
-Highlight the students in **column A** of Daily WOP, then **Radius → Import for
-highlighted rows**. The import fetches everything first and shows you what it
+Highlight the students in **column A** of Daily WOP, then **EOD → Radius import
+for highlighted rows**. Nothing runs on its own — the colored-sheets batch and
+the import are two deliberate clicks, in whichever order suits you. Running the
+import first puts its `Y` in column K for the batch to act on. The import fetches everything first and shows you what it
 found before writing anything:
 
 - one block per student, listing the value destined for each column
@@ -64,10 +67,6 @@ harmless option for cells that already hold something —
 `CONFIG.RADIUS.EOD_CONFLICT_MODE` is `'skip'`, so it fills the empties and
 leaves everything else be.
 
-Set `CONFIG.RADIUS.RUN_ON_EOD` to `false` to keep it to its own menu item. If
-it is on but the cookie or the roster settings are missing, EOD still runs its
-own work and says in the report why the import did not.
-
 Asks Radius for the **Instruction Manager roster**
 (`POST /AnswerKey/GetStudentDataSource`, with `CONFIG.RADIUS.CENTER_ID` as the
 centre), matches those names against column A of the highlighted Daily WOP
@@ -84,6 +83,46 @@ itself builds the link, so no id is ever guessed.
 
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
+
+## The seating chart
+
+**EOD → Seating chart for highlighted rows** records where each highlighted
+student sat, and who sat with them, in **column N**:
+
+```
+1C | IN3                 sat at table 1 seat C, with IN3
+1C, 2A | IN3 IN1         moved between hours
+```
+
+The chart is a grid of tables drawn one block per hour: a row of table numbers,
+then the seat rows C, B and A, with an instructor column between each pair of
+tables.
+
+**A seat is never read from the cell it is in.** The cells are printed with
+`1C`, `2A` and so on, but a student's name is written *over* that label, so by
+the time it matters the label is gone. The seat is worked out from position
+instead — the table number from the block header directly above, and the row
+letter from the markers running down the side. There is a test asserting that
+while the labels are still present, every derived seat equals the label sitting
+in it; that is the premise the whole thing rests on.
+
+Set `CONFIG.SEATING.SHEET_NAME` to the chart's tab. If it lives in a separate
+document, put that document's id in `CONFIG.SEATING.SPREADSHEET_ID` — the part
+of its URL between `/d/` and `/edit`.
+
+### Names on the chart
+
+The chart is filled in by hand and in a hurry, so surnames get cut short.
+`Amalie L` matches `Amalie Laz`; `Amalie Roe` does not. A first name on its own
+matches too.
+
+If one chart entry could be **two** of the highlighted students — `Amalie L`
+with both an Amalie Laz and an Amalie Lee selected — nothing is written for
+either, and the report names both. Writing the surname out on the chart settles
+it.
+
+A student already holding a different seating in column N has it replaced, and
+the replacement is named in the report. One already correct is left alone.
 
 ### What is extracted, and where it lands
 
@@ -251,11 +290,11 @@ student's data.
 just returns the sign-in page — with a perfectly normal `200`, which is why
 `looksLikeLoginPage_` exists rather than trusting the status code.
 
-**Radius → Set session cookie** stores a cookie copied from a logged-in
+**Tools → Set Radius session cookie** stores a cookie copied from a logged-in
 browser in Script Properties. It is not in the spreadsheet and is not visible
 to people the sheet is shared with, and no password is stored anywhere. The
 trade-off is that it expires; when it does, the import says so plainly.
-**Radius → Test connection** checks the cookie *and* the roster without
+**Tools → Test Radius connection** checks the cookie *and* the roster without
 touching the spreadsheet.
 
 ### How names are matched

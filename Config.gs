@@ -132,18 +132,28 @@ const CONFIG = {
     UNFINALIZED_FIELD: 'finalizedFlag',
     UNFINALIZED_VALUE: 'N',
 
-    EOD_CONFLICT_MODE: 'skip',
-
-    // Run the import automatically as the first step of the EOD batch, so the
-    // instruction it writes into column K is in place before EOD reads it.
-    // Set false to keep the import to its own menu item.
-    RUN_ON_EOD: true,
-
     // Pause between page fetches, in milliseconds. Radius is someone else's
     // server; there is no reason to hammer it.
     FETCH_DELAY_MS: 300,
 
     // Stop and report rather than being killed by the 6-minute ceiling.
     MAX_RUNTIME_MS: 4.5 * 60 * 1000
+  },
+
+  // The seating chart: a grid of tables drawn one block per hour, with the
+  // students written into the seat cells by hand.
+  SEATING: {
+    // Blank means a tab in this same spreadsheet. To read a separate document,
+    // paste the id out of its URL: .../spreadsheets/d/<this part>/edit
+    SPREADSHEET_ID: '',
+    SHEET_NAME: 'Seating Chart',
+
+    // Where the result lands on the Daily WOP.
+    TARGET_COLUMN: 14,   // N
+
+    // "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved during the day.
+    SEPARATOR: ' | ',
+    SEAT_JOIN: ', ',
+    INSTRUCTOR_JOIN: ' '
   }
 };

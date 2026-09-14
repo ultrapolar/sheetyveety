@@ -123,8 +123,18 @@ function install(globalObj, sheets, activeSheetName) {
     getSpreadsheetTimeZone: () => 'America/New_York'
   };
 
+  // A seating chart kept in a separate document is reached by id, so the fake
+  // has to be able to hand one back rather than only the active spreadsheet.
+  const booksById = {};
+
   globalObj.SpreadsheetApp = {
     getActiveSpreadsheet: () => spreadsheet,
+    openById: id => {
+      if (!booksById[id]) {
+        throw new Error('Unable to open the spreadsheet with id ' + id + '.');
+      }
+      return booksById[id];
+    },
     getUi: () => ({
       createMenu: () => ({ addItem() { return this; }, addToUi() {} }),
       alert: (...args) => {
@@ -219,7 +229,15 @@ function install(globalObj, sheets, activeSheetName) {
   // be reachable from the object the script actually holds.
   globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
 
-  return { dialogs, alerts, uiAnswer, fetchLog, fetchHandler, scriptProps,
+  // Register an extra spreadsheet that openById can find.
+  const addBook = (id, bookSheets) => {
+    booksById[id] = {
+      getSheetByName: name => bookSheets.filter(sh => sh.getName() === name)[0] || null,
+      getSpreadsheetTimeZone: () => 'UTC'
+    };
+  };
+
+  return { dialogs, alerts, uiAnswer, fetchLog, fetchHandler, scriptProps, addBook,
     sheets: byName };
 }
 

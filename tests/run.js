@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -33,7 +33,9 @@ function loadScript(context) {
   extractRadiusFields_, checkedRadioValue_, checkedRadioLabel_, formatPkCode_,
   yesFlag_, CONFIG, mergeStatusLetters_, parseClockTime_, reviewSessionTiming_,
   buildRadiusPlan_, applyRadiusPlan_, applyRadiusPlan_FromUI,
-  storeRadiusPlan_, loadRadiusPlan_, runRadiusImport_
+  storeRadiusPlan_, loadRadiusPlan_,
+  importSeatingChart, parseSeatingChart_, seatingNameMatches_,
+  formatSeating_, rowLetterOf_, isTableNumber_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -712,6 +714,160 @@ const DECK_FILLER_ROWS = [
     api.headerFor_([['Pages']], 1), { text: 'Pages', row: 1 });
 }
 
+// 45d. The seating chart, read from the real sample layout.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const BLOCK = JSON.parse(fs.readFileSync('tests/fixtures/seating-block.json', 'utf8'));
+  const clone = () => BLOCK.map(r => r.slice());
+
+  // While the chart still carries its printed labels, every seat derived from
+  // position has to come out equal to the label sitting in it. That is the
+  // whole premise: once a student is written over the label, position is all
+  // there is left to read.
+  const labelled = api.parseSeatingChart_(clone());
+  const disagreed = labelled.filter(e => e.seat !== e.occupant);
+  check('seating: derived seat matches every printed label', disagreed, []);
+  check('seating: found every occupied seat', labelled.length, 23);
+
+  const seatOf = name => labelled.filter(e => e.seat === name)[0] || {};
+  check('seating: 1C is read from table 1 and row C', seatOf('1C').seat, '1C');
+  check('seating: 1C takes the instructor beside it', seatOf('1C').instructor, 'IN3');
+  check('seating: row A takes the row A instructor',
+    seatOf('1A').instructor, 'IN1');
+  check('seating: the far table reads its own number', seatOf('8C').seat, '8C');
+
+  // 8A is empty on the sample, and an empty seat is not a seating.
+  check('seating: an empty seat is skipped',
+    labelled.filter(e => e.seat === '8A').length, 0);
+
+  // The footer row carries text but no row letter, so it is not a row of seats.
+  checkTruthy('seating: the rest room row is not read as seats',
+    !labelled.some(e => String(e.occupant).indexOf('Rest Room') !== -1));
+
+  // Now the live case: a name written over the label.
+  const live = clone();
+  live[3][15] = 'Amalie L';        // P4, the cell printed as 1C
+  const seated = api.parseSeatingChart_(live);
+  const amalie = seated.filter(e => e.occupant === 'Amalie L')[0];
+  check('seating: a name over the label still resolves to that seat',
+    [amalie.seat, amalie.instructor], ['1C', 'IN3']);
+}
+
+// 45e. Matching a hurried chart name to a Daily WOP name.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const m = (a, b) => api.seatingNameMatches_(a, b);
+
+  checkTruthy('name: exact', m('Amalie Laz', 'Amalie Laz'));
+  checkTruthy('name: shortened surname', m('Amalie L', 'Amalie Laz'));
+  checkTruthy('name: case and spacing', m('  amalie   l ', 'Amalie Laz'));
+  checkTruthy('name: last-comma-first on the chart', m('Laz, Amalie', 'Amalie Laz'));
+  checkTruthy('name: first name alone', m('Amalie', 'Amalie Laz'));
+
+  checkTruthy('name: a different surname does not match',
+    !m('Amalie Roe', 'Amalie Laz'));
+  checkTruthy('name: a different first name does not match',
+    !m('Amelia L', 'Amalie Laz'));
+  checkTruthy('name: an empty chart cell matches nobody', !m('', 'Amalie Laz'));
+
+  // Formatting, including a student who moved between hours.
+  check('format: one seat, one instructor',
+    api.formatSeating_([{ seat: '1C', instructor: 'IN3' }]), '1C | IN3');
+  check('format: two hours, same seat, two instructors',
+    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
+                        { seat: '1C', instructor: 'IN2' }]), '1C | IN3 IN2');
+  check('format: moved seats',
+    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
+                        { seat: '2A', instructor: 'IN1' }]), '1C, 2A | IN3 IN1');
+  check('format: a seat with no instructor beside it',
+    api.formatSeating_([{ seat: '1C', instructor: '' }]), '1C');
+  check('format: nothing found is nothing written', api.formatSeating_([]), '');
+}
+
+// 45f. The seating chart reaching the Daily WOP.
+{
+  function run(options) {
+    const opts = options || {};
+    const BLOCK = JSON.parse(fs.readFileSync('tests/fixtures/seating-block.json', 'utf8'));
+    const chart = BLOCK.map(r => r.slice());
+    (opts.place || [[3, 15, 'Amalie L']]).forEach(p => { chart[p[0]][p[1]] = p[2]; });
+
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wopRows = (opts.students || ['Amalie Laz']).map(name => {
+      const row = [name];
+      while (row.length < 26) row.push('');
+      if (opts.existing) row[13] = opts.existing;
+      return row;
+    });
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(wopRows.length, 26, '#ffffff'));
+    wop.setSelection(1, wopRows.length);
+    const seating = new FakeSheet('Seating Chart', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = opts.separate
+      ? install(ctx, [deck, wop], 'Daily WOP')
+      : install(ctx, [deck, wop, seating], 'Daily WOP');
+    const api = loadScript(ctx);
+    if (opts.separate) {
+      h.addBook('chart-id-123', [seating]);
+      vm.runInContext('CONFIG.SEATING.SPREADSHEET_ID = "chart-id-123";', ctx);
+    }
+    api.importSeatingChart();
+    return { wop, harness: h,
+      N: i => String(wop.values[i][13]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  let r = run();
+  check('seating sheet: seat and instructor land in column N', r.N(0), '1C | IN3');
+
+  // The chart can live in its own document.
+  r = run({ separate: true });
+  check('seating sheet: a chart in another spreadsheet works the same',
+    r.N(0), '1C | IN3');
+
+  // A student nobody sat: said out loud, not silently skipped.
+  r = run({ students: ['Ghost Student'] });
+  check('seating sheet: an unseated student is not written', r.N(0), '');
+  checkTruthy('seating sheet: and is reported',
+    r.said().includes('not found on the seating chart'));
+
+  // Two hours in different seats.
+  r = run({ place: [[3, 15, 'Amalie L'], [5, 13, 'Amalie L']] });
+  check('seating sheet: a student who moved gets both seats',
+    r.N(0), '1C, 2A | IN3 IN1');
+
+  // "Amalie L" cannot be resolved when two Amalie L-somethings are selected.
+  r = run({ students: ['Amalie Laz', 'Amalie Lee'] });
+  check('seating sheet: an ambiguous name writes nothing to either',
+    [r.N(0), r.N(1)], ['', '']);
+  checkTruthy('seating sheet: and says who it could have been',
+    r.said().includes('Amalie Laz or Amalie Lee'));
+
+  // Replacing something already in N is reported rather than done quietly.
+  r = run({ existing: '9Z | someone' });
+  check('seating sheet: a stale seat is corrected', r.N(0), '1C | IN3');
+  checkTruthy('seating sheet: and the replacement is named',
+    r.said().includes('replaced') && r.said().includes('9Z | someone'));
+
+  // Running it twice changes nothing the second time.
+  r = run({ existing: '1C | IN3' });
+  check('seating sheet: an already correct cell is left alone', r.N(0), '1C | IN3');
+  checkTruthy('seating sheet: and is not counted as a replacement',
+    !r.said().includes('replaced'));
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {
@@ -954,7 +1110,7 @@ const DECK_FILLER_ROWS = [
   const radiusSrc = fs.readFileSync('Radius.gs', 'utf8');
   const strays = [];
 
-  ['Setup.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs'].forEach(function (file) {
+  ['Setup.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs', 'Seating.gs'].forEach(function (file) {
     names(fs.readFileSync(file, 'utf8')).forEach(function (name) {
       if (shared.indexOf(name) !== -1) return;
       if (new RegExp('\\b' + name + '\\s*\\(').test(radiusSrc)) {
@@ -1620,70 +1776,58 @@ const DECK_FILLER_ROWS = [
       fs.readFileSync('tests/fixtures/dwp-live.html', 'utf8')), '');
 }
 
-// 52j. EOD runs the import first, then acts on what it wrote.
+// 52j. EOD reaches Radius only when asked. Import and EOD are two clicks now,
+//      and running them in order still hands the one's work to the other.
 {
-  function runEod(options) {
-    const opts = options || {};
-    const deckRows = [HEADER, ...DECK_FILLER_ROWS,
-      ['Amalie Laz', 'Task One', '', '', 'Task Two, Task Three', '',
-       '', '', '', '', '', '', '', '']];
-    const s = scenario(deckRows,
-      [{ name: 'Amalie Laz', status: opts.status === undefined ? '' : opts.status }],
+  function setUp(status) {
+    const s = scenario(
+      [HEADER, ...DECK_FILLER_ROWS,
+       ['Amalie Laz', 'Task One', '', '', 'Task Two, Task Three', '',
+        '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz', status: status === undefined ? '' : status }],
       { start: 1, rows: 1 }, '2026-08-22');
-
-    if (!opts.unconfigured) {
-      s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
-      vm.runInContext(
-        'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
-        s.context);
-    }
-    if (opts.runOnEod === false) {
-      vm.runInContext('CONFIG.RADIUS.RUN_ON_EOD = false;', s.context);
-    }
-
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
     const page = fs.readFileSync('tests/fixtures/dwp-complete.html', 'utf8');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
-      url.indexOf('/IM') !== -1
-        ? rosterReply(['Amalie Laz'])
-        : page });
-
-    s.api.processWopToDeck();
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
     return s;
   }
 
-  // The completed fixture reports a deck update, so the import writes Y into
-  // column K and EOD then advances the student on the strength of it.
-  let s = runEod();
-  check('EOD+import: column K carries the imported Y', s.wopStatus(0), 'Y');
-  check('EOD+import: and EOD marked it done', s.wopStatusBg(0), '#00ff00');
-  check('EOD+import: the student was advanced', s.deckCell(4, C.CURRENT), 'Task Two');
-  check('EOD+import: the finished task was archived',
+  // EOD on its own touches nothing outside the spreadsheet, cookie or no.
+  let s = setUp();
+  s.api.processWopToDeck();
+  check('EOD alone: Radius is not contacted', s.harness.fetchLog.length, 0);
+  check('EOD alone: column K is not invented', s.wopStatus(0), '');
+  check('EOD alone: the student is not advanced', s.deckCell(4, C.CURRENT), 'Task One');
+  checkTruthy('EOD alone: nothing it says mentions an import',
+    !s.harness.alerts.concat(s.harness.dialogs.map(d => d.html))
+      .some(t => String(t).includes('Imported from Radius')));
+
+  // Run deliberately, in order: the import writes the instruction into column
+  // K and EOD then acts on it, exactly as it used to in one step.
+  s = setUp();
+  confirmRadiusImport(s);
+  check('import then EOD: the import wrote the Y', s.wopStatus(0), 'Y');
+  s.api.processWopToDeck();
+  check('import then EOD: EOD marked it done', s.wopStatusBg(0), '#00ff00');
+  check('import then EOD: the student was advanced',
+    s.deckCell(4, C.CURRENT), 'Task Two');
+  check('import then EOD: the finished task was archived',
     s.deckCell(4, C.ARCHIVE), 'Task One 08/22');
-  check('EOD+import: the other columns landed too',
+  check('import then EOD: the other columns landed too',
     [String(s.wop.values[0][7]), String(s.wop.values[0][11])], ['33', '10:48 AM']);
-  check('EOD+import: notes and score reached column P',
+  check('import then EOD: notes and score reached column P',
     String(s.wop.values[0][15]), 'ALB: she doesnt shut up big L | MLS (3)');
-  checkTruthy('EOD+import: the report counts the import',
-    lastDialog(s).html.includes('Imported from Radius'));
 
-  // An operator-typed P plus the imported Y means both happen in one pass.
-  s = runEod({ status: 'P' });
-  check('EOD+import: typed P and imported Y both act',
+  // A typed P survives the import and acts alongside the imported Y.
+  s = setUp('P');
+  confirmRadiusImport(s);
+  s.api.processWopToDeck();
+  check('import then EOD: typed P and imported Y both act',
     [s.deckCell(4, C.CURRENT), s.deckCell(4, C.PINK)], ['Task Two', 'pink']);
-
-  // Turned off, EOD behaves exactly as it did before.
-  s = runEod({ runOnEod: false });
-  check('RUN_ON_EOD off: nothing fetched', s.harness.fetchLog.length, 0);
-  check('RUN_ON_EOD off: column K untouched', s.wopStatus(0), '');
-  check('RUN_ON_EOD off: student not advanced', s.deckCell(4, C.CURRENT), 'Task One');
-
-  // On but not set up: EOD still runs, and says why the import did not.
-  s = runEod({ unconfigured: true });
-  check('unconfigured: nothing fetched', s.harness.fetchLog.length, 0);
-  checkTruthy('unconfigured: EOD says the import was skipped',
-    s.harness.alerts.concat(s.harness.dialogs.map(d => d.html))
-      .some(t => String(t).includes('Radius')));
-  check('unconfigured: EOD did not invent a status', s.wopStatus(0), '');
 }
 
 // 53. A fully completed page. This is the one that exposed the textarea bug
