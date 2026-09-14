@@ -135,6 +135,17 @@ const CONFIG = {
     // remember to turn it back on.
     REQUIRE_SESSION_TODAY: true,
 
+    // Written into the sign-in and sign-out columns for a student who has no
+    // session today, so the row reads as asked-and-answered rather than as one
+    // nobody got to.
+    ABSENT_MARK: '?',
+
+    // If any of these appears anywhere in a row, the student is known not to be
+    // coming and Radius is not asked about them at all. Matched without regard
+    // to case, anywhere in the row, because whoever takes the call writes it
+    // wherever they happen to be looking.
+    SKIP_MARKERS: ['LM cancel', 'no show'],
+
     UNFINALIZED_FIELD: 'finalizedFlag',
     UNFINALIZED_VALUE: 'N',
 

@@ -1208,8 +1208,8 @@ const DECK_FILLER_ROWS = [
   check('session date: another day writes nothing', r.H(), '');
   checkTruthy('session date: and names the day it found',
     r.said().includes('8/15/2026'));
-  checkTruthy('session date: and says they have not checked in',
-    r.said().includes('not checked in'));
+  checkTruthy('session date: and says it is not today',
+    r.said().includes('not today'));
 
   // Same day, differently padded, is still the same day.
   r = importOn('08/22/2026');
@@ -1228,6 +1228,110 @@ const DECK_FILLER_ROWS = [
   // Turned off to backfill a past day, the old behaviour is back.
   r = importOn('8/15/2026', { allowAnyDay: true });
   check('session date: the check can be turned off for a backfill', r.H(), '33');
+}
+
+// 45l. A student who was not in today, and one the row already accounts for.
+{
+  function run(options) {
+    const opts = options || {};
+    const wopRow = { name: 'Amalie Laz' };
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [wopRow], { start: 1, rows: 1 }, '2026-08-22');
+    if (opts.rowNote) s.wop.values[0][opts.rowNoteColumn || 16] = opts.rowNote;
+    if (opts.signedIn) s.wop.values[0][11] = opts.signedIn;
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+
+    const page = dwp('complete', opts.pageDate || '8/22/2026');
+    s.harness.fetchHandler.value = url => {
+      if (url.indexOf('/IM') !== -1) {
+        return { code: 200, body: rosterReply(
+          opts.onRoster === false ? ['Someone Else'] : ['Amalie Laz']) };
+      }
+      return opts.dwpFails ? { code: 500, body: 'boom' } : { code: 200, body: page };
+    };
+    confirmRadiusImport(s);
+    return { s: s,
+      L: () => String(s.wop.values[0][11]), M: () => String(s.wop.values[0][12]),
+      H: () => String(s.wop.values[0][7]),
+      dwpFetches: () => s.harness.fetchLog.filter(
+        c => String(c.url).indexOf('/DWP/') !== -1).length,
+      said: () => s.harness.alerts.concat(
+        s.harness.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Their most recent session is from another day: they were not in.
+  let r = run({ pageDate: '8/15/2026' });
+  check('absent: sign-in and sign-out are marked', [r.L(), r.M()], ['?', '?']);
+  check('absent: nothing else is written', r.H(), '');
+  checkTruthy('absent: the report says why', r.said().includes('not today'));
+
+  // Not on the roster at all is the same kind of fact.
+  r = run({ onRoster: false });
+  check('absent: an unrostered student is marked too', [r.L(), r.M()], ['?', '?']);
+
+  // A row that already records the cancellation is left entirely alone, and
+  // Radius is not asked a question somebody has already answered.
+  r = run({ rowNote: 'LM cancel, mum called at 3' });
+  check('not coming: nothing written', [r.L(), r.M(), r.H()], ['', '', '']);
+  check('not coming: the DWP is never fetched', r.dwpFetches(), 0);
+  checkTruthy('not coming: the report says which words stopped it',
+    r.said().includes('LM cancel'));
+
+  r = run({ rowNote: 'NO SHOW' });
+  check('not coming: matched whatever the case', [r.L(), r.M()], ['', '']);
+  r = run({ rowNote: 'no show', rowNoteColumn: 14 });
+  check('not coming: found in any column of the row', [r.L(), r.M()], ['', '']);
+
+  // The distinction that matters: a failure to find out is not an absence.
+  // Marking it "?" would put a confident answer where nobody knows one.
+  r = run({ dwpFails: true });
+  check('unknown: a fetch failure marks nothing', [r.L(), r.M()], ['', '']);
+  checkTruthy('unknown: and is reported as a failure',
+    r.said().includes('HTTP 500'));
+
+  // The preview has to say why, or two lone question marks read as a glitch.
+  r = run({ pageDate: '8/15/2026' });
+  checkTruthy('absent: the preview marks them as not in',
+    r.said().includes('not in today'));
+  checkTruthy('absent: and gives the reason there too',
+    r.said().includes('8/15/2026'));
+
+  // A mixed selection: one in, one not coming, both accounted for.
+  r = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['John Roe', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }, { name: 'John Roe' }],
+      { start: 1, rows: 2 }, '2026-08-22');
+    s.wop.values[1][16] = 'no show';
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('complete', '8/22/2026');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? rosterReply(['Amalie Laz', 'John Roe']) : page });
+    confirmRadiusImport(s);
+    return { s: s, said: () => s.harness.alerts.concat(
+      s.harness.dialogs.map(d => d.html)).join(' ') };
+  })();
+  check('mixed: the student who came is imported',
+    String(r.s.wop.values[0][7]), '33');
+  check('mixed: the one already marked not coming is untouched',
+    [String(r.s.wop.values[1][7]), String(r.s.wop.values[1][11])], ['', '']);
+  checkTruthy('mixed: and the preview accounts for them',
+    r.said().includes('not coming'));
+
+  // A time already in the sign-in column is a clash like any other, not
+  // something to be quietly overwritten with a question mark.
+  r = run({ pageDate: '8/15/2026', signedIn: '10:48 AM' });
+  checkTruthy('absent: an existing time is treated as a clash',
+    r.said().includes('10:48 AM'));
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status
@@ -1523,8 +1627,8 @@ const DECK_FILLER_ROWS = [
 
   let err = '';
   try { api.lookupRosterEntry_(roster, 'Ghost Student'); } catch (e) { err = e.message; }
-  checkTruthy('lookup: absent points at the name and the centre',
-    err.includes('spelled') && err.includes('CENTER_ID'));
+  checkTruthy('lookup: absent points at check-in or the spelling',
+    err.includes('checked in') && err.includes('spelled'));
 
   err = '';
   try { api.lookupRosterEntry_(roster, 'Not In Yet'); } catch (e) { err = e.message; }

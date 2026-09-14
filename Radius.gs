@@ -332,18 +332,18 @@ function loadRoster_() {
 function lookupRosterEntry_(roster, name) {
   const entry = roster.byName[normalizeStudentName_(name)];
   if (!entry) {
-    throw new Error('not on the Instruction Manager — is the name spelled the ' +
-      'same way in both places, and is CONFIG.RADIUS.CENTER_ID the right centre?');
+    throw absentError_('not on the Instruction Manager — either they have not ' +
+      'checked in, or the name is spelled differently there.');
   }
   if (entry.ambiguous) {
     throw new Error('matches more than one student on the Instruction Manager, ' +
       'so there is no way to tell which session is theirs.');
   }
   if (!entry.checkedIn) {
-    throw new Error('is on the Instruction Manager but has not checked in.');
+    throw absentError_('is on the Instruction Manager but has not checked in.');
   }
   if (!entry.url) {
-    throw new Error('has checked in but has no DWP 2.0 yet.');
+    throw absentError_('has checked in but has no DWP 2.0 yet.');
   }
   return entry;
 }
@@ -365,6 +365,36 @@ function escapeForRegex_(text) {
 }
 
 /** The whole <input> tag carrying a given id, or null. */
+/**
+ * A student who simply was not here today.
+ *
+ * Kept apart from every other failure on purpose. "No session today" is
+ * something we know, and it earns a mark in the sign-in and sign-out columns.
+ * A dead cookie or a page that changed shape is something we could not find
+ * out, and marking those the same way would put a confident answer in a cell
+ * where nobody actually knows.
+ */
+function absentError_(message) {
+  const err = new Error(message);
+  err.absent = true;
+  return err;
+}
+
+/**
+ * True when a row already says the student was not coming.
+ *
+ * Read across the whole row rather than one column, because whoever takes the
+ * call writes it wherever they happen to be looking.
+ */
+function rowSaysNotComing_(rowValues) {
+  const haystack = rowValues.map(function (v) {
+    return String(v == null ? '' : v);
+  }).join(' ').toLowerCase();
+  return (CONFIG.RADIUS.SKIP_MARKERS || []).filter(function (marker) {
+    return haystack.indexOf(String(marker).toLowerCase()) !== -1;
+  })[0] || '';
+}
+
 /** The text inside a <span id="..."> -- the page states its date in one. */
 function spanTextById_(html, id) {
   const match = String(html).match(
@@ -933,6 +963,7 @@ function buildRadiusPlan_(sheets, selection, log) {
     numRows: selection.numRows,
     students: [],
     problems: [],
+    skipped: [],
     stoppedEarly: false
   };
 
@@ -945,6 +976,12 @@ function buildRadiusPlan_(sheets, selection, log) {
   });
 
   const roster = loadRoster_();
+
+  // The whole of each row, so a "no show" written wherever the pen landed is
+  // still found.
+  const rowWidth = Math.max(sheets.wop.getLastColumn(), 1);
+  const rows = sheets.wop.getRange(selection.startRow, 1,
+    selection.numRows, rowWidth).getValues();
 
   // The centre's day, not the server's: a run just before midnight in one
   // timezone is the previous afternoon in another.
@@ -963,6 +1000,16 @@ function buildRadiusPlan_(sheets, selection, log) {
 
     const name = extractName_(nameCol.value(i));
     if (!name) continue;
+
+    // Somebody has already recorded that this student is not coming. There is
+    // no session to go looking for, and asking Radius would only produce a
+    // second answer to a question already settled.
+    const notComing = rowSaysNotComing_(rows[i]);
+    if (notComing) {
+      plan.skipped.push({ index: i, name: name, marker: notComing });
+      log.ok(name, 'row says "' + notComing + '" — left alone.');
+      continue;
+    }
 
     try {
       const entry = lookupRosterEntry_(roster, name);
@@ -986,9 +1033,8 @@ function buildRadiusPlan_(sheets, selection, log) {
             'is no way to tell whether it is today\'s. Nothing was written.');
         }
         if (!sameCalendarDay_(pageDate, today)) {
-          throw new Error('their most recent session is ' + pageDate.month + '/' +
-            pageDate.day + '/' + pageDate.year + ', not today. They have not ' +
-            'checked in yet, so nothing was written.');
+          throw absentError_('their most recent session is ' + pageDate.month +
+            '/' + pageDate.day + '/' + pageDate.year + ', not today.');
         }
       }
 
@@ -1087,8 +1133,34 @@ function buildRadiusPlan_(sheets, selection, log) {
         durationMinutes: review.durationMinutes
       });
     } catch (err) {
-      plan.problems.push({ index: i, name: name, message: err.message });
-      log.error(name, err.message);
+      if (err.absent) {
+        // Nothing to import, but the row should not be left looking unasked.
+        const mark = CONFIG.RADIUS.ABSENT_MARK;
+        const values = {};
+        const existing = {};
+        [timing.SIGN_IN_FIELD, timing.SIGN_OUT_FIELD].forEach(function (key) {
+          values[key] = mark;
+          existing[key] = String(columns[key].value(i)).trim();
+        });
+        plan.students.push({
+          index: i, name: name, values: values, existing: existing,
+          conflicts: Object.keys(existing).filter(function (key) {
+            return existing[key] && existing[key] !== mark;
+          }).map(function (key) { return key; }),
+          blocked: [], shade: false, durationMinutes: null,
+          absent: true, absentReason: err.message
+        });
+        log.warn(name, err.message + ' Marked "' + mark + '" in ' +
+          columnLetter_(CONFIG.RADIUS.FIELDS.filter(function (f) {
+            return f.key === timing.SIGN_IN_FIELD;
+          })[0].column) + ' and ' +
+          columnLetter_(CONFIG.RADIUS.FIELDS.filter(function (f) {
+            return f.key === timing.SIGN_OUT_FIELD;
+          })[0].column) + '.');
+      } else {
+        plan.problems.push({ index: i, name: name, message: err.message });
+        log.error(name, err.message);
+      }
     }
 
     Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
@@ -1192,6 +1264,7 @@ function storeRadiusPlan_(plan) {
     numRows: plan.numRows,
     count: plan.students.length,
     problems: plan.problems,
+    skipped: plan.skipped,
     stoppedEarly: plan.stoppedEarly
   });
   plan.students.forEach(function (student, n) {
@@ -1254,7 +1327,19 @@ function renderPlanStudent_(student, position) {
       '; font-size: 12px;"> · ' + student.durationMinutes + ' min' +
       (student.shade ? ' (odd length)' : '') + '</span>';
   }
-  html += '</label><table style="width: 100%; font-size: 12px; border-collapse: collapse;">';
+  if (student.absent) {
+    html += '<span style="color: #b45309; font-size: 12px;"> · not in today</span>';
+  }
+  html += '</label>';
+
+  // Two lone question marks with nothing to explain them read as a glitch.
+  if (student.absent) {
+    html += '<p style="margin: 6px 10px; font-size: 12px; color: #92400e;">' +
+      escapeHtml_(student.absentReason) + ' Marking the sign-in and sign-out ' +
+      'columns rather than importing a session.</p>';
+  }
+
+  html += '<table style="width: 100%; font-size: 12px; border-collapse: collapse;">';
 
   CONFIG.RADIUS.FIELDS.forEach(function (field) {
     const value = student.values[field.key];
@@ -1303,6 +1388,16 @@ function showRadiusPlanDialog_(plan, log) {
     'want to leave out.</p>' +
     '<form id="radiusForm">' +
     '<input type="hidden" name="token" value="' + escapeHtml_(token) + '">';
+
+  if (plan.skipped && plan.skipped.length) {
+    html += '<div style="background: #f3f4f6; border: 1px solid #e5e7eb; ' +
+      'border-radius: 6px; padding: 8px; margin-bottom: 10px; color: #4b5563;">' +
+      plan.skipped.length + ' row(s) already say the student is not coming, so ' +
+      'Radius was not asked about them: ' +
+      plan.skipped.map(function (row) {
+        return escapeHtml_(row.name) + ' (&ldquo;' + escapeHtml_(row.marker) + '&rdquo;)';
+      }).join(', ') + '.</div>';
+  }
 
   if (plan.problems.length) {
     html += '<div style="background: #fef2f2; border: 1px solid #fecaca; ' +
@@ -1417,11 +1512,26 @@ function applyRadiusPlan_FromUI(formObject) {
     lock.releaseLock();
   }
 
+  // The build phase's own log is long gone by now -- the plan went through the
+  // cache and a dialog to get here. Everything worth saying has to be said
+  // again from the plan itself.
   plan.problems.forEach(function (problem) { log.error(problem.name, problem.message); });
+  (plan.skipped || []).forEach(function (row) {
+    log.ok(row.name, 'row says "' + row.marker + '" — Radius was not asked.');
+  });
+  plan.students.forEach(function (student) {
+    if (!student.absent) return;
+    if (picked.indexOf(student.index) === -1) return;
+    log.warn(student.name, student.absentReason + ' Marked "' +
+      CONFIG.RADIUS.ABSENT_MARK + '" in the sign-in and sign-out columns.');
+  });
 
   showReport_('Radius Import', '🔗 Import Summary', [
     { label: 'Students written', value: stats.imported },
     { label: 'Left out', value: plan.students.length - picked.length },
+    { label: 'Not in today', value: plan.students.filter(function (st) {
+      return st.absent; }).length },
+    { label: 'Already marked not coming', value: (plan.skipped || []).length },
     { label: 'Could not be fetched', value: plan.problems.length,
       alert: plan.problems.length > 0 },
     { label: 'Cells left alone', value: stats.skippedCells },
@@ -1454,6 +1564,16 @@ function importRadiusData() {
   }
 
   if (!plan.students.length) {
+    // Every row accounted for before we got here is a result, not an empty
+    // run, and saying "no names found" about it would be plainly untrue.
+    if (plan.skipped.length) {
+      showError_(plan.skipped.length + ' row(s) already say the student is not ' +
+        'coming (' + plan.skipped.map(function (row) {
+          return row.name + ': "' + row.marker + '"';
+        }).join('; ') + '), and there is nobody else in the selection to ask ' +
+        'Radius about. Nothing was written.');
+      return;
+    }
     showError_(plan.problems.length
       ? 'Nothing could be fetched. ' + plan.problems[0].message
       : 'No student names found in the highlighted rows of column A.');

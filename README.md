@@ -241,6 +241,30 @@ must not be allowed to pass for today's. Set
 `CONFIG.RADIUS.REQUIRE_SESSION_TODAY` to `false` only to backfill a past day,
 and put it back afterwards.
 
+### A student who was not in
+
+A row whose student has no session today gets a **`?`** in the sign-in and
+sign-out columns, so it reads as asked-and-answered rather than as one nobody
+got to. That covers every way of not being here: not on the roster, on it but
+never checked in, checked in with no DWP, or a DWP from another day.
+
+**A failure to find out is kept separate.** A dead cookie, an HTTP 500, a page
+that changed shape — those are reported as problems and write nothing at all.
+Marking them `?` would put a confident answer in a cell where nobody actually
+knows one.
+
+### A row that already says they are not coming
+
+If any of `CONFIG.RADIUS.SKIP_MARKERS` — `LM cancel`, `no show` — appears
+**anywhere in the row**, Radius is not asked about that student at all, and
+nothing is written. Somebody has already answered the question; a second answer
+would only disagree with the first. Matched without regard to case, and across
+the whole row, because whoever takes the call writes it wherever they happen to
+be looking.
+
+Both are counted in the report and named in the preview before anything is
+written.
+
 ### Session timing
 
 Sessions are booked on the hour, so a normal one runs about an hour and a
