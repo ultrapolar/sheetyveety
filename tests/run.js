@@ -1678,6 +1678,63 @@ const DECK_FILLER_ROWS = [
     report.includes('Highlight the rest and run again'));
 }
 
+// 45t. The seating import against rows the organiser wrote.
+//
+//      The organiser heads each row with an hour and gives a student who came
+//      twice two rows. Counting rows rather than people then made every one of
+//      their seats look like it could belong to two different students, so the
+//      ambiguity guard fired and nothing at all was written -- for the
+//      commonest arrangement there is.
+{
+  function go(names, edits) {
+    const chart = JSON.parse(fs.readFileSync('tests/fixtures/seating-populated.json', 'utf8'))
+      .map(row => row.slice());
+    (edits || []).forEach(e => { chart[e[0]][e[1]] = e[2]; });
+    const wopRows = names.map(function (n) {
+      const r = [n]; while (r.length < 26) r.push(''); return r;
+    });
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(names.length, 26, '#ffffff'));
+    wop.setSelection(1, names.length);
+    const seating = new FakeSheet('Seating Chart', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-22'), String, Number, Object, Array, RegExp,
+      Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+    loadScript(ctx).importSeatingChart();
+    return { N: i => String(wop.values[i][13]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Sat at 1C at noon and 3A at one o'clock: each row gets its own hour.
+  const twice = [[3, 15, 'Amalie L'], [10, 11, 'Amalie L']];
+  let r = go(['12:00 Amalie Laz', '1:00 Amalie Laz'], twice);
+  check('per hour: the noon row gets the noon seat', r.N(0), '1C | AA');
+  check('per hour: the one o\'clock row gets its own', r.N(1), '3A | DD');
+  checkTruthy('per hour: not reported as an ambiguity',
+    !r.said().includes('could be'));
+
+  // A row with no hour on it still gets everywhere they sat, as before.
+  r = go(['Amalie Laz'], twice);
+  check('no hour: every seat of the day', r.N(0), '1C, 3A | AA DD');
+
+  // A row headed at an hour they were not there is not given someone else's
+  // seat, and says which hour it looked for.
+  r = go(['2:00 Amalie Laz'], [[3, 15, 'Amalie L']]);
+  check('wrong hour: nothing written', r.N(0), '');
+  checkTruthy('wrong hour: and it names the hour',
+    r.said().includes('not seated at 2:00'));
+
+  // Two genuinely different students behind one chart name is still refused.
+  r = go(['12:00 Amalie Laz', '12:00 Amalie Lee'], [[3, 15, 'Amalie L']]);
+  check('still ambiguous: neither is written', [r.N(0), r.N(1)], ['', '']);
+  checkTruthy('still ambiguous: and both are named',
+    r.said().includes('Amalie Laz or Amalie Lee'));
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {

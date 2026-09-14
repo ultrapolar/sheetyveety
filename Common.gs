@@ -266,6 +266,41 @@ function leadingTimeOf_(raw) {
   return match ? match[0].trim().replace(/[-–—:]\s*$/, '').trim() : '';
 }
 
+/**
+ * A clock time like "10:48 AM" as minutes since midnight, or null if it is
+ * not a time at all.
+ */
+function parseClockTime_(text) {
+  const match = String(text == null ? '' : text).trim()
+    .match(/^(\d{1,2}):(\d{2})\s*([AaPp])?\.?[Mm]?\.?$/);
+  if (!match) return null;
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+
+  const period = match[3] ? match[3].toUpperCase() : null;
+  if (period === 'A' && hours === 12) hours = 0;
+  if (period === 'P' && hours !== 12) hours += 12;
+  if (hours > 23) return null;
+
+  return hours * 60 + minutes;
+}
+
+/**
+ * The minute of the day a slot label means.
+ *
+ * parseClockTime_ reads "1:00" as one in the morning, which is right for a
+ * clock and wrong for a row heading on a sheet whose day runs into the
+ * evening. A bare hour with no am or pm on it is read the way the centre runs.
+ */
+function slotMinutes_(text) {
+  const value = parseClockTime_(text);
+  if (value === null) return null;
+  if (/[ap]\.?m/i.test(String(text))) return value;
+  return value <= CONFIG.AFTERNOON_AT_OR_BELOW * 60 ? value + 12 * 60 : value;
+}
+
 /** Splits a comma-separated task list, dropping blanks. */
 function splitList_(raw) {
   const text = String(raw == null ? '' : raw).trim();

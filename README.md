@@ -188,6 +188,20 @@ Set `CONFIG.SEATING.SHEET_NAME` to the chart's tab. If it lives in a separate
 document, put that document's id in `CONFIG.SEATING.SPREADSHEET_ID` — the part
 of its URL between `/d/` and `/edit`.
 
+### A student who came twice
+
+The SOD organiser heads each row with an hour and gives a student who attended
+twice two rows. The import matches a row to **that hour's** seat:
+
+```
+12:00 Amalie Laz   →   N = 1C | AA
+1:00 Amalie Laz    →   N = 3A | DD
+```
+
+A row with no hour on it still collects every seat of the day
+(`1C, 3A | AA DD`). A row headed at an hour the student was not there gets
+nothing, and the report names the hour it looked for.
+
 ### Names on the chart
 
 The chart is filled in by hand and in a hurry, so surnames get cut short.

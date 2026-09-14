@@ -295,11 +295,23 @@ function importSeatingChart() {
     // them can be spotted before it is written to either.
     const students = [];
     for (let i = 0; i < selection.numRows; i++) {
-      const name = extractName_(nameCol.value(i));
-      if (name) students.push({ index: i, name: name });
+      const raw = nameCol.value(i);
+      const name = extractName_(raw);
+      if (name) {
+        students.push({ index: i, name: name,
+          slot: slotMinutes_(leadingTimeOf_(raw)) });
+      }
     }
 
-    const studentNames = students.map(function (s) { return s.name; });
+    // One name per person, not per row. After the organiser has run, a student
+    // who came twice has two rows, and counting rows made every one of their
+    // seats look like it could belong to two different people -- so nothing
+    // was written for the commonest case there is.
+    const studentNames = [];
+    students.forEach(function (student) {
+      if (studentNames.indexOf(student.name) === -1) studentNames.push(student.name);
+    });
+
     seats.forEach(function (entry) {
       const claimants = seatingCandidates_(entry.occupant, studentNames);
       entry.claimants = claimants;
@@ -310,10 +322,18 @@ function importSeatingChart() {
       const matches = [];
       const ambiguous = [];
 
+      // A row headed with an hour wants that hour's seat, not every seat the
+      // student sat in all day. Without this the noon row and the one o'clock
+      // row both read "1C, 3A" and neither says where they actually were.
+      const hourly = student.slot !== null && seats.some(function (entry) {
+        return entry.hour && slotMinutes_(entry.hour) !== null;
+      });
+
       seats.forEach(function (entry) {
         if (entry.claimants.indexOf(student.name) === -1) return;
-        if (entry.ambiguous) ambiguous.push(entry);
-        else matches.push(entry);
+        if (entry.ambiguous) { ambiguous.push(entry); return; }
+        if (hourly && slotMinutes_(entry.hour) !== student.slot) return;
+        matches.push(entry);
       });
 
       if (ambiguous.length) {
@@ -325,7 +345,10 @@ function importSeatingChart() {
 
       if (!matches.length) {
         stats.missing++;
-        log.warn(student.name, 'not found on the seating chart.');
+        const at = leadingTimeOf_(nameCol.value(student.index));
+        log.warn(student.name, at
+          ? 'not seated at ' + at + ' on the chart.'
+          : 'not found on the seating chart.');
         return;
       }
 
