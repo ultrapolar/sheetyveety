@@ -375,10 +375,19 @@ function importSeatingChart() {
 function planSeatingOrder_(seats, nameFor) {
   const hours = [];
   const byHour = {};
+  const unpodded = [];
 
   seats.forEach(function (entry) {
     const pod = podOfTable_(entry.table);
-    if (pod === -1) return;
+
+    // A table no pod claims. Dropping it silently left the student to be
+    // reported later as absent from a chart they are plainly sitting on,
+    // which sends whoever reads that after entirely the wrong thing.
+    if (pod === -1) {
+      unpodded.push({ name: nameFor(entry.occupant), chart: entry.occupant,
+        seat: entry.seat, table: entry.table, hour: entry.hour });
+      return;
+    }
     if (!byHour[entry.hour]) {
       byHour[entry.hour] = { hour: entry.hour, pods: {} };
       hours.push(entry.hour);
@@ -415,7 +424,7 @@ function planSeatingOrder_(seats, nameFor) {
       });
   });
 
-  return rows;
+  return { rows: rows, unpodded: unpodded };
 }
 
 function podFill_(pod) {
@@ -520,8 +529,9 @@ function organizeSeatingRows() {
       return resolved;
     };
 
-    const rows = planSeatingOrder_(seats, nameFor);
-    if (!rows.length) {
+    const plan = planSeatingOrder_(seats, nameFor);
+    const rows = plan.rows;
+    if (!rows.length && !plan.unpodded.length) {
       showError_('The chart has students on it, but none at a table belonging ' +
         'to a pod. Check CONFIG.SEATING.PODS against the table numbers.');
       return;
@@ -533,6 +543,15 @@ function organizeSeatingRows() {
     // not vanish. They go at the end, marked, with no hour and no pod.
     const unseated = existing.filter(function (name) { return !claimed[name]; });
     const hourCount = rows.length ? rows[rows.length - 1].hourIndex + 1 : 0;
+
+    plan.unpodded.forEach(function (entry) {
+      rows.push({ name: entry.name, chart: entry.chart, instructors: '',
+        pod: -1, hourIndex: -1, unseated: true });
+      log.warn(entry.name, 'is sitting at table ' + entry.table +
+        ', which is not in any pod, so there is no telling where in the order ' +
+        'they belong. Listed at the end — check CONFIG.SEATING.PODS.');
+    });
+
     unseated.forEach(function (name) {
       rows.push({ name: name, chart: '', instructors: '',
         pod: -1, hourIndex: -1, unseated: true });
@@ -581,6 +600,8 @@ function organizeSeatingRows() {
       { label: 'Hours', value: hourCount },
       { label: 'On the Daily WOP but not seated', value: unseated.length,
         alert: unseated.length > 0 },
+      { label: 'Seated at a table no pod covers', value: plan.unpodded.length,
+        alert: plan.unpodded.length > 0 },
       { label: 'Names taken from the chart as-is', value: unmatched.length,
         alert: unmatched.length > 0 },
       { label: 'Rows cleared below', value: spare > 0 ? spare : 0 }

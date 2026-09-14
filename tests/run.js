@@ -37,7 +37,7 @@ function loadScript(context) {
   importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
-  podOfTable_, resolveSeatingAlias_
+  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1332,6 +1332,82 @@ const DECK_FILLER_ROWS = [
   r = run({ pageDate: '8/15/2026', signedIn: '10:48 AM' });
   checkTruthy('absent: an existing time is treated as a clash',
     r.said().includes('10:48 AM'));
+}
+
+// 45m. Edge cases that had no rule, and now do.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const r = (a, b) => api.reviewSessionTiming_(a, b);
+
+  // Signed out before signed in. Wrapping round the clock made 5:00 PM to
+  // 4:00 PM a 23 hour session, shaded, with nothing said about it.
+  check('backwards: no duration is claimed', r('5:00 PM', '4:00 PM').durationMinutes, null);
+  check('backwards: says what is wrong', r('5:00 PM', '4:00 PM').notes,
+    ['signed out before signed in — check the times']);
+  checkTruthy('backwards: still shaded', r('5:00 PM', '4:00 PM').shade);
+  check('backwards: a late evening pair is not a real session either',
+    r('11:00 PM', '12:30 AM').notes,
+    ['signed out before signed in — check the times']);
+
+  // In and out on the same minute is a slip, not an early departure.
+  check('same minute: named for what it is', r('4:00 PM', '4:00 PM').notes,
+    ['signed in and out at the same time']);
+  check('same minute: duration is zero, not an hour',
+    r('4:00 PM', '4:00 PM').durationMinutes, 0);
+
+  // One minute is a real, if daft, duration, and is measured normally.
+  check('one minute: measured against the end of the slot',
+    r('4:00 PM', '4:01 PM').notes, ['left 59 minutes early']);
+
+  // Markers match as whole phrases. "no show" lives inside "Juno Showalter".
+  check('marker: a name containing the letters is not a marker',
+    api.rowSaysNotComing_(['Juno Showalter', '']), '');
+  check('marker: the phrase itself still matches',
+    api.rowSaysNotComing_(['', 'no show']), 'no show');
+  check('marker: punctuation around it is fine',
+    api.rowSaysNotComing_(['(no show)']), 'no show');
+  check('marker: mid-sentence is fine',
+    api.rowSaysNotComing_(['mum rang, no show today']), 'no show');
+  check('marker: numbers in the row do not break it',
+    api.rowSaysNotComing_([1, 2, 'LM cancel']), 'LM cancel');
+  check('marker: a longer word it starts is not a match',
+    api.rowSaysNotComing_(['no showing up ever']), '');
+}
+
+// 45n. A student seated at a table no pod covers.
+{
+  const chart = JSON.parse(fs.readFileSync('tests/fixtures/seating-populated.json', 'utf8'))
+    .map(row => row.slice());
+  chart[2][1] = '9.0';          // table 8 renumbered to one no pod claims
+  chart[3][1] = 'Stray Kid';    // with somebody sitting at it
+
+  const wopRows = [['Stray Kid']].map(row => {
+    const r = row.slice(); while (r.length < 26) r.push(''); return r;
+  });
+  const deck = new FakeSheet('Deck List',
+    [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+  const wop = new FakeSheet('Daily WOP', wopRows, makeGrid(1, 26, '#ffffff'));
+  const seating = new FakeSheet('Seating Chart', chart,
+    makeGrid(chart.length, chart[0].length, '#ffffff'));
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+  loadScript(ctx).organizeSeatingRows();
+
+  const said = h.alerts.concat(h.dialogs.map(d => d.html)).join(' ');
+  const column = wop.values.map(v => String(v[0])).filter(Boolean);
+
+  checkTruthy('unpodded: the student is not lost',
+    column.some(v => v === 'Stray Kid'));
+  checkTruthy('unpodded: the reason names the table',
+    said.includes('table 9') && said.includes('not in any pod'));
+  checkTruthy('unpodded: and does not claim they are missing from the chart',
+    !said.includes('Stray Kid</b> is on the Daily WOP but not on the seating chart'));
+  checkTruthy('unpodded: points at the setting to fix',
+    said.includes('CONFIG.SEATING.PODS'));
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

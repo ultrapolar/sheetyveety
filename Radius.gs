@@ -390,8 +390,13 @@ function rowSaysNotComing_(rowValues) {
   const haystack = rowValues.map(function (v) {
     return String(v == null ? '' : v);
   }).join(' ').toLowerCase();
+  // Whole phrase only. A bare substring search finds "no show" inside "Juno
+  // Showalter", and skipping a student because of the letters in their name
+  // would be a hard thing to ever notice.
   return (CONFIG.RADIUS.SKIP_MARKERS || []).filter(function (marker) {
-    return haystack.indexOf(String(marker).toLowerCase()) !== -1;
+    const pattern = new RegExp('(^|[^a-z0-9])' +
+      escapeForRegex_(String(marker).toLowerCase()) + '([^a-z0-9]|$)');
+    return pattern.test(haystack);
   })[0] || '';
 }
 
@@ -623,8 +628,24 @@ function reviewSessionTiming_(signIn, signOut) {
     return { known: false, durationMinutes: null, shade: false, notes: [] };
   }
 
-  let duration = end - start;
-  if (duration < 0) duration += 24 * 60;
+  // A centre that opens in the morning or the afternoon never runs a session
+  // across midnight, so a sign-out before its sign-in is not a long session --
+  // it is two times in the wrong order, or one of them mistyped. Wrapping it
+  // round the clock turned 5:00 PM to 4:00 PM into a 23 hour session and
+  // shaded it without ever saying why.
+  if (end < start) {
+    return { known: true, durationMinutes: null, shade: true,
+      notes: ['signed out before signed in — check the times'] };
+  }
+
+  const duration = end - start;
+
+  // In and out on the same minute is a slip of the pen or a check-in undone,
+  // not somebody who left an hour early.
+  if (duration === 0) {
+    return { known: true, durationMinutes: 0, shade: true,
+      notes: ['signed in and out at the same time'] };
+  }
 
   const isSingle = duration >= timing.SINGLE_MIN && duration <= timing.SINGLE_MAX;
   const isDouble = duration >= timing.DOUBLE_MIN && duration <= timing.DOUBLE_MAX;
