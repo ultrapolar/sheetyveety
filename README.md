@@ -35,6 +35,22 @@ spreadsheet.
 
 ---
 
+### The menus
+
+Grouped by what an entry does to the sheet, not by which feature it came from.
+
+| Menu | Entries |
+| --- | --- |
+| **SOD** | Pinks Printed · Organise rows from the seating chart |
+| **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
+| **Tools** | Check setup · Radius: sign in · Radius: test connection |
+
+SOD and EOD are the day's work — every entry there reads the sheet or fills it
+in. **Tools is everything else**: the checks and the Radius sign-in, set up
+once and then forgotten, none of which writes a student's data. A test enforces
+the split, so a sign-in box can't drift into the middle of somebody's
+end-of-day run.
+
 ## Radius import
 
 Highlight the students in **column A** of Daily WOP, then **EOD → Radius import

@@ -1,9 +1,14 @@
 /**
  * Builds the custom menus when the spreadsheet is opened.
  *
- * Menus are grouped by when you reach for them: SOD at the start of the day,
- * EOD at the end, and Tools for the things you set up once and then forget.
- * Nothing here runs anything on its own -- every entry is a deliberate click.
+ * Grouped by when you reach for them, and by what they do to the sheet.
+ *
+ * SOD and EOD are the day's work: each entry reads the sheet, or fills it in.
+ * Tools is everything else -- the checks and the Radius sign-in, set up once
+ * and then forgotten, and none of which writes a student's data.
+ *
+ * Nothing here runs on its own. Every entry is a deliberate click, and the two
+ * that fetch from elsewhere show you what they found before writing any of it.
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
@@ -17,14 +22,14 @@ function onOpen() {
   ui.createMenu('EOD')
     .addItem('Colored Sheets Batch Process', 'processWopToDeck')
     .addSeparator()
-    .addItem('Radius import for highlighted rows', 'importRadiusData')
-    .addItem('Seating chart for highlighted rows', 'importSeatingChart')
+    .addItem('Bring in Radius sessions (highlighted rows)', 'importRadiusData')
+    .addItem('Bring in seating (highlighted rows)', 'importSeatingChart')
     .addToUi();
 
   ui.createMenu('Tools')
     .addItem('Check setup', 'checkSheetSetup')
     .addSeparator()
-    .addItem('Set Radius session cookie', 'setRadiusCookie')
-    .addItem('Test Radius connection', 'testRadiusConnection')
+    .addItem('Radius: sign in (set session cookie)', 'setRadiusCookie')
+    .addItem('Radius: test connection', 'testRadiusConnection')
     .addToUi();
 }

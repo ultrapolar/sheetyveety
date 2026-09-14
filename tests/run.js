@@ -287,6 +287,33 @@ const DECK_FILLER_ROWS = [
   check('every menu entry names a function that exists', unresolved, []);
   checkTruthy('menu: the check found the entries at all', actions.length >= 8);
 
+  // The menus are split by what an entry does to the sheet, not by which
+  // feature wrote it. SOD and EOD are the day's work and fill the sheet in;
+  // Tools is the checks and the Radius sign-in, none of which touches a
+  // student's data. An auth or diagnostic entry drifting into EOD would put a
+  // sign-in box in the middle of somebody's end-of-day run.
+  const menus = {};
+  menu.split(/ui\.createMenu\(/).slice(1).forEach(function (block) {
+    const name = (block.match(/^'([^']+)'/) || [])[1];
+    if (!name) return;
+    menus[name] = (block.match(/addItem\('[^']*', '([^']*)'\)/g) || [])
+      .map(m => m.replace(/^.*', '/, '').replace(/'\)$/, ''));
+  });
+
+  const belongsInTools = ['setRadiusCookie', 'testRadiusConnection', 'checkSheetSetup'];
+  const belongsInEod = ['importRadiusData', 'importSeatingChart', 'processWopToDeck'];
+
+  check('auth and checks live under Tools',
+    belongsInTools.filter(n => (menus.Tools || []).indexOf(n) === -1), []);
+  check('and nowhere else',
+    belongsInTools.filter(function (n) {
+      return (menus.SOD || []).indexOf(n) !== -1 || (menus.EOD || []).indexOf(n) !== -1;
+    }), []);
+  check('the day\'s transfers live under EOD',
+    belongsInEod.filter(n => (menus.EOD || []).indexOf(n) === -1), []);
+  check('Tools writes no student data',
+    (menus.Tools || []).filter(n => belongsInEod.indexOf(n) !== -1), []);
+
   // Apps Script's document lock is not reentrant. A tool that takes it and
   // then calls another that does the same gets tryLock returning false and
   // tells the user "another run is in progress" about itself -- which is a
