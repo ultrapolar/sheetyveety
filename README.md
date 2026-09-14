@@ -444,6 +444,13 @@ Two students whose names normalise to the same thing are refused rather than
 guessed at. A Daily WOP row cannot say which of them it means, and the
 student-name guard below would confirm either one, so neither is safe.
 
+### A task listed twice in the queue
+
+Printing it moves one copy into column E and leaves the other in column F, so
+the student works it twice and EOD archives it twice — and neither run looks
+wrong from the inside. SOD now says so when it happens. Blank entries in the
+queue are dropped without comment; they are not a repeat.
+
 ### A column K nobody can read
 
 EOD acts on `Y` and `P`. A cell holding anything else — `YU` for `YY` — is

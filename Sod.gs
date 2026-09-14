@@ -264,6 +264,18 @@ function executeSodPlan_(plan) {
       const itemsToMove = Math.max(1, Math.min(move.itemsToMove, queue.length));
       const moved = queue.splice(0, itemsToMove);
 
+      // A task listed twice in the queue is printed now and queued again for
+      // next time. The student then works it twice and EOD archives it twice,
+      // and nothing in either run would look wrong.
+      const repeated = moved.filter(function (task) {
+        return queue.indexOf(task) !== -1;
+      });
+      if (repeated.length) {
+        log.warn(move.name, 'the Column F queue lists ' +
+          repeated.join(', ') + ' more than once, so it is printed now and ' +
+          'still waiting. Remove the spare unless that is deliberate.');
+      }
+
       deck.set(row, CONFIG.DECK_COL.LOADED, moved.join(', '));
       deck.set(row, CONFIG.DECK_COL.QUEUE, queue.join(', '));
       deck.set(row, CONFIG.DECK_COL.PINK, '');

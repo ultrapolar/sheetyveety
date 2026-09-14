@@ -1567,6 +1567,44 @@ const DECK_FILLER_ROWS = [
     r.said().includes('no time beside it'));
 }
 
+// 45r. A task sitting in the queue twice.
+{
+  function sod(queue) {
+    const s = scenario(
+      [HEADER, ['Jane Doe', 'T1', 'pink', '', '', queue, '', '', '', '', '', '', '']],
+      [{ name: 'Jane Doe' }], { start: 1, rows: 1 });
+    s.api.processSodPinks();
+    const dialog = s.harness.dialogs[s.harness.dialogs.length - 1];
+    const token = (dialog.html.match(/name="token" value="([^"]+)"/) || [])[1];
+    const form = { token: token };
+    (dialog.html.match(/name="(move_\d+)"/g) || []).forEach(function (m) {
+      form[m.match(/"([^"]+)"/)[1]] = '1';
+    });
+    s.api.executeSodOperations_FromUI(form);
+    return { s: s, E: () => s.deckCell(2, C.LOADED), F: () => s.deckCell(2, C.QUEUE),
+      said: () => s.harness.alerts.concat(
+        s.harness.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Printed now and still waiting: the student works it twice and EOD archives
+  // it twice, and neither run looks wrong from the inside.
+  let r = sod('T2, , T2, T3');
+  check('repeat: the task is printed', r.E(), 'T2');
+  check('repeat: and is still in the queue', r.F(), 'T2, T3');
+  checkTruthy('repeat: which is said out loud',
+    r.said().includes('more than once'));
+
+  // An ordinary queue says nothing about repeats.
+  r = sod('T2, T3');
+  check('no repeat: printed and gone from the queue', [r.E(), r.F()], ['T2', 'T3']);
+  checkTruthy('no repeat: nothing said', !r.said().includes('more than once'));
+
+  // Blanks in the queue are dropped without comment -- they are not a repeat.
+  r = sod('T2, , T3');
+  check('blanks: ignored', [r.E(), r.F()], ['T2', 'T3']);
+  checkTruthy('blanks: not reported as a repeat', !r.said().includes('more than once'));
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {
