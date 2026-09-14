@@ -50,11 +50,23 @@ function processWopToDeck() {
         continue;
       }
 
-      const status = parseStatus_(statusCol.value(i));
-      if (!status) continue;
-
       const sheetRow = selection.startRow + i;
       const rawStatus = String(statusCol.value(i)).trim();
+      const status = parseStatus_(statusCol.value(i));
+
+      if (!status) {
+        // An empty cell is a row with nothing to do. A cell with something in
+        // it that is not a Y/P instruction is a typo, and skipping it without
+        // a word lets "YU" pass for a finished row -- the report would say
+        // nothing needed processing, and whoever typed it would believe that.
+        if (rawStatus) {
+          statusCol.setBackground(i, CONFIG.COLOR.ERROR);
+          log.error('Row ' + sheetRow, 'Column K says "' + rawStatus +
+            '", which is not a Y/P instruction. Nothing was applied.');
+        }
+        continue;
+      }
+
       const name = extractName_(nameCol.value(i));
 
       if (!name) {

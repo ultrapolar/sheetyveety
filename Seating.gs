@@ -376,6 +376,8 @@ function planSeatingOrder_(seats, nameFor) {
   const hours = [];
   const byHour = {};
   const unpodded = [];
+  const doubleBooked = [];
+  const unlabelledHour = { seen: false };
 
   seats.forEach(function (entry) {
     const pod = podOfTable_(entry.table);
@@ -389,12 +391,28 @@ function planSeatingOrder_(seats, nameFor) {
       return;
     }
     if (!byHour[entry.hour]) {
-      byHour[entry.hour] = { hour: entry.hour, pods: {} };
+      byHour[entry.hour] = { hour: entry.hour, pods: {}, seen: {} };
       hours.push(entry.hour);
+      if (!entry.hour) unlabelledHour.seen = true;
     }
-    const pods = byHour[entry.hour].pods;
+    const block = byHour[entry.hour];
+    const resolved = nameFor(entry.occupant);
+
+    // Nobody sits in two seats at once. A chart that says otherwise would put
+    // the student on the sheet twice for one hour, and the Radius import then
+    // has two rows at the same hour and no way to tell which of them the one
+    // session belongs to -- so a slip on the chart would cost the import too.
+    const key = normalizeStudentName_(resolved);
+    if (block.seen[key]) {
+      doubleBooked.push({ name: resolved, hour: entry.hour,
+        seats: [block.seen[key], entry.seat] });
+      return;
+    }
+    block.seen[key] = entry.seat;
+
+    const pods = block.pods;
     if (!pods[pod]) pods[pod] = { pod: pod, students: [], instructors: [] };
-    pods[pod].students.push({ name: nameFor(entry.occupant), chart: entry.occupant });
+    pods[pod].students.push({ name: resolved, chart: entry.occupant });
     if (entry.instructor && pods[pod].instructors.indexOf(entry.instructor) === -1) {
       pods[pod].instructors.push(entry.instructor);
     }
@@ -424,7 +442,8 @@ function planSeatingOrder_(seats, nameFor) {
       });
   });
 
-  return { rows: rows, unpodded: unpodded };
+  return { rows: rows, unpodded: unpodded, doubleBooked: doubleBooked,
+    unlabelledHour: unlabelledHour.seen };
 }
 
 function podFill_(pod) {
@@ -544,6 +563,17 @@ function organizeSeatingRows() {
     const unseated = existing.filter(function (name) { return !claimed[name]; });
     const hourCount = rows.length ? rows[rows.length - 1].hourIndex + 1 : 0;
 
+    plan.doubleBooked.forEach(function (entry) {
+      log.warn(entry.name, 'is in two seats at ' + (entry.hour || 'one hour') +
+        ' on the chart (' + entry.seats.join(' and ') + '). Listed once, at ' +
+        entry.seats[0] + ' — fix the chart to settle which.');
+    });
+
+    if (plan.unlabelledHour) {
+      log.warn('Seating chart', 'an hour block has no time beside it, so its ' +
+        'students are listed without one and sorted after the hours that do.');
+    }
+
     plan.unpodded.forEach(function (entry) {
       rows.push({ name: entry.name, chart: entry.chart, instructors: '',
         pod: -1, hourIndex: -1, unseated: true });
@@ -602,6 +632,8 @@ function organizeSeatingRows() {
         alert: unseated.length > 0 },
       { label: 'Seated at a table no pod covers', value: plan.unpodded.length,
         alert: plan.unpodded.length > 0 },
+      { label: 'In two seats at once', value: plan.doubleBooked.length,
+        alert: plan.doubleBooked.length > 0 },
       { label: 'Names taken from the chart as-is', value: unmatched.length,
         alert: unmatched.length > 0 },
       { label: 'Rows cleared below', value: spare > 0 ? spare : 0 }

@@ -1478,6 +1478,95 @@ const DECK_FILLER_ROWS = [
   check('one session: a lone row still imports', r.pages(0), '33');
 }
 
+// 45p. Column K holding something EOD cannot read.
+//
+//      "YU" for "YY" used to be skipped in silence, and the report then said
+//      nothing in the selection needed processing -- which whoever typed it
+//      would have every reason to believe.
+{
+  function run(status) {
+    const s = scenario(
+      [HEADER, ['Jane Doe', 'T1', '', '', 'T2', '', '', '', '', '', '', '', '']],
+      [{ name: 'Jane Doe', status: status }], { start: 1, rows: 1 });
+    s.api.processWopToDeck();
+    return { s: s, B: () => s.deckCell(2, C.CURRENT),
+      K: () => s.wopStatus(0), Kbg: () => s.wopStatusBg(0),
+      said: () => s.harness.alerts.concat(
+        s.harness.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  let r = run('YU');
+  check('typo: nothing is applied', r.B(), 'T1');
+  check('typo: the cell is left as typed', r.K(), 'YU');
+  checkTruthy('typo: the cell is marked', r.Kbg().toLowerCase() === '#ffcccc');
+  checkTruthy('typo: and it is named in the report',
+    r.said().includes('YU') && r.said().includes('not a Y/P instruction'));
+  checkTruthy('typo: the report no longer claims there was nothing to do',
+    !r.said().includes('Nothing in the highlighted selection needed processing'));
+
+  // A blank cell is a row with nothing to do, and stays quiet.
+  r = run('');
+  check('blank: left alone', [r.B(), r.K()], ['T1', '']);
+  checkTruthy('blank: not marked', r.Kbg().toLowerCase() === '#ffffff');
+  checkTruthy('blank: nothing said about it', !r.said().includes('not a Y/P'));
+
+  // EOD writes its own markers into K, and must still read them back.
+  r = run('Y (2 of 3 done, ran out)');
+  check('marker: EOD reads its own note back', r.B(), 'T2');
+  r = run('YYP - B empty?');
+  checkTruthy('marker: the B-empty note is understood too',
+    !r.said().includes('not a Y/P instruction'));
+
+  // Lower case and stray spaces are people, not typos.
+  check('case: a lower-case y still works', run('y').B(), 'T2');
+  check('spacing: padding still works', run('  Y  ').B(), 'T2');
+}
+
+// 45q. A chart that seats one student twice in the same hour.
+{
+  function organise(edits, names) {
+    const chart = JSON.parse(fs.readFileSync('tests/fixtures/seating-populated.json', 'utf8'))
+      .map(row => row.slice());
+    edits.forEach(e => { chart[e[0]][e[1]] = e[2]; });
+    const wopRows = names.map(function (n) {
+      const r = [n]; while (r.length < 26) r.push(''); return r;
+    });
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(names.length, 26, '#ffffff'));
+    const seating = new FakeSheet('Seating Chart', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+    loadScript(ctx).organizeSeatingRows();
+    return { wop: wop,
+      column: () => wop.values.map(v => String(v[0])).filter(Boolean),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // 1C and 1B at noon: the same student, twice, in one hour.
+  let r = organise([[3, 15, 'Twin'], [4, 15, 'Twin']], ['Twin']);
+  check('double booked: listed once, not twice',
+    r.column().filter(v => v.indexOf('Twin') !== -1), ['12:00 Twin']);
+  checkTruthy('double booked: both seats are named',
+    r.said().includes('1C') && r.said().includes('1B'));
+  checkTruthy('double booked: and the chart is what gets blamed',
+    r.said().includes('fix the chart'));
+
+  // The same student at two different hours is ordinary, and stays two rows.
+  r = organise([[3, 15, 'Twin'], [8 + 1, 15, 'Twin']], ['Twin']);
+  check('two hours: still two rows',
+    r.column().filter(v => v.indexOf('Twin') !== -1).length, 2);
+
+  // A block with no time beside it: the students keep their place but the
+  // missing label is said out loud rather than left to be noticed.
+  r = organise([[4, 0, '']], ['Student  1']);
+  checkTruthy('unlabelled hour: reported',
+    r.said().includes('no time beside it'));
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {

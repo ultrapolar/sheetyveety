@@ -114,6 +114,20 @@ was filled in with — the chart's `Student  7` becomes the sheet's `Student 7`.
 A chart name with nobody to match is still placed, spelled as the chart spells
 it, and named in the report rather than dropped.
 
+### A chart that seats somebody twice in one hour
+
+Nobody sits in two seats at once, so the student is listed **once**, at the
+first of the two seats, and both are named in the report. Left as two rows it
+would put a phantom session on the sheet — and the Radius import would then
+find two rows at the same hour with one session between them and be unable to
+say which it belonged to, so a slip on the chart would cost the import too.
+
+The same student at two *different* hours is ordinary and stays two rows.
+
+An hour block with no time beside it keeps its students, sorted after the hours
+that do have one, and the missing label is reported rather than left to be
+noticed.
+
 ### A student the chart never mentions
 
 The list is rebuilt from the chart, so a Daily WOP name that no chart entry
@@ -429,6 +443,17 @@ checked in**, and from one who has checked in but **has no DWP 2.0 yet**.
 Two students whose names normalise to the same thing are refused rather than
 guessed at. A Daily WOP row cannot say which of them it means, and the
 student-name guard below would confirm either one, so neither is safe.
+
+### A column K nobody can read
+
+EOD acts on `Y` and `P`. A cell holding anything else — `YU` for `YY` — is
+**not** skipped in silence: the cell is marked, and the report names it. Left
+quiet, the summary would say nothing in the selection needed processing, which
+whoever typed it would have every reason to believe.
+
+An empty cell is a row with nothing to do and stays quiet. EOD's own notes
+(`Y (2 of 3 done, ran out)`, `YYP - B empty?`) are read back normally, as are
+lower case and stray spaces.
 
 ### Notes
 
