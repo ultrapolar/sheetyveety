@@ -34,7 +34,7 @@ function loadScript(context) {
   yesFlag_, CONFIG, mergeStatusLetters_, parseClockTime_, reviewSessionTiming_,
   buildRadiusPlan_, applyRadiusPlan_, applyRadiusPlan_FromUI,
   storeRadiusPlan_, loadRadiusPlan_,
-  importSeatingChart, parseSeatingChart_, seatingNameMatches_,
+  importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
   podOfTable_, resolveSeatingAlias_
@@ -213,6 +213,88 @@ const DECK_FILLER_ROWS = [
   ['LEGEND', '', '', '', '', '', '', '', '', '', '', ''],
   ['(instructions)', '', '', '', '', '', '', '', '', '', '', '']
 ];
+
+// These two run first, and on the source text rather than on behaviour: a
+// mistyped config path takes down whatever runs next, and a stack trace
+// from three files away is a poor way to learn the name of the typo.
+// 0a. Every config path the code reads actually exists.
+//
+//      CONFIG.RADIUS.CACHE_TTL_SECONDS was read for weeks while the key lived
+//      on CONFIG, one level up. JavaScript hands back undefined for that and
+//      says nothing, so it surfaced as an Apps Script signature error at the
+//      very last step of a run. This is the cheap way to never repeat it.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const source = SOURCES.map(f => fs.readFileSync(f, 'utf8')).join('\n');
+  const missing = [];
+  const seen = {};
+
+  (source.match(/CONFIG(?:\.[A-Z_]+)+/g) || []).forEach(function (path) {
+    if (seen[path]) return;
+    seen[path] = true;
+    let node = api.CONFIG;
+    path.split('.').slice(1).forEach(function (key) {
+      node = (node && typeof node === 'object' && key in node) ? node[key] : undefined;
+    });
+    if (node === undefined) missing.push(path);
+  });
+
+  check('config: every path the code reads is defined', missing, []);
+  checkTruthy('config: the check is actually looking at something',
+    Object.keys(seen).length > 20);
+
+  // Stop here rather than carry on. An undefined config value takes down
+  // whatever reads it, and that crash ends the run before the summary is ever
+  // printed -- so the one line naming the typo would never be seen.
+  if (missing.length) {
+    console.error('\nUndefined config path(s): ' + missing.join(', '));
+    process.exit(1);
+  }
+}
+
+// 0b. Nothing is left defined but unreachable.
+//
+//      Removals across this project have twice orphaned a function: one when
+//      EOD stopped calling the import, one when a matcher was replaced. Dead
+//      code is not harmful in itself, but it is read as live when the next
+//      change comes along.
+{
+  const menu = fs.readFileSync('Menu.gs', 'utf8');
+  const sources = SOURCES.map(f => fs.readFileSync(f, 'utf8')).join('\n');
+
+  const dead = (sources.match(/^function\s+([A-Za-z0-9_$]+)/gm) || [])
+    .map(m => m.replace(/^function\s+/, ''))
+    .filter(function (name) {
+      if (name === 'onOpen') return false;                  // the entry point
+      if (menu.indexOf("'" + name + "'") !== -1) return false;  // a menu action
+      const uses = sources.match(new RegExp('\\b' + name + '\\b', 'g')) || [];
+      return uses.length <= 1;                              // its own definition
+    });
+
+  check('no function is defined without a caller', dead, []);
+
+  // A menu entry naming a function that no longer exists looks perfectly fine
+  // until somebody clicks it, and then fails in front of them.
+  const actions = (menu.match(/addItem\('[^']*', '([^']*)'\)/g) || [])
+    .map(m => m.replace(/^.*', '/, '').replace(/'\)$/, ''));
+  const unresolved = actions.filter(function (name) {
+    return !new RegExp('function\\s+' + name + '\\s*\\(').test(sources);
+  });
+  check('every menu entry names a function that exists', unresolved, []);
+  checkTruthy('menu: the check found the entries at all', actions.length >= 8);
+
+  if (dead.length || unresolved.length) {
+    if (dead.length) console.error('\nUnreachable function(s): ' + dead.join(', '));
+    if (unresolved.length) {
+      console.error('\nMenu entries with no such function: ' + unresolved.join(', '));
+    }
+    process.exit(1);
+  }
+}
 
 // 1. Single Y advances one task.
 {
@@ -780,7 +862,7 @@ const DECK_FILLER_ROWS = [
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   install(ctx, [], null);
   const api = loadScript(ctx);
-  const m = (a, b) => api.seatingNameMatches_(a, b);
+  const m = (a, b) => api.seatingMatchRank_(a, b) > 0;
 
   checkTruthy('name: exact', m('Amalie Laz', 'Amalie Laz'));
   checkTruthy('name: shortened surname', m('Amalie L', 'Amalie Laz'));

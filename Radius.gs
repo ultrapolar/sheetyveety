@@ -1223,14 +1223,6 @@ function clearRadiusPlan_(token, count) {
   CacheService.getUserCache().removeAll(keys);
 }
 
-/** True when there is enough set up for the import to be worth attempting. */
-function radiusIsConfigured_() {
-  return Boolean(
-    PropertiesService.getScriptProperties().getProperty(CONFIG.RADIUS.COOKIE_PROPERTY) &&
-    String(CONFIG.RADIUS.ROSTER_URL || '').trim() &&
-    String(CONFIG.RADIUS.CENTER_ID || '').trim());
-}
-
 /** The columns the import writes, as letters, for a report line. */
 function radiusColumnList_() {
   return CONFIG.RADIUS.FIELDS.map(function (f) {

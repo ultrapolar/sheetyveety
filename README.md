@@ -8,7 +8,7 @@ spreadsheet.
 | `Config.gs` | Sheet names, column positions, colours. The only file to edit if the layout changes. |
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
-| `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart**. |
+| `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart for highlighted rows**. |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |

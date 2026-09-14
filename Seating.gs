@@ -205,10 +205,6 @@ function seatingMatchRank_(chartName, wopName) {
   return (lastA.indexOf(lastB) === 0 || lastB.indexOf(lastA) === 0) ? 1 : 0;
 }
 
-function seatingNameMatches_(chartName, wopName) {
-  return seatingMatchRank_(chartName, wopName) > 0;
-}
-
 /**
  * Picks the one student a chart entry means, out of the ones on offer.
  *
