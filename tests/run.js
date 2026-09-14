@@ -287,11 +287,34 @@ const DECK_FILLER_ROWS = [
   check('every menu entry names a function that exists', unresolved, []);
   checkTruthy('menu: the check found the entries at all', actions.length >= 8);
 
-  if (dead.length || unresolved.length) {
+  // Apps Script's document lock is not reentrant. A tool that takes it and
+  // then calls another that does the same gets tryLock returning false and
+  // tells the user "another run is in progress" about itself -- which is a
+  // baffling thing to be told. EOD used to call the import and only avoided
+  // this because the import deliberately took no lock of its own.
+  const bodies = sources.split(/^function\s+/m).slice(1);
+  const locking = bodies.filter(b => b.indexOf('tryLock') !== -1)
+    .map(b => b.match(/^([A-Za-z0-9_$]+)/)[1]);
+  const nested = [];
+  bodies.forEach(function (body) {
+    const name = body.match(/^([A-Za-z0-9_$]+)/)[1];
+    if (locking.indexOf(name) === -1) return;
+    locking.forEach(function (other) {
+      if (other === name) return;
+      if (new RegExp('\\b' + other + '\\s*\\(').test(body)) {
+        nested.push(name + ' calls ' + other);
+      }
+    });
+  });
+  check('no tool takes the document lock inside another', nested, []);
+  checkTruthy('lock: the check found the tools at all', locking.length >= 5);
+
+  if (dead.length || unresolved.length || nested.length) {
     if (dead.length) console.error('\nUnreachable function(s): ' + dead.join(', '));
     if (unresolved.length) {
       console.error('\nMenu entries with no such function: ' + unresolved.join(', '));
     }
+    if (nested.length) console.error('\nNested document lock: ' + nested.join(', '));
     process.exit(1);
   }
 }
