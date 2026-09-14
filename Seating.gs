@@ -507,9 +507,11 @@ function organizeSeatingRows() {
     }
 
     const unmatched = [];
+    const claimed = {};
     const nameFor = function (chartName) {
       const resolved = resolveSeatingAlias_(chartName);
       const hits = seatingCandidates_(chartName, existing);
+      hits.forEach(function (name) { claimed[name] = true; });
       if (hits.length === 1) return hits[0];
       if (hits.length > 1) {
         log.error(chartName, 'could be ' + hits.join(' or ') +
@@ -529,17 +531,37 @@ function organizeSeatingRows() {
       return;
     }
 
-    // A sheet trimmed to yesterday's length has nowhere to put today's list.
+    // A student on the Daily WOP that the chart never mentions. The list is
+    // rebuilt from the chart, so leaving them out would quietly delete them --
+    // and the one name nobody remembered to seat is exactly the one that must
+    // not vanish. They go at the end, marked, with no hour and no pod.
+    const unseated = existing.filter(function (name) { return !claimed[name]; });
+    const hourCount = rows.length ? rows[rows.length - 1].hourIndex + 1 : 0;
+    unseated.forEach(function (name) {
+      rows.push({ name: name, chart: '', instructors: '',
+        pod: -1, hourIndex: -1, unseated: true });
+      log.warn(name, 'is on the Daily WOP but not on the seating chart, so they ' +
+        'are listed at the end with no seat.');
+    });
+
+    // A sheet trimmed to yesterday's length has nowhere to put today's list. Counted
+    // after the unseated are added, or the last of them falls off the end.
     const needed = startRow + rows.length - 1;
     if (needed > wop.getMaxRows()) {
       wop.insertRowsAfter(wop.getMaxRows(), needed - wop.getMaxRows());
     }
 
     const names = rows.map(function (r) { return [r.name]; });
-    const nameShades = rows.map(function (r) { return [hourShade_(r.hourIndex)]; });
+    const nameShades = rows.map(function (r) {
+      return [r.unseated ? CONFIG.COLOR.WARN : hourShade_(r.hourIndex)];
+    });
     const instructors = rows.map(function (r) { return [r.instructors]; });
-    const podFills = rows.map(function (r) { return [podFill_(r.pod)]; });
-    const podFonts = rows.map(function (r) { return [podFont_(r.pod)]; });
+    const podFills = rows.map(function (r) {
+      return [r.unseated ? CONFIG.COLOR.WARN : podFill_(r.pod)];
+    });
+    const podFonts = rows.map(function (r) {
+      return [r.unseated ? '#000000' : podFont_(r.pod)];
+    });
 
     wop.getRange(startRow, CONFIG.WOP_COL.NAME, rows.length, 1).setValues(names)
       .setBackgrounds(nameShades);
@@ -560,8 +582,9 @@ function organizeSeatingRows() {
 
     showReport_('Seating order', 'Daily WOP rewritten in seating order', [
       { label: 'Rows written', value: rows.length },
-      { label: 'Hours', value: rows.length
-        ? rows[rows.length - 1].hourIndex + 1 : 0 },
+      { label: 'Hours', value: hourCount },
+      { label: 'On the Daily WOP but not seated', value: unseated.length,
+        alert: unseated.length > 0 },
       { label: 'Names taken from the chart as-is', value: unmatched.length,
         alert: unmatched.length > 0 },
       { label: 'Rows cleared below', value: spare > 0 ? spare : 0 }

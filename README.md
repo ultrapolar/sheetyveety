@@ -114,6 +114,14 @@ was filled in with — the chart's `Student  7` becomes the sheet's `Student 7`.
 A chart name with nobody to match is still placed, spelled as the chart spells
 it, and named in the report rather than dropped.
 
+### A student the chart never mentions
+
+The list is rebuilt from the chart, so a Daily WOP name that no chart entry
+claims would otherwise be deleted by the rebuild — and the one student nobody
+remembered to seat is exactly the one that must not vanish. They are kept,
+listed at the end with no hour and no pod, their row marked yellow, and named
+in the report.
+
 ### It refuses to run mid-day
 
 Session data is tied to its row by position alone. Reordering column A

@@ -1027,6 +1027,21 @@ const DECK_FILLER_ROWS = [
   checkTruthy('organise: and is reported',
     r.said().includes('not on the Daily WOP'));
 
+  // A student on the Daily WOP that the chart never mentions must not be
+  // deleted by a rebuild of the list. Losing the one name nobody remembered to
+  // seat is the worst thing this could do.
+  r = organise({ students: ['Student  1', 'Walk In Kid'] });
+  const column = r.wop.values.map(v => String(v[0])).filter(Boolean);
+  checkTruthy('organise: an unseated student survives the rebuild',
+    column.some(v => v === 'Walk In Kid'));
+  check('organise: and is put at the end', column[column.length - 1], 'Walk In Kid');
+  checkTruthy('organise: with no hour attached',
+    column[column.length - 1].indexOf(':') === -1);
+  checkTruthy('organise: and is reported',
+    r.said().includes('not on the seating chart'));
+  check('organise: marked rather than left looking seated',
+    String(r.wop.backgrounds[column.length - 1][1]), '#ffff00');
+
   // Special spellings settle what the name alone cannot.
   r = organise({ students: ['Amalie Lazeration'],
                  aliases: { 'Student  7': 'Amalie Lazeration' } });
