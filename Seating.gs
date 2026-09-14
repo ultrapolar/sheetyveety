@@ -84,33 +84,104 @@ function parseSeatingChart_(values) {
   headers.forEach(function (header, n) {
     const stop = n + 1 < headers.length ? headers[n + 1].row : values.length;
 
+    // The hour is written down the left of the block, on whichever of its rows
+    // suited whoever drew it.
+    let hour = '';
+    for (let r = header.row; r < stop && !hour; r++) {
+      hour = hourLabel_(values[r][0]);
+    }
+
+    // Instructor slots are a property of the block, not of one row: a row with
+    // only some of them filled still has the others, empty. Finding them row by
+    // row made an empty slot reach across the room for the next name along.
+    const instructorColumns = [];
+    for (let r = header.row + 1; r < stop; r++) {
+      if (!rowLetterOf_(values[r], header.columns)) continue;
+      for (let c = 0; c < values[r].length; c++) {
+        if (header.columns.indexOf(c) !== -1) continue;
+        if (instructorColumns.indexOf(c) !== -1) continue;
+        if (cellText_(values[r][c]).length > 1) instructorColumns.push(c);
+      }
+    }
+
     for (let r = header.row + 1; r < stop; r++) {
       const row = values[r];
       const letter = rowLetterOf_(row, header.columns);
       if (!letter) continue;   // a spacer or a footer, not a row of seats
 
-      // Whatever else carries text on a seat row is an instructor slot: the
-      // seats are accounted for, and the row letters are single characters.
-      const instructorColumns = [];
-      for (let c = 0; c < row.length; c++) {
-        if (header.columns.indexOf(c) !== -1) continue;
-        const text = cellText_(row[c]);
-        if (text.length > 1) instructorColumns.push(c);
-      }
-
       header.columns.forEach(function (c) {
         const occupant = cellText_(row[c]);
         if (!occupant) return;
+        const table = tableNumberText_(values[header.row][c]);
         seats.push({
-          seat: tableNumberText_(values[header.row][c]) + letter,
+          seat: table + letter,
           occupant: occupant,
-          instructor: nearestValue_(row, instructorColumns, c)
+          instructor: nearestValue_(row, instructorColumns, c),
+          hour: hour,
+          block: n,
+          table: Number(table),
+          letter: letter
         });
       });
     }
   });
 
   return seats;
+}
+
+/**
+ * Applies the special-spellings list.
+ *
+ * Some chart shorthand cannot be worked out from the name alone -- two students
+ * who share a first name and an initial, or a nickname nobody writes the same
+ * way twice. Those are spelled out in CONFIG.SEATING.ALIASES rather than
+ * guessed at here.
+ */
+function resolveSeatingAlias_(name) {
+  const aliases = CONFIG.SEATING.ALIASES || {};
+  const wanted = normalizeStudentName_(name);
+  const keys = Object.keys(aliases);
+  for (let i = 0; i < keys.length; i++) {
+    if (normalizeStudentName_(keys[i]) === wanted) return aliases[keys[i]];
+  }
+  return name;
+}
+
+/** "12:00" from a cell holding either that text or a real time value. */
+function hourLabel_(value) {
+  if (value instanceof Date) {
+    const hours = value.getHours();
+    const minutes = value.getMinutes();
+    return (hours % 12 === 0 ? 12 : hours % 12) + ':' +
+      (minutes < 10 ? '0' : '') + minutes;
+  }
+  const text = cellText_(value);
+  const match = text.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return '';
+  return String(Number(match[1])) + ':' + match[2];
+}
+
+/**
+ * Minutes past midnight, for putting the hours in the order the day runs.
+ *
+ * The centre opens mornings or afternoons and never at 1am, so a small hour is
+ * an afternoon one: 4:00 belongs after 12:00, not eight hours before 9:00.
+ */
+function hourSortKey_(label) {
+  const match = String(label).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  let hours = Number(match[1]);
+  if (hours <= CONFIG.SEATING.AFTERNOON_AT_OR_BELOW) hours += 12;
+  return hours * 60 + Number(match[2]);
+}
+
+/** Which pod a table belongs to, as a zero-based index, or -1. */
+function podOfTable_(table) {
+  const pods = CONFIG.SEATING.PODS || [];
+  for (let i = 0; i < pods.length; i++) {
+    if (pods[i].indexOf(table) !== -1) return i;
+  }
+  return -1;
 }
 
 /**
@@ -121,17 +192,38 @@ function parseSeatingChart_(values) {
  * not, and a first name on its own counts only as far as the ambiguity check
  * below lets it.
  */
-function seatingNameMatches_(chartName, wopName) {
-  const a = normalizeStudentName_(chartName).split(' ').filter(Boolean);
+function seatingMatchRank_(chartName, wopName) {
+  const a = normalizeStudentName_(resolveSeatingAlias_(chartName)).split(' ').filter(Boolean);
   const b = normalizeStudentName_(wopName).split(' ').filter(Boolean);
-  if (!a.length || !b.length) return false;
-  if (a.join(' ') === b.join(' ')) return true;
-  if (a[0] !== b[0]) return false;
-  if (a.length === 1 || b.length === 1) return true;
+  if (!a.length || !b.length) return 0;
+  if (a.join(' ') === b.join(' ')) return 2;
+  if (a[0] !== b[0]) return 0;
+  if (a.length === 1 || b.length === 1) return 1;
 
   const lastA = a[a.length - 1];
   const lastB = b[b.length - 1];
-  return lastA.indexOf(lastB) === 0 || lastB.indexOf(lastA) === 0;
+  return (lastA.indexOf(lastB) === 0 || lastB.indexOf(lastA) === 0) ? 1 : 0;
+}
+
+function seatingNameMatches_(chartName, wopName) {
+  return seatingMatchRank_(chartName, wopName) > 0;
+}
+
+/**
+ * Picks the one student a chart entry means, out of the ones on offer.
+ *
+ * A name written out in full beats one that merely starts the same way, so
+ * "Student 11" is not taken to be an abbreviation of "Student 1" while a
+ * "Student 11" is sitting right there. Only when nothing matches exactly does
+ * the abbreviation rule get a say, and two candidates at that point is a
+ * genuine ambiguity rather than something to pick between.
+ */
+function seatingCandidates_(chartName, names) {
+  const exact = names.filter(function (n) {
+    return seatingMatchRank_(chartName, n) === 2;
+  });
+  if (exact.length) return exact;
+  return names.filter(function (n) { return seatingMatchRank_(chartName, n) === 1; });
 }
 
 /** "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved. */
@@ -211,13 +303,11 @@ function importSeatingChart() {
       if (name) students.push({ index: i, name: name });
     }
 
+    const studentNames = students.map(function (s) { return s.name; });
     seats.forEach(function (entry) {
-      const claimants = students.filter(function (student) {
-        return seatingNameMatches_(entry.occupant, student.name);
-      });
-      if (claimants.length > 1) {
-        entry.ambiguous = claimants.map(function (s) { return s.name; });
-      }
+      const claimants = seatingCandidates_(entry.occupant, studentNames);
+      entry.claimants = claimants;
+      if (claimants.length > 1) entry.ambiguous = claimants;
     });
 
     students.forEach(function (student) {
@@ -225,7 +315,7 @@ function importSeatingChart() {
       const ambiguous = [];
 
       seats.forEach(function (entry) {
-        if (!seatingNameMatches_(entry.occupant, student.name)) return;
+        if (entry.claimants.indexOf(student.name) === -1) return;
         if (entry.ambiguous) ambiguous.push(entry);
         else matches.push(entry);
       });
@@ -268,6 +358,213 @@ function importSeatingChart() {
       { label: 'Already correct', value: stats.unchanged },
       { label: 'Replaced', value: stats.replaced, alert: stats.replaced > 0 },
       { label: 'Not on the chart', value: stats.missing, alert: stats.missing > 0 }
+    ], log);
+  } catch (err) {
+    showError_(err.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ------------------------------------------------------------------
+// Start of day: putting the Daily WOP in seating order
+// ------------------------------------------------------------------
+
+/**
+ * Groups the chart into the order the Daily WOP should read.
+ *
+ * Hours run in the order the day does, pods within an hour run 1 to 4, and
+ * students within a pod run alphabetically. Empty pods are simply not there.
+ */
+function planSeatingOrder_(seats, nameFor) {
+  const hours = [];
+  const byHour = {};
+
+  seats.forEach(function (entry) {
+    const pod = podOfTable_(entry.table);
+    if (pod === -1) return;
+    if (!byHour[entry.hour]) {
+      byHour[entry.hour] = { hour: entry.hour, pods: {} };
+      hours.push(entry.hour);
+    }
+    const pods = byHour[entry.hour].pods;
+    if (!pods[pod]) pods[pod] = { pod: pod, students: [], instructors: [] };
+    pods[pod].students.push({ name: nameFor(entry.occupant), chart: entry.occupant });
+    if (entry.instructor && pods[pod].instructors.indexOf(entry.instructor) === -1) {
+      pods[pod].instructors.push(entry.instructor);
+    }
+  });
+
+  hours.sort(function (a, b) { return hourSortKey_(a) - hourSortKey_(b); });
+
+  const rows = [];
+  hours.forEach(function (hour, hourIndex) {
+    const pods = byHour[hour].pods;
+    Object.keys(pods).map(Number).sort(function (a, b) { return a - b; })
+      .forEach(function (pod) {
+        const group = pods[pod];
+        group.students.sort(function (a, b) {
+          return a.name.toLowerCase() < b.name.toLowerCase() ? -1
+            : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0;
+        });
+        group.students.forEach(function (student) {
+          rows.push({
+            name: (hour ? hour + ' ' : '') + student.name,
+            chart: student.chart,
+            instructors: group.instructors.join(CONFIG.SEATING.INSTRUCTOR_SEPARATOR),
+            pod: pod,
+            hourIndex: hourIndex
+          });
+        });
+      });
+  });
+
+  return rows;
+}
+
+function podFill_(pod) {
+  const fills = CONFIG.SEATING.POD_FILLS;
+  return fills[pod % fills.length];
+}
+
+function podFont_(pod) {
+  const fonts = CONFIG.SEATING.POD_FONTS;
+  return fonts[pod % fonts.length];
+}
+
+function hourShade_(hourIndex) {
+  const shades = CONFIG.SEATING.HOUR_SHADES;
+  return shades[hourIndex % shades.length];
+}
+
+/**
+ * Menu entry: rewrites columns A and B of the Daily WOP in seating order.
+ *
+ * This reorders whole rows' worth of meaning, so it refuses to run once
+ * anything else on the sheet has been filled in. A student's pages and times
+ * live in the columns to the right and are tied to their row by position
+ * alone; shuffling column A underneath them would quietly hand one student's
+ * session to another, and no report afterwards could untangle it.
+ */
+function organizeSeatingRows() {
+  const log = ActionLog_();
+
+  let sheets;
+  try {
+    sheets = getSheets_();
+  } catch (err) {
+    showError_(err.message);
+    return;
+  }
+
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
+    showError_('Another run is in progress. Try again in a moment.');
+    return;
+  }
+
+  try {
+    const wop = sheets.wop;
+    const startRow = CONFIG.SEATING.ORGANIZE_START_ROW;
+    const instructorCol = CONFIG.SEATING.INSTRUCTOR_COLUMN;
+    const lastRow = wop.getLastRow();
+
+    // Everything already on the sheet, so a name can keep the spelling the
+    // Daily WOP uses rather than the shorthand the chart was filled in with.
+    const existing = [];
+    if (lastRow >= startRow) {
+      wop.getRange(startRow, CONFIG.WOP_COL.NAME, lastRow - startRow + 1, 1)
+        .getValues().forEach(function (row) {
+          const name = extractName_(row[0]);
+          if (name) existing.push(name);
+        });
+    }
+
+    // Refuse to shuffle names out from under data that is pinned to its row.
+    const guardWidth = wop.getLastColumn();
+    if (lastRow >= startRow && guardWidth > instructorCol) {
+      const beyond = wop.getRange(startRow, instructorCol + 1,
+        lastRow - startRow + 1, guardWidth - instructorCol).getValues();
+      for (let r = 0; r < beyond.length; r++) {
+        for (let c = 0; c < beyond[r].length; c++) {
+          if (cellText_(beyond[r][c]) !== '') {
+            showError_('Row ' + (startRow + r) + ' already has something in column ' +
+              columnLetter_(instructorCol + 1 + c) + '. Reordering the names now ' +
+              'would leave that data beside the wrong student, so nothing has ' +
+              'been changed. Run this at the start of the day, before anything ' +
+              'else is filled in.');
+            return;
+          }
+        }
+      }
+    }
+
+    const seats = parseSeatingChart_(seatingSheet_().getDataRange().getValues());
+    if (!seats.length) {
+      showError_('No students found on the seating chart. Check that ' +
+        'CONFIG.SEATING.SHEET_NAME points at the right tab.');
+      return;
+    }
+
+    const unmatched = [];
+    const nameFor = function (chartName) {
+      const resolved = resolveSeatingAlias_(chartName);
+      const hits = seatingCandidates_(chartName, existing);
+      if (hits.length === 1) return hits[0];
+      if (hits.length > 1) {
+        log.error(chartName, 'could be ' + hits.join(' or ') +
+          '. Listed as written on the chart — add a line to ' +
+          'CONFIG.SEATING.ALIASES to settle it.');
+        unmatched.push(chartName);
+        return resolved;
+      }
+      unmatched.push(chartName);
+      return resolved;
+    };
+
+    const rows = planSeatingOrder_(seats, nameFor);
+    if (!rows.length) {
+      showError_('The chart has students on it, but none at a table belonging ' +
+        'to a pod. Check CONFIG.SEATING.PODS against the table numbers.');
+      return;
+    }
+
+    // A sheet trimmed to yesterday's length has nowhere to put today's list.
+    const needed = startRow + rows.length - 1;
+    if (needed > wop.getMaxRows()) {
+      wop.insertRowsAfter(wop.getMaxRows(), needed - wop.getMaxRows());
+    }
+
+    const names = rows.map(function (r) { return [r.name]; });
+    const nameShades = rows.map(function (r) { return [hourShade_(r.hourIndex)]; });
+    const instructors = rows.map(function (r) { return [r.instructors]; });
+    const podFills = rows.map(function (r) { return [podFill_(r.pod)]; });
+    const podFonts = rows.map(function (r) { return [podFont_(r.pod)]; });
+
+    wop.getRange(startRow, CONFIG.WOP_COL.NAME, rows.length, 1).setValues(names)
+      .setBackgrounds(nameShades);
+    wop.getRange(startRow, instructorCol, rows.length, 1).setValues(instructors)
+      .setBackgrounds(podFills).setFontColors(podFonts);
+
+    // Yesterday's list may have been longer than today's.
+    const spare = lastRow - (startRow + rows.length) + 1;
+    if (spare > 0) {
+      wop.getRange(startRow + rows.length, CONFIG.WOP_COL.NAME, spare, instructorCol)
+        .clearContent();
+    }
+
+    unmatched.forEach(function (chartName) {
+      log.warn(chartName, 'is on the chart but not on the Daily WOP, so it is ' +
+        'listed exactly as the chart spells it.');
+    });
+
+    showReport_('Seating order', 'Daily WOP rewritten in seating order', [
+      { label: 'Rows written', value: rows.length },
+      { label: 'Hours', value: rows.length
+        ? rows[rows.length - 1].hourIndex + 1 : 0 },
+      { label: 'Names taken from the chart as-is', value: unmatched.length,
+        alert: unmatched.length > 0 },
+      { label: 'Rows cleared below', value: spare > 0 ? spare : 0 }
     ], log);
   } catch (err) {
     showError_(err.message);

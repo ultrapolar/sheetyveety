@@ -154,6 +154,41 @@ const CONFIG = {
     // "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved during the day.
     SEPARATOR: ' | ',
     SEAT_JOIN: ', ',
-    INSTRUCTOR_JOIN: ' '
+    INSTRUCTOR_JOIN: ' ',
+
+    // Shorthand written on the chart that cannot be worked out from the Daily
+    // WOP name on its own -- two students who share a first name and an
+    // initial, a nickname, a spelling nobody agrees on. Chart side on the
+    // left, exactly as it is written there; the Daily WOP's spelling on the
+    // right. Used by the seating import and the SOD organiser alike.
+    ALIASES: {
+      // 'Amalie L2': 'Amalie Lazeration',
+      // 'Alex the younger': 'Alexander Roe'
+    },
+
+    // --- the start-of-day organiser ---------------------------------------
+
+    // Which tables make up each pod. Pods are listed in this order.
+    PODS: [[1, 2], [3, 4], [5, 6], [7, 8]],
+
+    // One background per pod, so a glance says who is sitting together.
+    POD_FILLS: ['#efefef', '#cfe2f3', '#9fc5e8', '#6d9eeb'],
+
+    // The initials alternate colour so neighbouring pods stay apart.
+    POD_FONTS: ['#0000ff', '#ff0000'],
+
+    // Alternating hours get a shaded name cell, so each hour reads as a block.
+    HOUR_SHADES: ['#ffffff', '#d9d9d9'],
+
+    // Between the instructors of one pod: "AA/BB".
+    INSTRUCTOR_SEPARATOR: '/',
+
+    // Where the organised list starts, and where the instructors go.
+    ORGANIZE_START_ROW: 1,
+    INSTRUCTOR_COLUMN: 2,   // B
+
+    // The centre runs mornings or afternoons, never small hours, so an hour at
+    // or below this is read as afternoon: 4:00 sorts after 12:00, not before 9.
+    AFTERNOON_AT_OR_BELOW: 7
   }
 };

@@ -8,8 +8,8 @@ spreadsheet.
 | `Config.gs` | Sheet names, column positions, colours. The only file to edit if the layout changes. |
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
+| `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart**. |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
-| `Seating.gs` | **EOD → Seating chart**: where each student sat, and who sat with them. |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
 | `Menu.gs` | Menu construction. |
@@ -83,6 +83,62 @@ itself builds the link, so no id is ever guessed.
 
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
+
+## Start of day: organising the rows
+
+**SOD → Organise rows from the seating chart** rewrites columns **A and B** of
+the Daily WOP into the order the room is actually arranged in:
+
+```
+A                        B        (B shaded per pod, initials alternating colour)
+12:00 Student 1          AA/BB
+12:00 Student 2          AA/BB
+...
+12:00 Student 7          CC/DD
+...
+1:00 Student 3           AA/FF     (column A shaded on alternate hours)
+```
+
+- **Hours** run in the order the day does. An hour of 7 or less is read as an
+  afternoon one, so `4:00` sorts after `12:00` rather than eight hours before
+  `9:00` (`CONFIG.SEATING.AFTERNOON_AT_OR_BELOW`).
+- **Pods** run 1 to 4. A pod is a pair of tables — 1 and 2, 3 and 4, and so on,
+  set by `CONFIG.SEATING.PODS`. Empty pods are simply absent.
+- **Students** run alphabetically within their pod.
+- **Column B** holds the pod's instructors, joined: `AA/BB`. Its fill says which
+  pod, and the initials alternate colour so neighbouring pods stay apart.
+- **Column A** is shaded on alternate hours, so each hour reads as a block.
+
+Names keep the spelling the Daily WOP already uses, not the shorthand the chart
+was filled in with — the chart's `Student  7` becomes the sheet's `Student 7`.
+A chart name with nobody to match is still placed, spelled as the chart spells
+it, and named in the report rather than dropped.
+
+### It refuses to run mid-day
+
+Session data is tied to its row by position alone. Reordering column A
+underneath it would hand one student's pages and times to another, silently and
+irreversibly. So if anything at all sits to the right of column B, the organiser
+stops and names the cell that stopped it. Column B itself is its own, so
+yesterday's instructors are no reason to halt.
+
+### Special spellings
+
+`CONFIG.SEATING.ALIASES` maps what is written on the chart to the Daily WOP's
+spelling, for the cases a first name and an initial cannot settle:
+
+```js
+ALIASES: {
+  'Amalie L2': 'Amalie Lazeration',
+  'Alex the younger': 'Alexander Roe'
+}
+```
+
+A name written out in full always beats one that merely starts the same way, so
+`Student 11` is not read as an abbreviation of `Student 1` while a Student 11 is
+sitting right there. Only when nothing matches exactly does the abbreviation
+rule get a say — and two candidates at that point is reported as an ambiguity
+rather than guessed between. The same list is used by the EOD seating import.
 
 ## The seating chart
 

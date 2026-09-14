@@ -10,6 +10,8 @@ function onOpen() {
 
   ui.createMenu('SOD')
     .addItem('Pinks Printed', 'processSodPinks')
+    .addSeparator()
+    .addItem('Organise rows from the seating chart', 'organizeSeatingRows')
     .addToUi();
 
   ui.createMenu('EOD')

@@ -35,7 +35,9 @@ function loadScript(context) {
   buildRadiusPlan_, applyRadiusPlan_, applyRadiusPlan_FromUI,
   storeRadiusPlan_, loadRadiusPlan_,
   importSeatingChart, parseSeatingChart_, seatingNameMatches_,
-  formatSeating_, rowLetterOf_, isTableNumber_
+  formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
+  organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
+  podOfTable_, resolveSeatingAlias_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -777,6 +779,26 @@ const DECK_FILLER_ROWS = [
     !m('Amelia L', 'Amalie Laz'));
   checkTruthy('name: an empty chart cell matches nobody', !m('', 'Amalie Laz'));
 
+  // A name written out in full beats one that merely starts the same way.
+  // Without this "Student 11" reads as an abbreviation of "Student 1".
+  const roll = ['Student 1', 'Student 11', 'Student 12'];
+  check('candidates: an exact name wins outright',
+    api.seatingCandidates_('Student  11', roll), ['Student 11']);
+  check('candidates: an abbreviation still finds its student',
+    api.seatingCandidates_('Amalie L', ['Amalie Laz', 'Bo Peep']), ['Amalie Laz']);
+  check('candidates: two students behind one abbreviation is an ambiguity',
+    api.seatingCandidates_('Amalie L', ['Amalie Laz', 'Amalie Lee']),
+    ['Amalie Laz', 'Amalie Lee']);
+  check('candidates: nobody is nobody',
+    api.seatingCandidates_('Ghost', ['Amalie Laz']), []);
+
+  // A special spelling settles what the name alone cannot.
+  vm.runInContext(
+    'CONFIG.SEATING.ALIASES = { "Amalie L": "Amalie Lee" };', ctx);
+  check('candidates: an alias overrides the abbreviation rule',
+    api.seatingCandidates_('Amalie L', ['Amalie Laz', 'Amalie Lee']), ['Amalie Lee']);
+  vm.runInContext('CONFIG.SEATING.ALIASES = {};', ctx);
+
   // Formatting, including a student who moved between hours.
   check('format: one seat, one instructor',
     api.formatSeating_([{ seat: '1C', instructor: 'IN3' }]), '1C | IN3');
@@ -866,6 +888,150 @@ const DECK_FILLER_ROWS = [
   check('seating sheet: an already correct cell is left alone', r.N(0), '1C | IN3');
   checkTruthy('seating sheet: and is not counted as a replacement',
     !r.said().includes('replaced'));
+}
+
+// 45g. The start-of-day organiser, against the populated sample chart.
+{
+  const POPULATED = 'tests/fixtures/seating-populated.json';
+
+  function organise(options) {
+    const opts = options || {};
+    const chart = JSON.parse(fs.readFileSync(POPULATED, 'utf8')).map(r => r.slice());
+    (opts.edit || []).forEach(e => { chart[e[0]][e[1]] = e[2]; });
+
+    const wopRows = (opts.students !== undefined ? opts.students
+      : ['Student 1', 'Student 2', 'Student 3', 'Student 4', 'Student 5',
+         'Student 6', 'Student 7', 'Student 8', 'Student 9', 'Student 10',
+         'Student 11', 'Student 12']).map(name => {
+      const row = [name];
+      while (row.length < 26) row.push('');
+      return row;
+    });
+    (opts.dirty || []).forEach(d => { wopRows[d[0]][d[1]] = d[2]; });
+    if (!wopRows.length) wopRows.push(new Array(26).fill(''));
+
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(wopRows.length, 26, '#ffffff'));
+    const seating = new FakeSheet('Seating Chart', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+    const api = loadScript(ctx);
+    if (opts.aliases) {
+      vm.runInContext('CONFIG.SEATING.ALIASES = ' + JSON.stringify(opts.aliases) + ';', ctx);
+    }
+    api.organizeSeatingRows();
+    return { wop, harness: h, api,
+      A: i => String(wop.values[i][0]),
+      B: i => String(wop.values[i][1]),
+      Bfill: i => String(wop.backgrounds[i][1]),
+      Bfont: i => String(wop.fontColors[i][1]),
+      Afill: i => String(wop.backgrounds[i][0]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  const r = organise();
+
+  // Twelve students at 12:00 and twelve at 1:00.
+  check('organise: a row per seating', r.wop.values.filter(v => v[0]).length, 24);
+
+  // The hour leads, and the earlier hour comes first.
+  checkTruthy('organise: the first row is the earlier hour',
+    r.A(0).indexOf('12:00 ') === 0);
+  checkTruthy('organise: the later hour follows', r.A(12).indexOf('1:00 ') === 0);
+
+  // Pod 1 is tables 1 and 2: students 1 to 6 at 12:00, alphabetically.
+  const firstHour = [];
+  for (let i = 0; i < 12; i++) firstHour.push(r.A(i).replace('12:00 ', ''));
+  check('organise: pod 1 holds students 1-6',
+    firstHour.slice(0, 6).slice().sort(),
+    ['Student 1', 'Student 2', 'Student 3', 'Student 4', 'Student 5', 'Student 6']);
+  check('organise: pod 1 is alphabetical within itself',
+    firstHour.slice(0, 6), firstHour.slice(0, 6).slice().sort());
+  check('organise: pod 2 follows, holding students 7-10',
+    firstHour.slice(6, 10).slice().sort(),
+    ['Student 10', 'Student 7', 'Student 8', 'Student 9']);
+  check('organise: pod 3 last, holding students 11-12',
+    firstHour.slice(10, 12).slice().sort(), ['Student 11', 'Student 12']);
+
+  // The instructors of a pod, joined, against every student in it.
+  check('organise: pod 1 carries both of its instructors', r.B(0), 'AA/BB');
+  check('organise: pod 2 carries its own', r.B(6), 'CC/DD');
+  check('organise: a single-instructor pod is not padded', r.B(10), 'EE');
+
+  // Colour: the pod on column B, the hour on column A.
+  check('organise: pod 1 fill', r.Bfill(0), '#efefef');
+  check('organise: pod 2 fill', r.Bfill(6), '#cfe2f3');
+  check('organise: pod 3 fill', r.Bfill(10), '#9fc5e8');
+  check('organise: initials alternate colour between neighbouring pods',
+    [r.Bfont(0), r.Bfont(6)], ['#0000ff', '#ff0000']);
+  check('organise: the hour shade alternates', [r.Afill(0), r.Afill(12)],
+    ['#ffffff', '#d9d9d9']);
+}
+
+// 45h. What the organiser refuses, and what it is told.
+{
+  const POPULATED = 'tests/fixtures/seating-populated.json';
+
+  function organise(options) {
+    const opts = options || {};
+    const chart = JSON.parse(fs.readFileSync(POPULATED, 'utf8')).map(r => r.slice());
+    (opts.edit || []).forEach(e => { chart[e[0]][e[1]] = e[2]; });
+    const wopRows = (opts.students || ['Student 1']).map(name => {
+      const row = [name];
+      while (row.length < 26) row.push('');
+      return row;
+    });
+    (opts.dirty || []).forEach(d => { wopRows[d[0]][d[1]] = d[2]; });
+
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', wopRows,
+      makeGrid(wopRows.length, 26, '#ffffff'));
+    const seating = new FakeSheet('Seating Chart', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+    const api = loadScript(ctx);
+    if (opts.aliases) {
+      vm.runInContext('CONFIG.SEATING.ALIASES = ' + JSON.stringify(opts.aliases) + ';', ctx);
+    }
+    api.organizeSeatingRows();
+    return { wop, said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Session data is tied to its row by position alone. Reordering the names
+  // under it would hand one student's pages to another, silently.
+  let r = organise({ dirty: [[0, 7, '33']] });   // column H
+  check('organise: refuses once session data is on the sheet',
+    String(r.wop.values[0][0]), 'Student 1');
+  checkTruthy('organise: and names the column that stopped it',
+    r.said().includes('column H'));
+
+  // Column B is the organiser's own, so yesterday's instructors are no reason
+  // to stop.
+  r = organise({ dirty: [[0, 1, 'ZZ']] });
+  checkTruthy('organise: yesterday\'s instructors do not block it',
+    !r.said().includes('would leave that data'));
+
+  // A chart name with nobody to match on the Daily WOP is still listed, and
+  // said out loud rather than dropped.
+  r = organise({ students: ['Student 1'] });
+  checkTruthy('organise: an unknown chart name is still placed',
+    r.wop.values.filter(v => String(v[0]).indexOf('Student  7') !== -1).length > 0);
+  checkTruthy('organise: and is reported',
+    r.said().includes('not on the Daily WOP'));
+
+  // Special spellings settle what the name alone cannot.
+  r = organise({ students: ['Amalie Lazeration'],
+                 aliases: { 'Student  7': 'Amalie Lazeration' } });
+  checkTruthy('organise: an alias puts the real name on the sheet',
+    r.wop.values.some(v => String(v[0]).indexOf('Amalie Lazeration') !== -1));
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

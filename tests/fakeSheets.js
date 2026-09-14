@@ -53,6 +53,8 @@ class FakeRange {
   getValues() { return this._slice(this.sheet.values); }
   setValues(block) { this._write(this.sheet.values, block, 'setValues'); return this; }
   getBackgrounds() { return this._slice(this.sheet.backgrounds); }
+  getFontColors() { return this._slice(this.sheet.fontColors); }
+  setFontColors(block) { this._write(this.sheet.fontColors, block, 'setFontColors'); return this; }
   setBackgrounds(block) { this._write(this.sheet.backgrounds, block, 'setBackgrounds'); return this; }
   getFormulas() {
     this.sheet.formulaReads = (this.sheet.formulaReads || 0) + 1;
@@ -70,7 +72,14 @@ class FakeRange {
   getValue() { return this.sheet.values[this.row - 1][this.col - 1]; }
   setValue(v) { this.sheet.values[this.row - 1][this.col - 1] = v; this.sheet.writeCount++; return this; }
   setBackground(c) { this.sheet.backgrounds[this.row - 1][this.col - 1] = c; return this; }
-  clearContent() { this.sheet.values[this.row - 1][this.col - 1] = ''; return this; }
+  clearContent() {
+    for (let r = 0; r < this.numRows; r++) {
+      for (let c = 0; c < this.numCols; c++) {
+        this.sheet.values[this.row - 1 + r][this.col - 1 + c] = '';
+      }
+    }
+    return this;
+  }
 }
 
 class FakeSheet {
@@ -78,6 +87,7 @@ class FakeSheet {
     this.name = name;
     this.values = values;
     this.backgrounds = backgrounds || makeGrid(values.length, values[0].length, '#ffffff');
+    this.fontColors = makeGrid(values.length, values[0].length, '#000000');
     this.activeRange = null;
     this.writeCount = 0;
   }
@@ -96,6 +106,16 @@ class FakeSheet {
     return 0;
   }
   getMaxColumns() { return this.values[0].length; }
+  getMaxRows() { return this.values.length; }
+  insertRowsAfter(row, howMany) {
+    const width = this.values[0].length;
+    for (let n = 0; n < howMany; n++) {
+      this.values.splice(row + n, 0, new Array(width).fill(''));
+      this.backgrounds.splice(row + n, 0, new Array(width).fill('#ffffff'));
+      this.fontColors.splice(row + n, 0, new Array(width).fill('#000000'));
+    }
+    return this;
+  }
   deleteColumn(col) {
     this.values.forEach(row => row.splice(col - 1, 1));
     this.backgrounds.forEach(row => row.splice(col - 1, 1));
