@@ -620,6 +620,33 @@ An empty cell is a row with nothing to do and stays quiet. EOD's own notes
 (`Y (2 of 3 done, ran out)`, `YYP - B empty?`) are read back normally, as are
 lower case and stray spaces.
 
+### A history column that has run out of room
+
+Column M grows by one entry every time a student finishes a task and is never
+trimmed, and a Google Sheets cell holds fifty thousand characters. On the day
+one reaches that, the write would throw — and a write that throws **partway
+through a batch** is the bad case: some columns land and others do not, so the
+Deck List ends up half-applied with no record of where it stopped.
+
+So EOD checks the length before it writes. A student whose history is full is
+**stopped on their own row**: nothing is applied, column K keeps the whole
+instruction (the pink included, since it is part of the same instruction), the
+cell is flagged, and the report says which column is full and what to do about
+it. Everybody else in the selection is processed normally — one full history
+must not cost the rest of the room their run.
+
+`CONFIG.MAX_CELL_CHARS` is the cap, set a little under the real limit to leave
+room for the entry being added.
+
+### The order the Deck List is written in
+
+Within one flush, **column M goes down before column B**. The two writes are
+separate API calls, so a failure between them is possible, and the order
+decides what that failure costs: archive-then-advance can only ever leave a
+task recorded but not advanced off — visible, and fixable by re-running.
+Advance-then-archive would lose the task from the history with nothing to say
+it had ever been there. The natural left-to-right order was the second one.
+
 ### Notes
 
 - The roster is fetched once per run, then one page per matched student.

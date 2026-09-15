@@ -40,6 +40,11 @@ const CONFIG = {
 
   PINK_VALUE: 'pink',
   ARCHIVE_SEPARATOR: ' | ',
+
+  // A Google Sheets cell holds 50,000 characters. The deck history column is
+  // the only one that grows forever, so it is the only one that can reach it.
+  // Stopping a little short leaves room for the entry being added.
+  MAX_CELL_CHARS: 49000,
   DATE_FORMAT: 'MM/dd',
 
   // How long a pending SOD dialog stays valid, in seconds.

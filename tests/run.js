@@ -83,7 +83,9 @@ function scenario(deckRows, wopRows, selection, today) {
     deckCell: (row, col) => String(deck.values[row - 1][col - 1]),
     wopStatus: i => String(wop.values[selection.start - 1 + i][10]),
     wopStatusBg: i => String(wop.backgrounds[selection.start - 1 + i][10]),
-    wopNameBg: i => String(wop.backgrounds[selection.start - 1 + i][0]) };
+    wopNameBg: i => String(wop.backgrounds[selection.start - 1 + i][0]),
+    /** Everything the operator was shown, alerts and dialogs alike. */
+    said: () => harness.alerts.concat(harness.dialogs.map(d => d.html)).join(' ') };
 }
 
 /**
@@ -532,6 +534,59 @@ const DECK_FILLER_ROWS = [
   // padded to get there. Padding with undefined would write the word.
   check('EOD narrow deck: no "undefined" leaked into the padded cells',
     deck.values[1].slice(2, 12).join('|'), '|||||||||');
+}
+
+// 12a. A history column that has run out of room stops that student rather
+//      than risking a write that throws partway through the batch.
+{
+  const full = 'OLD 01/01'.padEnd(49500, 'x');
+  const s = scenario(
+    [HEADER, ['Jane Doe', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', full],
+             ['John Roe', 'S1', '', '', 'S2', '', '', '', '', '', '', '', '']],
+    [{ name: 'Jane Doe', status: 'YP' },
+     { name: 'John Roe', status: 'Y' }],
+    { start: 1, rows: 2 });
+  s.api.processWopToDeck();
+
+  check('EOD full history: the task is not advanced',
+    s.deckCell(2, C.CURRENT), 'T1');
+  check('EOD full history: the queue is left alone',
+    s.deckCell(2, C.LOADED), 'T2, T3');
+  check('EOD full history: the history is left alone',
+    s.deckCell(2, C.ARCHIVE), full);
+  // The pink is part of the same instruction, so it waits with the rest.
+  check('EOD full history: the pink waits too', s.deckCell(2, C.PINK), '');
+  checkTruthy('EOD full history: column K keeps the whole instruction',
+    s.wopStatus(0).indexOf('YP') === 0);
+  check('EOD full history: and is flagged as needing attention',
+    s.wopStatusBg(0), s.api.CONFIG.COLOR.ERROR);
+  checkTruthy('EOD full history: the reason names the column and says what to do',
+    s.said().includes('run out of room'));
+
+  // One student's full history must not cost everybody else their run.
+  check('EOD full history: the next student is unaffected',
+    [s.deckCell(3, C.CURRENT), s.deckCell(3, C.ARCHIVE)], ['S2', 'S1 08/22']);
+}
+
+// 12b. The history goes down before the column that moves the student off it.
+//      A flush that fails partway can then only ever repeat a task, never lose
+//      one from the record.
+{
+  const s = scenario(
+    [HEADER, ['Jane Doe', 'T1', '', '', 'T2', '', '', '', '', '', '', '', '']],
+    [{ name: 'Jane Doe', status: 'Y' }],
+    { start: 1, rows: 1 });
+  const order = [];
+  const realGetRange = s.deck.getRange.bind(s.deck);
+  s.deck.getRange = function (row, col, numRows, numCols) {
+    if (order.indexOf(col) === -1) order.push(col);
+    return realGetRange(row, col, numRows, numCols);
+  };
+  s.api.processWopToDeck();
+  checkTruthy('EOD flush order: the archive column is written first',
+    order.length > 1 && order[0] === C.ARCHIVE);
+  checkTruthy('EOD flush order: the current column is written after it',
+    order.indexOf(C.CURRENT) > order.indexOf(C.ARCHIVE));
 }
 
 // ==========================================================================

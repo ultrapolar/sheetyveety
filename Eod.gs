@@ -122,6 +122,21 @@ function processWopToDeck() {
         current = queue.length ? queue.shift() : '';
       }
 
+      // A cell holds fifty thousand characters and no more. A history that
+      // has reached it would make the write throw, and a throw partway through
+      // a flush leaves the Deck List half-applied. Better to stop this one
+      // student with the instruction intact than to risk the whole batch.
+      if (status.yCount > 0 && String(archive).length > CONFIG.MAX_CELL_CHARS) {
+        statusCol.setValue(i, status.core + ' - history full');
+        statusCol.setBackground(i, CONFIG.COLOR.ERROR);
+        log.error(name, 'Column ' + columnLetter_(CONFIG.DECK_COL.ARCHIVE) +
+          ' has run out of room — a cell holds about ' + CONFIG.MAX_CELL_CHARS +
+          ' characters and this history is at ' + String(archive).length +
+          '. Nothing was applied. Move the older entries somewhere else and ' +
+          'run this again.');
+        continue;
+      }
+
       if (status.yCount > 0) {
         deck.set(row, CONFIG.DECK_COL.CURRENT, current);
         deck.set(row, CONFIG.DECK_COL.LOADED, queue.join(', '));

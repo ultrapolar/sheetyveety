@@ -120,8 +120,19 @@ function DeckTable_(sheet) {
         byColumn[col].push(Number(parts[0]));
       });
 
+      // The order matters when a write fails partway through. A task that
+      // disappears from the history is silent and gone for good; one written
+      // there twice is visible and easy to tidy. So the archive column goes
+      // down first, before the column that moves the student off the task.
+      const archiveKey = String(CONFIG.DECK_COL.ARCHIVE);
+      const order = Object.keys(byColumn).sort(function (a, b) {
+        if (a === archiveKey) return -1;
+        if (b === archiveKey) return 1;
+        return Number(a) - Number(b);
+      });
+
       let writes = 0;
-      Object.keys(byColumn).forEach(function (colKey) {
+      order.forEach(function (colKey) {
         const col = Number(colKey);
         const rows = byColumn[colKey].sort(function (a, b) { return a - b; });
 
