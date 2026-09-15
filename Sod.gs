@@ -32,6 +32,9 @@ function processSodPinks() {
     alreadyDone: 0
   };
 
+  // One move per Deck List row, however many Daily WOP rows point at it.
+  const plannedRows = {};
+
   for (let i = 0; i < selection.numRows; i++) {
     if (isDoneColor_(nameCol.background(i))) {
       plan.alreadyDone++;
@@ -54,6 +57,17 @@ function processSodPinks() {
     }
 
     const row = hit.row;
+
+    // A student can sit in the selection more than once -- the SOD organiser
+    // writes a row per hour -- but the pink flag is one fact about the student,
+    // not one per session. Planning a move for each row printed the first and
+    // then told the operator the flag had been "cleared while the dialog was
+    // open", which is true only in the sense that this script cleared it one
+    // move earlier. A daily red error nobody can act on is how a report stops
+    // being read.
+    if (plannedRows[row]) continue;
+    plannedRows[row] = true;
+
     if (deck.get(row, CONFIG.DECK_COL.PINK).toLowerCase() !== CONFIG.PINK_VALUE) {
       plan.notPink++;
       continue;

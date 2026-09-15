@@ -1762,6 +1762,69 @@ const DECK_FILLER_ROWS = [
     r.said().includes('Amalie Laz or Amalie Lee'));
 }
 
+// 45u. SOD against the rows the organiser writes.
+//
+//      One student, a row per hour, one pink flag. Planning a move for each
+//      row printed the first and then reported that the flag had been "cleared
+//      while the dialog was open" -- true only in the sense that this script
+//      cleared it a move earlier. A red error every morning that nobody can
+//      act on is how a report stops being read.
+{
+  function sod(wopNames, queue) {
+    const s = scenario(
+      [HEADER, ['Amalie Laz', 'T1', 'pink', '', '', queue || 'T2, T3',
+        '', '', '', '', '', '', '']],
+      wopNames.map(function (n) { return { name: n }; }),
+      { start: 1, rows: wopNames.length });
+    s.api.processSodPinks();
+    const dialog = s.harness.dialogs[s.harness.dialogs.length - 1];
+    const token = (dialog.html.match(/name="token" value="([^"]+)"/) || [])[1];
+    const form = { token: token };
+    (dialog.html.match(/name="(move_\d+)"/g) || []).forEach(function (m) {
+      form[m.match(/"([^"]+)"/)[1]] = '1';
+    });
+    s.api.executeSodOperations_FromUI(form);
+    return { s: s, E: () => s.deckCell(2, C.LOADED), F: () => s.deckCell(2, C.QUEUE),
+      pink: () => s.deckCell(2, C.PINK),
+      said: () => s.harness.alerts.concat(
+        s.harness.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  let r = sod(['12:00 Amalie Laz', '1:00 Amalie Laz']);
+  check('two rows: one task printed, not two', [r.E(), r.F()], ['T2', 'T3']);
+  check('two rows: the pink flag is spent once', r.pink(), '');
+  checkTruthy('two rows: nobody is blamed for clearing the flag',
+    !r.said().includes('cleared while the dialog was open'));
+  checkTruthy('two rows: counted as one student, not two',
+    /Students with pinks[^0-9]*1/.test(r.said().replace(/<[^>]*>/g, ' ')));
+
+  // Three sessions in a day is no different.
+  r = sod(['9:00 Amalie Laz', '10:00 Amalie Laz', '11:00 Amalie Laz'], 'T2, T3, T4');
+  check('three rows: still one move', [r.E(), r.F()], ['T2', 'T3, T4']);
+
+  // A single row behaves exactly as it always did.
+  r = sod(['Amalie Laz']);
+  check('one row: unchanged', [r.E(), r.F()], ['T2', 'T3']);
+  checkTruthy('one row: no complaint', !r.said().includes('cleared while'));
+}
+
+// 45v. EOD against the same rows: two sessions really are two advances.
+{
+  const s = scenario(
+    [HEADER, ['Amalie Laz', 'T1', '', '', 'T2, T3', '', '', '', '', '', '', '', '']],
+    [{ name: '12:00 Amalie Laz', status: 'Y' },
+     { name: '1:00 Amalie Laz', status: 'Y' }],
+    { start: 1, rows: 2 }, '2026-08-22');
+  s.api.processWopToDeck();
+
+  // Unlike the pink flag, a Y is a fact about a session, so two of them are
+  // two tasks finished and both belong in the history.
+  check('two sessions: advanced twice', s.deckCell(2, C.CURRENT), 'T3');
+  check('two sessions: both archived', s.deckCell(2, C.ARCHIVE), 'T1 08/22 | T2 08/22');
+  check('two sessions: both rows marked done',
+    [s.wopStatusBg(0), s.wopStatusBg(1)], ['#00ff00', '#00ff00']);
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {

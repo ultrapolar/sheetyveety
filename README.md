@@ -480,6 +480,24 @@ Two students whose names normalise to the same thing are refused rather than
 guessed at. A Daily WOP row cannot say which of them it means, and the
 student-name guard below would confirm either one, so neither is safe.
 
+### One student, several rows
+
+The organiser writes a row per student per hour, so the same name appears in a
+selection more than once. Each tool treats that according to what the thing it
+reads actually is:
+
+| Tool | Reads | Behaviour |
+| --- | --- | --- |
+| **SOD** | the pink flag — one fact about the student | **one move**, however many rows |
+| **EOD** | column K — one fact about a session | **one advance per row** |
+| **Radius import** | the most recent session | goes to the row whose hour it matches |
+| **Seating import** | a seat per hour | each row gets its own hour's seat |
+
+SOD used to plan a move per row: it printed the first and then reported that
+the pink flag had been *"cleared while the dialog was open"* — true only in the
+sense that the script had cleared it a move earlier. A red error every morning
+that nobody can act on is how a report stops being read.
+
 ### A task listed twice in the queue
 
 Printing it moves one copy into column E and leaves the other in column F, so
