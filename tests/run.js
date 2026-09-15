@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Progress.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -40,7 +40,10 @@ function loadScript(context) {
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
   changelogColumnPlan_, changelogCreate, changelogGrade,
   changelogLearningPlan, percentValue_, starsFor_, nextOpenDay_,
-  previousAssessment_, monthDay_, dayLabel_, monthDayValue_
+  previousAssessment_, monthDay_, dayLabel_, monthDayValue_,
+  draftProgressReport, nameColumnFor_, highlightedStudents_, upcomingTopics_,
+  masteredTopics_, progressDraft_, topicLines_, PROGRESS_EXTRACTORS,
+  progressAssessmentUrl_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -2214,6 +2217,164 @@ const DECK_FILLER_ROWS = [
     touched,
     b.api.CONFIG.CHANGELOG.COLUMNS
       .filter(c => c.fill === 'script').map(c => c.column));
+}
+
+// 45ab. Drafting a progress report.
+{
+  // A drafter on whichever sheet you happen to be looking at.
+  function pr(options) {
+    const opts = options || {};
+    const deckRows = [HEADER].concat(opts.deck || []);
+    const deck = new FakeSheet('Deck List', deckRows.map(r => {
+      const row = r.slice(); while (row.length < 13) row.push(''); return row;
+    }));
+
+    // A plain string is a name in column A; an object can also put something
+    // in another column, so a row can exist with no name on it.
+    const wopValues = (opts.wop || []).map(entry => {
+      const row = new Array(26).fill('');
+      if (entry && typeof entry === 'object') {
+        row[0] = entry.name || '';
+        row[4] = entry.note || '';
+      } else {
+        row[0] = entry;
+      }
+      return row;
+    });
+    const wop = new FakeSheet('Daily WOP',
+      wopValues.length ? wopValues : [new Array(26).fill('')],
+      makeGrid(Math.max(wopValues.length, 1), 26, '#ffffff'));
+
+    const logValues = [new Array(20).fill('')].concat((opts.changelog || [])
+      .map(name => { const row = new Array(20).fill(''); row[1] = name; return row; }));
+    const changelog = new FakeSheet('Deck Changelog', logValues,
+      makeGrid(logValues.length, 20, '#ffffff'));
+
+    const on = opts.on || 'Daily WOP';
+    const sheets = { 'Daily WOP': wop, 'Deck List': deck,
+      'Deck Changelog': changelog };
+    const target = sheets[on] || wop;
+    target.setSelection(opts.start || 1, opts.rows || 1);
+
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-22'), String, Number, Object, Array, RegExp,
+      Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, changelog], on);
+    const api = loadScript(ctx);
+    if (opts.assessmentUrl) {
+      vm.runInContext('CONFIG.PROGRESS.ASSESSMENT_URL = ' +
+        JSON.stringify(opts.assessmentUrl) + ';', ctx);
+    }
+    return { api: api, harness: h,
+      draft: () => {
+        const last = h.dialogs[h.dialogs.length - 1];
+        if (!last) return '';
+        const box = last.html.match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/);
+        return box ? box[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'") : '';
+      },
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Four topics waiting is a full upcoming list, in the order they meet them.
+  let p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T2, T3', 'T4, T5']],
+    wop: ['10:30 AM Jane Doe'] });
+  p.api.draftProgressReport();
+  check('PR: the upcoming topics, in queue order',
+    p.draft().split('Working on next:')[1].trim().split('\n')
+      .map(l => l.trim()).join(','),
+    '- T1,- T2,- T3,- T4');
+  checkTruthy('PR: the name is the student, not the time on the row',
+    p.draft().indexOf('Jane Doe') === 0);
+  checkTruthy('PR: nothing was written to the Deck List',
+    p.api.CONFIG.PROGRESS.TOPIC_COUNT === 4);
+
+  // A task sitting in two columns at once is one topic, not two.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T1, T2', 'T3, T4']],
+    wop: ['Jane Doe'] });
+  p.api.draftProgressReport();
+  check('PR: a topic in two columns is listed once',
+    p.draft().split('Working on next:')[1].trim().split('\n')
+      .map(l => l.trim()).join(','),
+    '- T1,- T2,- T3,- T4');
+
+  // Short of four, the draft says so in the text rather than looking finished.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T2', '']], wop: ['Jane Doe'] });
+  p.api.draftProgressReport();
+  const shortDraft = p.draft().split('Working on next:')[1];
+  checkTruthy('PR: a short list is marked short in the draft itself',
+    shortDraft.includes('2 more upcoming topic(s)'));
+  checkTruthy('PR: and the note says how short', p.said().includes('2 short'));
+
+  // The mastered half has no source yet, so the whole of it is marked.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T2, T3, T4', '']],
+    wop: ['Jane Doe'] });
+  p.api.draftProgressReport();
+  checkTruthy('PR: the mastered half is marked missing, not left out',
+    p.draft().split('Working on next:')[0].includes('4 more mastered topic(s)'));
+  checkTruthy('PR: and the reason names what is needed',
+    p.said().includes('ASSESSMENT_URL'));
+  checkTruthy('PR: the deck history is not passed off as mastered topics',
+    !p.draft().split('Working on next:')[0].includes('T1'));
+
+  // A student with no deck row gets a draft with both halves marked.
+  p = pr({ deck: [['John Roe', 'S1', '', '', '', '']], wop: ['Jane Doe'] });
+  p.api.draftProgressReport();
+  checkTruthy('PR: no deck row is said, not guessed at',
+    p.said().includes('is not on the Deck List'));
+  checkTruthy('PR: and the draft is still produced, fully marked',
+    p.draft().includes('4 more upcoming topic(s)'));
+
+  // One student on two hourly rows is one report.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T2, T3, T4', '']],
+    wop: ['9:00 AM Jane Doe', '2:00 PM Jane Doe'], rows: 2 });
+  p.api.draftProgressReport();
+  check('PR: a student highlighted twice gets one draft',
+    p.draft().split('Jane Doe').length - 1, 1);
+
+  // Two students get two drafts, separated.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', '', ''],
+                  ['John Roe', 'S1', '', '', '', '']],
+    wop: ['Jane Doe', 'John Roe'], rows: 2 });
+  p.api.draftProgressReport();
+  checkTruthy('PR: two students, two drafts',
+    p.draft().includes('Jane Doe') && p.draft().includes('John Roe'));
+  checkTruthy('PR: with something between them',
+    p.draft().includes('------'));
+
+  // The name is looked for wherever that sheet keeps it.
+  p = pr({ on: 'Deck List', deck: [['Jane Doe', 'T1', '', '', 'T2', '']],
+    start: 2 });
+  p.api.draftProgressReport();
+  checkTruthy('PR: run from the Deck List, the name is column A',
+    p.draft().indexOf('Jane Doe') === 0);
+
+  p = pr({ on: 'Deck Changelog', deck: [['Jane Doe', 'T1', '', '', 'T2', '']],
+    changelog: ['Jane Doe'], start: 2 });
+  p.api.draftProgressReport();
+  checkTruthy('PR: run from the changelog, the name is column B',
+    p.draft().indexOf('Jane Doe') === 0);
+
+  // A sheet with no name column is refused with somewhere to go.
+  const api0 = pr({}).api;
+  check('PR: a sheet with no name column has no name column',
+    api0.nameColumnFor_('Some Other Tab'), 0);
+
+  p = pr({ wop: [''] });
+  p.api.draftProgressReport();
+  check('PR: an empty selection is refused, not drafted', p.said(),
+    'The highlighted selection does not contain any rows with data.');
+
+  // A row that exists but carries no name is refused by name, not drafted for
+  // nobody. Guessing which student an unnamed row belongs to is exactly the
+  // sort of help that puts the wrong child's topics in a parent's hands.
+  p = pr({ deck: [['Jane Doe', 'T1', '', '', 'T2', '']],
+    wop: [{ note: 'came in late' }] });
+  p.api.draftProgressReport();
+  checkTruthy('PR: a row with no name in it is refused',
+    p.said().includes('No student name'));
+  check('PR: and nothing was drafted', p.draft(), '');
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

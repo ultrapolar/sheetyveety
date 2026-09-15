@@ -229,6 +229,46 @@ const CONFIG = {
   //   'radius' - might come from a DWP page, not yet confirmed
   //   'person' - a human decision, and it stays one
   //   'blank'  - a spacer column, deliberately empty
+  // Drafting a progress report. Nothing here writes to a sheet.
+  PROGRESS: {
+    // How many topics of each kind a report calls for.
+    TOPIC_COUNT: 4,
+
+    // What counts as mastered, as a percentage on the assessment.
+    MASTERED_AT_OR_ABOVE: 100,
+
+    // Which Deck List columns the upcoming topics are read from, in the order
+    // the student will meet them. Names from DECK_COL above.
+    UPCOMING_COLUMNS: ['CURRENT', 'LOADED', 'QUEUE'],
+
+    // NEEDS HTML. The Radius page carrying a per-topic breakdown of an
+    // assessment, with {{studentId}} and {{centerId}} standing in for the
+    // student's ids. Empty until somebody sends a copy of one, and while it is
+    // empty the mastered list is left out of the draft and the reason is said.
+    ASSESSMENT_URL: '',
+
+    BULLET: '  - ',
+
+    // Stands in for topics that were asked for and not found. It goes into the
+    // draft itself, so a report three topics deep where four were wanted
+    // cannot be pasted out without somebody seeing the hole.
+    MISSING_MARK: '[{{n}} more {{kind}} topic(s) — add by hand]',
+
+    BETWEEN_STUDENTS: '\n\n----------------------------------------\n\n',
+
+    // The shape of the draft. Change the wording here rather than in the code.
+    TEMPLATE: [
+      '{{student}}',
+      '',
+      'Mastered — scored full marks on:',
+      '{{mastered}}',
+      '',
+      'Working on next:',
+      '{{upcoming}}',
+      ''
+    ].join('\n')
+  },
+
   CHANGELOG: {
     SHEET_NAME: 'Deck Changelog',
 

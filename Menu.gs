@@ -30,6 +30,8 @@ function onOpen() {
     .addItem('1. Create — date it and find the next session', 'changelogCreate')
     .addItem('2. Grade — change since last time, and stars', 'changelogGrade')
     .addItem('3. Learning plan — date it and count it', 'changelogLearningPlan')
+    .addSeparator()
+    .addItem('Draft a progress report (highlighted names)', 'draftProgressReport')
     .addToUi();
 
   ui.createMenu('Tools')

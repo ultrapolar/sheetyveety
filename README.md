@@ -43,6 +43,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 | --- | --- |
 | **SOD** | Pinks Printed · Organise rows from the seating chart |
 | **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
+| **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
 
 SOD and EOD are the day's work — every entry there reads the sheet or fills it
@@ -203,6 +204,76 @@ not seen:
 
 `CONFIG.CHANGELOG.OPEN_DAYS` currently says Monday to Saturday. If the centre's
 hours differ, that line is the only thing to change.
+
+## Writing a progress report
+
+**Changelog → Draft a progress report.** Highlight the student's name, run it,
+and a draft appears on screen ready to copy out. It **writes nothing to any
+sheet** — the drafting is the whole job.
+
+Highlight from wherever you happen to be. The name is looked for in whichever
+column that sheet keeps it in: column A on the Daily WOP (the time in front of
+it is stripped), column A on the Deck List, column B on the changelog. One
+student highlighted on two hourly rows is one report, not two. Highlight
+several names and you get several drafts in the one box, separated.
+
+A report wants two lists of four, and they come from different places.
+
+### Working on next — real today
+
+The deck queue **is** the list of what they are about to work on, so this half
+needs nothing new: column B (what they are on now), then E (printed and
+waiting), then F (queued behind that), in the order the student will meet them.
+`CONFIG.PROGRESS.UPCOMING_COLUMNS` is that list if it ever needs changing.
+
+A task sitting in both B and E is **one** topic the student will work on, not
+two, and is listed once.
+
+### Mastered at 100% — needs a page I have not seen
+
+This is the per-topic breakdown of an assessment, and it lives on a Radius page
+nobody has sent me yet. Two things are missing, both named in the code:
+
+1. **Which page it is.** `CONFIG.PROGRESS.ASSESSMENT_URL`, empty for now, with
+   `{{studentId}}` and `{{centerId}}` standing in for the ids.
+2. **How to read it.** `PROGRESS_EXTRACTORS.masteredTopics` in `Progress.gs`,
+   deliberately kept apart from everything around it so that it is the only
+   function that has to be written when a copy of the page turns up. It returns
+   a list of `{ name, percent }`, one per topic, or throws saying what it could
+   not find.
+
+**Send me an assessment page for a student who has just been graded** and this
+becomes a few lines. Everything either side of it — finding the student, the
+roster lookup, the fetch, the 100% filter, the draft — is written and tested
+already.
+
+Until then it **does not fall back to the deck history**. A task the student
+finished is not a topic they scored full marks on, and a progress report that
+quietly says otherwise is worse than one with a hole in it.
+
+### A list that comes up short
+
+Whichever half falls short, the shortfall goes **into the draft text itself**:
+
+```
+Mastered — scored full marks on:
+  - [4 more mastered topic(s) — add by hand]
+
+Working on next:
+  - Fractions 3
+  - Fractions 4
+  - [2 more upcoming topic(s) — add by hand]
+```
+
+The report also says how short and why — no deck row, nothing in the queue, the
+assessment page not mapped. But the marker in the text is the part that
+matters: a draft three topics deep where four were asked for must not be
+possible to paste out without somebody seeing the gap. **This is the whole
+reason the mastered half is present-and-marked rather than left out.**
+
+`CONFIG.PROGRESS` holds the wording — the template, the bullet, the marker, how
+many topics of each kind, and what counts as mastered. Change the shape of the
+draft there rather than in the code.
 
 ## Start of day: organising the rows
 
