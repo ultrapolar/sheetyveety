@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -38,7 +38,9 @@ function loadScript(context) {
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
-  changelogColumnPlan_
+  changelogColumnPlan_, changelogCreate, changelogGrade,
+  changelogLearningPlan, percentValue_, starsFor_, nextOpenDay_,
+  previousAssessment_, monthDay_, dayLabel_, monthDayValue_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1895,6 +1897,270 @@ const DECK_FILLER_ROWS = [
     columns.filter(c => c.fill === 'person').length > columns.length / 2);
 }
 
+// 45y. The changelog arithmetic, which is the part specified exactly.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  // Sheets keeps 85% as 0.85; a typed "85" stays 85. Both land in one column.
+  check('percent: a typed number', api.percentValue_('85'), 85);
+  check('percent: with a sign', api.percentValue_('85%'), 85);
+  check('percent: a sheet fraction', api.percentValue_(0.85), 85);
+  check('percent: full marks as a fraction', api.percentValue_(1), 100);
+  check('percent: full marks typed', api.percentValue_(100), 100);
+  check('percent: nothing there', api.percentValue_(''), null);
+  check('percent: not a number', api.percentValue_('n/a'), null);
+  check('percent: zero is a grade, not a blank', api.percentValue_(0), 0);
+
+  // Stars are half the questions answered right.
+  check('stars: 85% of 20 questions', api.starsFor_(85, 20), 8.5);
+  check('stars: full marks', api.starsFor_(100, 20), 10);
+  check('stars: none right', api.starsFor_(0, 20), 0);
+  check('stars: rounds to the half', api.starsFor_(33, 20), 3.5);
+  check('stars: no question count means no stars', api.starsFor_(85, 0), null);
+  check('stars: no grade means no stars', api.starsFor_(null, 20), null);
+
+  // On a repeat, the stars are earned on what is new since last time, so a
+  // second sitting cannot collect the same stars twice.
+  check('stars: a 20 point gain over 20 questions', api.starsFor_(20, 20), 2);
+  check('stars: going backwards is not hidden', api.starsFor_(-10, 20), -1);
+
+  // The m/dd column has no year in it, so this only ever orders two rows.
+  checkTruthy('m/dd: later in the month sorts after',
+    api.monthDayValue_('8/22') > api.monthDayValue_('8/01'));
+  checkTruthy('m/dd: a later month sorts after',
+    api.monthDayValue_('9/01') > api.monthDayValue_('8/22'));
+  check('m/dd: a blank is not a date', api.monthDayValue_(''), null);
+  check('m/dd: prose is not a date', api.monthDayValue_('next week'), null);
+  check('m/dd: an impossible month is not a date', api.monthDayValue_('13/01'), null);
+  checkTruthy('m/dd: a real Date works too',
+    api.monthDayValue_(new Date(2026, 7, 22)) === api.monthDayValue_('8/22'));
+}
+
+// 45z. Finding the sitting to compare against.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const C2 = api.CONFIG.CHANGELOG.COL;
+
+  function row(index, student, assessment, percent) {
+    const values = new Array(20).fill('');
+    values[C2.STUDENT - 1] = student;
+    values[C2.ASSESSMENT - 1] = assessment;
+    values[C2.PERCENT - 1] = percent;
+    return { index: index, sheetRow: index + 1, values: values };
+  }
+
+  const rows = [
+    row(1, 'Amalie Laz', 'Checkup 6', '60'),
+    row(2, 'Amalie Laz', 'Checkup 7', '70'),
+    row(3, 'John Roe', 'Checkup 6', '50'),
+    row(4, 'Amalie Laz', 'Checkup 6', '80'),
+    row(5, 'Amalie Laz', 'Checkup 6', '')
+  ];
+
+  const found = api.previousAssessment_(rows, rows[3]);
+  check('compare: the same student and the same assessment',
+    found && found.index, 1);
+
+  check('compare: a different assessment is not a comparison',
+    api.previousAssessment_(rows, rows[1]), null);
+  check('compare: another student\'s sitting is not a comparison',
+    api.previousAssessment_(rows, rows[2]), null);
+  check('compare: the first sitting has nothing before it',
+    api.previousAssessment_(rows, rows[0]), null);
+
+  // A row below is the future as far as the row being graded is concerned.
+  check('compare: never looks downwards',
+    api.previousAssessment_(rows, rows[0]), null);
+
+  // An ungraded earlier row is not something to measure against.
+  const ungraded = [row(1, 'Amalie Laz', 'Checkup 6', ''),
+                    row(2, 'Amalie Laz', 'Checkup 6', '80')];
+  check('compare: an ungraded sitting is skipped',
+    api.previousAssessment_(ungraded, ungraded[1]), null);
+
+  // Two earlier sittings: the most recent one is what counts.
+  const thrice = [row(1, 'Amalie Laz', 'Checkup 6', '40'),
+                  row(2, 'Amalie Laz', 'Checkup 6', '60'),
+                  row(3, 'Amalie Laz', 'Checkup 6', '80')];
+  check('compare: takes the latest of several',
+    api.previousAssessment_(thrice, thrice[2]).index, 2);
+
+  // Spelling and case are people, not different students.
+  const loose = [row(1, 'amalie  laz', 'checkup 6', '60'),
+                 row(2, 'Amalie Laz', 'Checkup 6', '80')];
+  checkTruthy('compare: forgiving about case and spacing',
+    api.previousAssessment_(loose, loose[1]) !== null);
+}
+
+// 45aa. The three stages against a sheet.
+{
+  function book(rows, options) {
+    const opts = options || {};
+    const head = new Array(20).fill('');
+    head[1] = 'Student';
+    const values = [head].concat(rows.map(function (r) {
+      const row = new Array(20).fill('');
+      Object.keys(r).forEach(function (k) { row[Number(k) - 1] = r[k]; });
+      return row;
+    }));
+    const log = new FakeSheet('Deck Changelog', values,
+      makeGrid(values.length, 20, '#ffffff'));
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', [new Array(26).fill('')],
+      makeGrid(1, 26, '#ffffff'));
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate(opts.today || '2026-08-19'), String, Number, Object,
+      Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, log], 'Deck Changelog');
+    const api = loadScript(ctx);
+    if (opts.counts) {
+      vm.runInContext('CONFIG.CHANGELOG.QUESTION_COUNTS = ' +
+        JSON.stringify(opts.counts) + ';', ctx);
+    }
+    return { log: log, api: api,
+      cell: (r, c) => String(log.values[r][c - 1]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  const C3 = { DATE_DONE: 1, STUDENT: 2, DAY: 3, NEXT: 4, ASSESSMENT: 5,
+    PERCENT: 8, STARS: 9, CHANGE: 10, LP_DATE: 15, BOOK: 18, LP_COUNT: 19 };
+
+  // --- creation ---------------------------------------------------------
+  // 19 August 2026 is a Wednesday, so the next open day is Thursday the 20th.
+  let b = book([{ 2: 'Amalie Laz' }]);
+  b.api.changelogCreate();
+  check('create: today goes in', b.cell(1, C3.DATE_DONE), '8/19');
+  check('create: the next open day', [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)],
+    ['Th', '8/20']);
+
+  // Saturday rolls over the closed Sunday to Monday.
+  b = book([{ 2: 'Amalie Laz' }], { today: '2026-08-22' });
+  b.api.changelogCreate();
+  check('create: Saturday skips the closed Sunday',
+    [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['M', '8/24']);
+
+  // A row somebody already dated is left exactly as it is.
+  b = book([{ 1: '8/01', 2: 'Amalie Laz', 3: 'F', 4: '8/07' }]);
+  b.api.changelogCreate();
+  check('create: an existing row is not re-dated',
+    [b.cell(1, C3.DATE_DONE), b.cell(1, C3.NEXT)], ['8/01', '8/07']);
+
+  // --- grading ----------------------------------------------------------
+  // A first sitting: no comparison, and the stars come off the whole grade.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '85' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: no previous sitting is said, not left blank',
+    b.cell(1, C3.CHANGE), 'NA');
+  check('grade: stars off the whole grade', b.cell(1, C3.STARS), '8.5');
+
+  // A repeat: the change drives the stars, so the same ground is not paid for
+  // twice. 60% then 80% over 20 questions is four new questions, two stars.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '60' },
+            { 2: 'Amalie Laz', 5: 'Checkup 6', 8: '80' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: the change is written', b.cell(2, C3.CHANGE), '+20%');
+  check('grade: stars on what is new', b.cell(2, C3.STARS), '2');
+  check('grade: the first sitting keeps its own answer',
+    [b.cell(1, C3.CHANGE), b.cell(1, C3.STARS)], ['NA', '6']);
+
+  // Going backwards is recorded rather than tidied away.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '80' },
+            { 2: 'Amalie Laz', 5: 'Checkup 6', 8: '70' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: a drop is shown as a drop', b.cell(2, C3.CHANGE), '-10%');
+  check('grade: and the stars follow it down', b.cell(2, C3.STARS), '-1');
+
+  // An assessment nobody has given a question count to: the change still
+  // lands, the stars are left for a person, and the report says which.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 9', 8: '85' }]);
+  b.api.changelogGrade();
+  check('grade: the change is still worked out', b.cell(1, C3.CHANGE), 'NA');
+  check('grade: but the stars are left alone', b.cell(1, C3.STARS), '');
+  checkTruthy('grade: and the reason names the assessment',
+    b.said().includes('Checkup 9') && b.said().includes('QUESTION_COUNTS'));
+
+  // A row with no grade yet is skipped and said out loud.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6' }], { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: an ungraded row is untouched',
+    [b.cell(1, C3.CHANGE), b.cell(1, C3.STARS)], ['', '']);
+  checkTruthy('grade: and is reported', b.said().includes('no grade'));
+
+  // A row somebody has already marked done is theirs, not the script's.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '60' },
+            { 2: 'Amalie Laz', 5: 'Checkup 6', 8: '80', 9: '5', 10: 'by hand',
+              12: 'x' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: a row marked done keeps what a person put in it',
+    [b.cell(2, C3.CHANGE), b.cell(2, C3.STARS)], ['by hand', '5']);
+
+  // Rows out of date order still get graded, but the doubt is said out loud.
+  b = book([{ 1: '8/20', 2: 'Amalie Laz', 5: 'Checkup 6', 8: '60' },
+            { 1: '8/12', 2: 'Amalie Laz', 5: 'Checkup 6', 8: '80' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  check('grade: an out-of-order sheet is still graded on row order',
+    b.cell(2, C3.CHANGE), '+20%');
+  checkTruthy('grade: and the doubt about it is reported',
+    b.said().includes('out of order'));
+
+  // In the ordinary case there is nothing to complain about.
+  b = book([{ 1: '8/12', 2: 'Amalie Laz', 5: 'Checkup 6', 8: '60' },
+            { 1: '8/20', 2: 'Amalie Laz', 5: 'Checkup 6', 8: '80' }],
+    { counts: { 'Checkup 6': 20 } });
+  b.api.changelogGrade();
+  checkTruthy('grade: rows in order are not complained about',
+    !b.said().includes('out of order'));
+
+  // --- learning plan ----------------------------------------------------
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 15: '8/01' },
+            { 2: 'Amalie Laz', 5: 'Checkup 7' }]);
+  b.api.changelogLearningPlan();
+  check('lp: dated today', b.cell(2, C3.LP_DATE), '8/19');
+  check('lp: counted as their second', b.cell(2, C3.LP_COUNT), '2');
+  check('lp: the earlier row is left alone', b.cell(1, C3.LP_DATE), '8/01');
+  checkTruthy('lp: the workout book is asked for, not invented',
+    b.said().includes('workout book'));
+  check('lp: and that column is left empty', b.cell(2, C3.BOOK), '');
+
+  // A book already written in is not nagged about.
+  b = book([{ 2: 'Amalie Laz', 18: 'WOB 3' }]);
+  b.api.changelogLearningPlan();
+  checkTruthy('lp: a book already there is left in peace',
+    !b.said().includes('workout book'));
+
+  // --- what the three stages between them touch -------------------------
+  // CONFIG says which columns are the script's and which are somebody's
+  // judgement. Run all three stages over one row and see: the columns that
+  // change must be exactly the ones marked 'script'. A stage that later starts
+  // writing an initials column fails here rather than quietly taking it over.
+  b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '85' }],
+    { counts: { 'Checkup 6': 20 } });
+  const beforeRun = b.log.values[1].slice();
+  b.api.changelogCreate();
+  b.api.changelogGrade();
+  b.api.changelogLearningPlan();
+  const touched = [];
+  b.log.values[1].forEach(function (value, i) {
+    if (String(value) !== String(beforeRun[i])) touched.push(i + 1);
+  });
+  check('stages: write exactly the columns CONFIG calls the script\'s',
+    touched,
+    b.api.CONFIG.CHANGELOG.COLUMNS
+      .filter(c => c.fill === 'script').map(c => c.column));
+}
+
 // 46. A logged-out response is the sign-in page with a 200, so the status
 //     code alone cannot be trusted.
 {
@@ -2137,7 +2403,7 @@ const DECK_FILLER_ROWS = [
   const radiusSrc = fs.readFileSync('Radius.gs', 'utf8');
   const strays = [];
 
-  ['Setup.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs', 'Seating.gs'].forEach(function (file) {
+  ['Setup.gs', 'Sod.gs', 'Eod.gs', 'Menu.gs', 'Seating.gs', 'Changelog.gs'].forEach(function (file) {
     names(fs.readFileSync(file, 'utf8')).forEach(function (name) {
       if (shared.indexOf(name) !== -1) return;
       if (new RegExp('\\b' + name + '\\s*\\(').test(radiusSrc)) {

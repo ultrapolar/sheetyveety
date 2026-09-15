@@ -102,39 +102,107 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 
 ## The Deck Changelog
 
-Not built yet. The layout is described in `CONFIG.CHANGELOG` so the column
-numbers live in one place, and **Tools → Check setup** lists the sheet once it
-exists — staying quiet until then, because a check that nags about something
-nobody has made is a check people learn to skip.
+One row is one assessment, and it is filled in over days rather than at once.
+That is why it is three menu entries rather than one button: **Changelog →
+1. Create**, **2. Grade**, **3. Learning plan**. Each stage writes only its own
+columns and leaves every other cell exactly as it found it.
+
+Run a stage with rows highlighted to act on just those; run it with nothing
+highlighted and it acts on every row that has a student name.
+
+### 1. Create — date it and find the next session
+
+You put the name in **B**. The stage fills **A** with today, and **C** and
+**D** with the next day the centre is open. Which days those are is
+`CONFIG.CHANGELOG.OPEN_DAYS`, so a Saturday assessment rolls over the closed
+Sunday to Monday without anybody teaching the script about weekends.
+
+A row that already has a date in A is left alone. Re-running is for the rows
+nobody has got to yet, not a way to re-stamp finished work.
+
+### 2. Grade — the change since last time, and the stars
+
+You put the percentage in **H**. The stage fills **J** with the change and
+**I** with the stars.
+
+- **The change** is measured against the last earlier row for *the same student
+  and the same assessment* — a Checkup 6 against a Checkup 6, never against a
+  Checkup 7. If there is no such row, J says `NA` rather than sitting empty,
+  because an empty cell would have to stand for both "no previous sitting" and
+  "nobody has got to this yet".
+- **The stars** are half the questions answered right. On a first sitting that
+  comes off the whole grade. **On a repeat it comes off the change**, so a
+  student who sat the same assessment twice is not paid twice for the ground
+  they already had. A score that went down produces negative stars, written as
+  calculated rather than rounded up to nothing.
+- **A drop in grade is shown as a drop.** The report says so too.
+
+Two things it will not do:
+
+- **Guess a question count.** Nothing on the DWP page says how many questions
+  an assessment carries, so it is listed in
+  `CONFIG.CHANGELOG.QUESTION_COUNTS`. An assessment missing from that list has
+  its change written as usual and its **stars left blank**, and the report names
+  the assessment so you know which line to add.
+- **Overwrite work somebody marked done.** Anything in **L** means the row is
+  finished by hand; grading skips it. Clear that cell to ask for a re-grade.
+
+The comparison assumes the sheet runs down the page in date order, because that
+is how it is written. If the row it compared against is dated *later* than the
+row being graded, the change is still worked out but the report says the rows
+look out of order — a wrong answer that announces itself beats a wrong answer
+that does not.
+
+### 3. Learning plan — date it and count it
+
+Fills **O** with today and **S** with how many learning plans that student has
+had, counted from the rows above rather than asked for again. A row that
+already has a date in O is left alone.
+
+**R (the workout book) and T (what's next) stay empty**, and the report asks
+for R by name. Nothing the script can read says which book went into a plan or
+what should come next; those are judgements, and inventing a plausible one is
+worse than leaving the cell blank.
+
+### Who fills what
 
 | # | Column | Filled by |
 | --- | --- | --- |
-| 1 | Date assessment done | Radius, probably |
-| 2 | Student | the script |
-| 3 | Day of week next session | Radius, probably |
-| 4 | Next attendance date | Radius, probably |
-| 5 | Most recent assessment | Radius, probably |
-| 6–12 | Date graded · Initials · Grade % · Stars · Change if previously done · Good/bad/fine · Done | a person |
+| 1 | Date assessment done | **stage 1** |
+| 2 | Student | a person |
+| 3–4 | Day of week · Next attendance date | **stage 1** |
+| 5–8 | Most recent assessment · Date graded · Initials · Grade % | a person |
+| 9–10 | Stars · Change if previously done | **stage 2** |
+| 11–12 | Good/bad/fine · Done | a person |
 | 13 | Progress report submitted | left blank |
-| 14–16 | Progress report initials · LP creation date · LP created by | a person |
+| 14 | Progress report initials | a person |
+| 15 | LP creation date | **stage 3** |
+| 16 | LP created by | a person |
 | 17 | *(spacer)* | — |
-| 18–20 | Topic repeated · How many LPs made · What's next | a person |
+| 18 | Topic repeated | a person |
+| 19 | How many LPs made | **stage 3** |
+| 20 | What's next | a person |
 
-**Thirteen of the twenty are somebody's judgement written down**, and no script
-should pretend otherwise. There is a test asserting the sheet stays mostly
-human, so that changing it is a decision rather than a drift.
+**Eleven of the twenty are somebody's judgement written down**, initials
+included, and no stage touches one of them. That is not a promise in prose: a
+test runs all three stages over a row and asserts the columns that changed are
+exactly the ones `CONFIG` marks as the script's. A stage that later starts
+writing an initials column fails that test rather than quietly taking the
+column over.
 
-### What would be needed to fill the rest
+### Still open
 
-Only the student name is certain today. The four marked *probably* need
-something I have not seen:
+Columns 1, 3, 4 and 5 were once expected to come from Radius. Stages 1 and 3
+now fill 1, 3 and 4 from the calendar instead, which needs nothing from Radius
+at all. Column 5 is still typed by a person, and would need something I have
+not seen:
 
-- **Date assessment done** and **Most recent assessment** — the DWP page has an
-  assessment status behind `AssessmentStatusId`, but nothing dated. A page for
-  a student who has just had one assessed would settle it.
-- **Day of week** and **Next attendance date** — nothing in the DWP or the
-  roster carries a future booking. This probably lives on a Radius scheduling
-  page nobody has looked at yet.
+- **Most recent assessment** — the DWP page has an assessment status behind
+  `AssessmentStatusId`, but nothing naming or dating one. A page for a student
+  who has just had an assessment graded would settle it.
+
+`CONFIG.CHANGELOG.OPEN_DAYS` currently says Monday to Saturday. If the centre's
+hours differ, that line is the only thing to change.
 
 ## Start of day: organising the rows
 

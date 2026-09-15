@@ -227,26 +227,56 @@ const CONFIG = {
   CHANGELOG: {
     SHEET_NAME: 'Deck Changelog',
 
+    // Row 1 is the heading. Everything below it is an assessment.
+    HEADER_ROWS: 1,
+
+    // The columns the three stages read and write, by name.
+    COL: {
+      DATE_DONE: 1, STUDENT: 2, DAY_OF_WEEK: 3, NEXT_DATE: 4,
+      ASSESSMENT: 5, DATE_GRADED: 6, INITIALS: 7, PERCENT: 8,
+      STARS: 9, CHANGE: 10, VERDICT: 11, DONE: 12,
+      PR_DATE: 13, PR_INITIALS: 14, LP_DATE: 15, LP_BY: 16,
+      WORKOUT_BOOK: 18, LP_COUNT: 19, WHATS_NEXT: 20
+    },
+
+    // Which days the centre opens, 0 being Sunday, and how each is written in
+    // the day-of-week column.
+    OPEN_DAYS: [1, 2, 3, 4, 5, 6],
+    DAY_LABELS: ['Su', 'M', 'T', 'W', 'Th', 'F', 'S'],
+
+    // Written into the change column when the student has not sat this
+    // assessment before, so an empty cell never has to stand for two things.
+    NO_COMPARISON: 'NA',
+
+    // How many questions each assessment carries, which is what turns a
+    // percentage into a count of stars. Nothing on the DWP page says this, so
+    // it is listed here. An assessment missing from this list has its stars
+    // left for a person rather than guessed at.
+    QUESTION_COUNTS: {
+      // 'Checkup 6': 20,
+    },
+
+
     COLUMNS: [
-      { column: 1,  label: 'Date assessment done',          fill: 'radius' },
-      { column: 2,  label: 'Student',                       fill: 'script' },
-      { column: 3,  label: 'Day of week next session',      fill: 'radius' },
-      { column: 4,  label: 'Next attendance date (m/dd)',   fill: 'radius' },
-      { column: 5,  label: 'Most recent assessment',        fill: 'radius' },
+      { column: 1,  label: 'Date assessment done',          fill: 'script' },
+      { column: 2,  label: 'Student',                       fill: 'person' },
+      { column: 3,  label: 'Day of week next session',      fill: 'script' },
+      { column: 4,  label: 'Next attendance date (m/dd)',   fill: 'script' },
+      { column: 5,  label: 'Most recent assessment',        fill: 'person' },
       { column: 6,  label: 'Date graded',                   fill: 'person' },
       { column: 7,  label: 'Initials',                      fill: 'person' },
       { column: 8,  label: 'Grade percentage',              fill: 'person' },
-      { column: 9,  label: 'Stars',                         fill: 'person' },
-      { column: 10, label: 'Change if previously done',     fill: 'person' },
+      { column: 9,  label: 'Stars',                         fill: 'script' },
+      { column: 10, label: 'Change if previously done',     fill: 'script' },
       { column: 11, label: 'Good / bad / fine',             fill: 'person' },
       { column: 12, label: 'Done (grading finished)',       fill: 'person' },
       { column: 13, label: 'Progress report submitted',     fill: 'blank'  },
       { column: 14, label: 'Progress report initials',      fill: 'person' },
-      { column: 15, label: 'LP creation date',              fill: 'person' },
+      { column: 15, label: 'LP creation date',              fill: 'script' },
       { column: 16, label: 'LP created by (initials)',      fill: 'person' },
       { column: 17, label: '',                              fill: 'blank'  },
       { column: 18, label: 'Topic repeated',                fill: 'person' },
-      { column: 19, label: 'How many LPs made',             fill: 'person' },
+      { column: 19, label: 'How many LPs made',             fill: 'script' },
       { column: 20, label: "What's next",                   fill: 'person' }
     ]
   }
