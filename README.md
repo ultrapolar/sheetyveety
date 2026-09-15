@@ -100,6 +100,42 @@ itself builds the link, so no id is ever guessed.
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 
+## The Deck Changelog
+
+Not built yet. The layout is described in `CONFIG.CHANGELOG` so the column
+numbers live in one place, and **Tools → Check setup** lists the sheet once it
+exists — staying quiet until then, because a check that nags about something
+nobody has made is a check people learn to skip.
+
+| # | Column | Filled by |
+| --- | --- | --- |
+| 1 | Date assessment done | Radius, probably |
+| 2 | Student | the script |
+| 3 | Day of week next session | Radius, probably |
+| 4 | Next attendance date | Radius, probably |
+| 5 | Most recent assessment | Radius, probably |
+| 6–12 | Date graded · Initials · Grade % · Stars · Change if previously done · Good/bad/fine · Done | a person |
+| 13 | Progress report submitted | left blank |
+| 14–16 | Progress report initials · LP creation date · LP created by | a person |
+| 17 | *(spacer)* | — |
+| 18–20 | Topic repeated · How many LPs made · What's next | a person |
+
+**Thirteen of the twenty are somebody's judgement written down**, and no script
+should pretend otherwise. There is a test asserting the sheet stays mostly
+human, so that changing it is a decision rather than a drift.
+
+### What would be needed to fill the rest
+
+Only the student name is certain today. The four marked *probably* need
+something I have not seen:
+
+- **Date assessment done** and **Most recent assessment** — the DWP page has an
+  assessment status behind `AssessmentStatusId`, but nothing dated. A page for
+  a student who has just had one assessed would settle it.
+- **Day of week** and **Next attendance date** — nothing in the DWP or the
+  roster carries a future booking. This probably lives on a Radius scheduling
+  page nobody has looked at yet.
+
 ## Start of day: organising the rows
 
 **SOD → Organise rows from the seating chart** rewrites columns **A and B** of

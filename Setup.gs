@@ -41,6 +41,21 @@ function wopColumnPlan_() {
     .sort(function (a, b) { return a.column - b.column; });
 }
 
+/**
+ * The Deck Changelog, described but not yet written to by anything.
+ *
+ * Listed only when the sheet exists. Reporting a missing sheet every time
+ * would make the check nag about something nobody has built yet, and a check
+ * that nags is a check that gets skipped.
+ */
+function changelogColumnPlan_() {
+  return (CONFIG.CHANGELOG.COLUMNS || [])
+    .filter(function (entry) { return entry.fill !== 'blank'; })
+    .map(function (entry) {
+      return { column: entry.column, labels: [entry.label], fill: entry.fill };
+    });
+}
+
 function deckColumnPlan_() {
   return Object.keys(CONFIG.DECK_COL).map(function (key) {
     return { column: CONFIG.DECK_COL[key], labels: [key] };
@@ -124,6 +139,9 @@ function checkSheetSetup() {
     'back to row 2.</p>' +
     describe(CONFIG.SHEETS.WOP, wopColumnPlan_()) +
     describe(CONFIG.SHEETS.DECK, deckColumnPlan_()) +
+    (ss.getSheetByName(CONFIG.CHANGELOG.SHEET_NAME)
+      ? describe(CONFIG.CHANGELOG.SHEET_NAME, changelogColumnPlan_())
+      : '') +
     '</div>';
 
   SpreadsheetApp.getUi().showModalDialog(

@@ -37,7 +37,8 @@ function loadScript(context) {
   importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
-  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_
+  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
+  changelogColumnPlan_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -1823,6 +1824,75 @@ const DECK_FILLER_ROWS = [
   check('two sessions: both archived', s.deckCell(2, C.ARCHIVE), 'T1 08/22 | T2 08/22');
   check('two sessions: both rows marked done',
     [s.wopStatusBg(0), s.wopStatusBg(1)], ['#00ff00', '#00ff00']);
+}
+
+// 45w. The Deck Changelog: described, not yet written to.
+{
+  function setup(withChangelog) {
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', [new Array(26).fill('')],
+      makeGrid(1, 26, '#ffffff'));
+    const sheets = [deck, wop];
+    if (withChangelog) {
+      const head = ['Date assessment done', 'Test student', 'Day of week',
+        'Next attendance', 'Most recent assessment'];
+      while (head.length < 20) head.push('');
+      sheets.push(new FakeSheet('Deck Changelog', [head, new Array(20).fill('')],
+        makeGrid(2, 20, '#ffffff')));
+    }
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, sheets, 'Daily WOP');
+    loadScript(ctx).checkSheetSetup();
+    return h.dialogs[h.dialogs.length - 1].html;
+  }
+
+  // Nobody has built the sheet yet. A check that nags about something that
+  // does not exist is a check people learn to skip.
+  const without = setup(false);
+  checkTruthy('changelog: not mentioned while the sheet is absent',
+    !without.includes('Deck Changelog'));
+  checkTruthy('changelog: and no missing-sheet complaint',
+    !without.includes('No sheet named "Deck Changelog"'));
+
+  // Once it exists, the columns are checked like any other sheet.
+  const withIt = setup(true);
+  checkTruthy('changelog: listed once the sheet is there',
+    withIt.includes('Deck Changelog'));
+  checkTruthy('changelog: reads the headings off it',
+    withIt.includes('Date assessment done'));
+  checkTruthy('changelog: covers the far end of the row',
+    withIt.includes("What&#39;s next") || withIt.includes("What's next"));
+}
+
+// 45x. The changelog layout describes itself honestly.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const columns = api.CONFIG.CHANGELOG.COLUMNS;
+
+  check('layout: one entry per column, in order',
+    columns.map(c => c.column), columns.map((c, i) => i + 1));
+  check('layout: every column says who fills it',
+    columns.filter(c => ['script', 'radius', 'person', 'blank']
+      .indexOf(c.fill) === -1), []);
+
+  // Spacer columns are the only ones allowed to have no label.
+  check('layout: only a spacer may be unlabelled',
+    columns.filter(c => !c.label && c.fill !== 'blank'), []);
+
+  // The plan drops spacers -- there is nothing to check in an empty column.
+  const plan = api.changelogColumnPlan_();
+  check('plan: spacers left out',
+    plan.length, columns.filter(c => c.fill !== 'blank').length);
+
+  // Most of this sheet is somebody's judgement. If that ever stops being true
+  // it should be a decision, not a drift.
+  checkTruthy('layout: still mostly human',
+    columns.filter(c => c.fill === 'person').length > columns.length / 2);
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status

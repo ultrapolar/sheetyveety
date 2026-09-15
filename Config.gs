@@ -209,5 +209,45 @@ const CONFIG = {
     ORGANIZE_START_ROW: 1,
     INSTRUCTOR_COLUMN: 2,   // B
 
+  },
+
+  // The Deck Changelog, one row per assessment worked through.
+  //
+  // Described here before anything writes to it, so that Tools -> Check setup
+  // can tell you whether the sheet you build matches what a script would
+  // expect -- and so the column numbers live in one place when something does
+  // come to fill them in.
+  //
+  // `fill` says who a column is for. Most of this sheet is somebody's
+  // judgement written down, and no script should pretend otherwise:
+  //   'script' - the script can know this
+  //   'radius' - might come from a DWP page, not yet confirmed
+  //   'person' - a human decision, and it stays one
+  //   'blank'  - a spacer column, deliberately empty
+  CHANGELOG: {
+    SHEET_NAME: 'Deck Changelog',
+
+    COLUMNS: [
+      { column: 1,  label: 'Date assessment done',          fill: 'radius' },
+      { column: 2,  label: 'Student',                       fill: 'script' },
+      { column: 3,  label: 'Day of week next session',      fill: 'radius' },
+      { column: 4,  label: 'Next attendance date (m/dd)',   fill: 'radius' },
+      { column: 5,  label: 'Most recent assessment',        fill: 'radius' },
+      { column: 6,  label: 'Date graded',                   fill: 'person' },
+      { column: 7,  label: 'Initials',                      fill: 'person' },
+      { column: 8,  label: 'Grade percentage',              fill: 'person' },
+      { column: 9,  label: 'Stars',                         fill: 'person' },
+      { column: 10, label: 'Change if previously done',     fill: 'person' },
+      { column: 11, label: 'Good / bad / fine',             fill: 'person' },
+      { column: 12, label: 'Done (grading finished)',       fill: 'person' },
+      { column: 13, label: 'Progress report submitted',     fill: 'blank'  },
+      { column: 14, label: 'Progress report initials',      fill: 'person' },
+      { column: 15, label: 'LP creation date',              fill: 'person' },
+      { column: 16, label: 'LP created by (initials)',      fill: 'person' },
+      { column: 17, label: '',                              fill: 'blank'  },
+      { column: 18, label: 'Topic repeated',                fill: 'person' },
+      { column: 19, label: 'How many LPs made',             fill: 'person' },
+      { column: 20, label: "What's next",                   fill: 'person' }
+    ]
   }
 };
