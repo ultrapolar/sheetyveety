@@ -5,12 +5,20 @@
  * row of table numbers, and under it sit the seat rows -- C, B and A -- with an
  * instructor column between each pair of tables.
  *
- * The seat cells are labelled "1C", "2A" and so on until somebody writes a
- * student into one, at which point the label is gone. So a seat is never read
- * from the cell: it is worked out from where the cell is. The table number
- * comes from the block's header row directly above, and the row letter from
- * the markers running down the side of that row. That way the chart can be
- * filled in, cleared and refilled all day and the seat names still come out.
+ * The table number always comes from the block's header row directly above.
+ * The row letter is looked for in three places, in this order, because charts
+ * in the wild carry different amounts of help:
+ *
+ *   1. A seat still showing its own label -- "1C" written in the cell -- names
+ *      its row outright, and one such seat names the whole row.
+ *   2. Failing that, single-letter markers down the side of the row, which the
+ *      older chart had.
+ *   3. Failing both, the row's position in its block, against
+ *      CONFIG.SEATING.SEAT_ROW_ORDER.
+ *
+ * Only the third is an assumption, so the report says when it was used and
+ * which way round it read. A seat name that is silently upside down puts every
+ * student at the wrong table.
  */
 
 /** True for a cell that is just a table number: 8, or 8.0 as Sheets stores it. */
@@ -52,13 +60,84 @@ function rowLetterOf_(row, seatColumns) {
   return bestCount >= 2 ? best : '';
 }
 
-/** The value in whichever of `columns` sits closest to `column`. */
-function nearestValue_(row, columns, column) {
-  let best = '';
+/**
+ * The row letter a seat cell names for itself, if it is still showing its
+ * label rather than a student.
+ *
+ * The table number has to match the column it sits in, so a student recorded
+ * as "J5" is not mistaken for a seat label, and a stray note is not either.
+ */
+function seatLabelLetter_(text, table) {
+  const parts = String(text == null ? '' : text).trim()
+    .match(/^(\d+)\s*([A-Za-z])$/);
+  if (!parts) return '';
+  return parts[1] === String(table) ? parts[2].toUpperCase() : '';
+}
+
+/**
+ * The columns holding instructors: the ones dividing the two tables of a pod.
+ *
+ * Read from where the tables sit rather than from what is written in them,
+ * because an instructor column is empty for most of the day and a hunt for
+ * text finds nothing. The gap between two pods looks exactly like the gap
+ * inside one, so CONFIG.SEATING.PODS is what tells them apart.
+ */
+function wallColumns_(columns, tableOf) {
+  const walls = [];
+  for (let i = 0; i + 1 < columns.length; i++) {
+    const left = tableOf[columns[i]];
+    const right = tableOf[columns[i + 1]];
+    if (podOfTable_(left) === -1 || podOfTable_(left) !== podOfTable_(right)) {
+      continue;   // the space between two pods, not the wall inside one
+    }
+    for (let c = columns[i] + 1; c < columns[i + 1]; c++) {
+      if (walls.indexOf(c) === -1) walls.push(c);
+    }
+  }
+  return walls;
+}
+
+/**
+ * Which column is which table, across the whole chart.
+ *
+ * The room does not move between four o'clock and seven, so the header row
+ * over each hour is the same layout drawn again. Read block by block that is a
+ * waste; worse, it is fragile, because a header that has lost a table -- the
+ * real chart has three of them missing the middle pod -- takes that hour's
+ * students down with it. Reading every header together means one complete
+ * drawing anywhere on the sheet names the columns for all of them.
+ *
+ * Two headers naming the same column differently is the room having moved, and
+ * that is reported rather than resolved: the last one drawn is not obviously
+ * more right than the first.
+ */
+function seatingLayout_(values, headers) {
+  const tableOf = {};
+  const conflicts = [];
+
+  headers.forEach(function (header) {
+    header.columns.forEach(function (c) {
+      const table = Number(tableNumberText_(values[header.row][c]));
+      if (tableOf[c] === undefined) { tableOf[c] = table; return; }
+      if (tableOf[c] === table) return;
+      conflicts.push({ column: c, was: tableOf[c], now: table, row: header.row + 1 });
+    });
+  });
+
+  const columns = Object.keys(tableOf).map(Number).sort(function (a, b) {
+    return a - b;
+  });
+  return { tableOf: tableOf, columns: columns, conflicts: conflicts,
+    walls: wallColumns_(columns, tableOf) };
+}
+
+/** Whichever of `columns` sits closest to `column`, or -1 if there are none. */
+function nearestColumn_(columns, column) {
+  let best = -1;
   let bestDistance = Infinity;
   columns.forEach(function (c) {
     const distance = Math.abs(c - column);
-    if (distance < bestDistance) { bestDistance = distance; best = cellText_(row[c]); }
+    if (distance < bestDistance) { bestDistance = distance; best = c; }
   });
   return best;
 }
@@ -80,7 +159,10 @@ function parseSeatingChart_(values) {
     if (columns.length >= 2) headers.push({ row: r, columns: columns });
   }
 
+  const layout = seatingLayout_(values, headers);
   const seats = [];
+  seats.conflicts = layout.conflicts;
+
   headers.forEach(function (header, n) {
     const stop = n + 1 < headers.length ? headers[n + 1].row : values.length;
 
@@ -93,37 +175,87 @@ function parseSeatingChart_(values) {
 
     // Instructor slots are a property of the block, not of one row: a row with
     // only some of them filled still has the others, empty. Finding them row by
-    // row made an empty slot reach across the room for the next name along.
-    const instructorColumns = [];
-    for (let r = header.row + 1; r < stop; r++) {
-      if (!rowLetterOf_(values[r], header.columns)) continue;
-      for (let c = 0; c < values[r].length; c++) {
-        if (header.columns.indexOf(c) !== -1) continue;
-        if (instructorColumns.indexOf(c) !== -1) continue;
-        if (cellText_(values[r][c]).length > 1) instructorColumns.push(c);
-      }
-    }
+    // row made an empty slot reach across the room for the next name along --
+    // and on a chart where nobody is written in yet, found none at all.
+    const instructorColumns = layout.walls;
 
+    // Which rows of this block are seat rows, and what each one is called.
+    // Gathered for the whole block before any of it is read, so that one
+    // labelled seat anywhere in the block names its row for every table.
+    const seatRows = [];
     for (let r = header.row + 1; r < stop; r++) {
       const row = values[r];
-      const letter = rowLetterOf_(row, header.columns);
-      if (!letter) continue;   // a spacer or a footer, not a row of seats
 
-      header.columns.forEach(function (c) {
+      let letter = '';
+      let from = '';
+      layout.columns.forEach(function (c) {
+        if (letter) return;
+        const found = seatLabelLetter_(row[c], String(layout.tableOf[c]));
+        if (found) { letter = found; from = 'label'; }
+      });
+
+      if (!letter) {
+        letter = rowLetterOf_(row, layout.columns);
+        if (letter) from = 'marker';
+      }
+
+      const occupied = layout.columns.some(function (c) {
+        return cellText_(row[c]) !== '';
+      });
+      if (letter || occupied) seatRows.push({ row: r, letter: letter, from: from });
+    }
+
+    // Anything with no letter of its own takes one from where it sits. A chart
+    // that says nothing about its rows is read in the configured order, and a
+    // block with more rows than that order names is left alone rather than run
+    // off the end of it.
+    const order = CONFIG.SEATING.SEAT_ROW_ORDER || [];
+    seatRows.forEach(function (seatRow, i) {
+      if (seatRow.letter) return;
+      if (i < order.length) {
+        seatRow.letter = order[i];
+        seatRow.from = 'position';
+      }
+    });
+
+    // The instructors of a pod, for this hour.
+    //
+    // They are written down the wall column between the pod's two tables, one
+    // to a line because there may be several of them -- not because a line
+    // belongs to the seat row beside it. Reading them row by row left the
+    // middle row of the real chart with no instructor at all, while the two
+    // who were plainly there sat one line above and one below. The format this
+    // ends up in says the same thing: "1C | IN1 IN2 IN3" is a list.
+    const instructorsAt = {};
+    instructorColumns.forEach(function (c) {
+      const names = [];
+      seatRows.forEach(function (seatRow) {
+        const text = cellText_(values[seatRow.row][c]);
+        if (text && names.indexOf(text) === -1) names.push(text);
+      });
+      instructorsAt[c] = names;
+    });
+
+    seatRows.forEach(function (seatRow) {
+      const row = values[seatRow.row];
+      if (!seatRow.letter) return;   // more rows than the order names
+
+      layout.columns.forEach(function (c) {
         const occupant = cellText_(row[c]);
-        if (!occupant) return;
-        const table = tableNumberText_(values[header.row][c]);
+        const table = String(layout.tableOf[c]);
+        if (!occupant || seatLabelLetter_(occupant, table)) return;
         seats.push({
-          seat: table + letter,
+          seat: table + seatRow.letter,
           occupant: occupant,
-          instructor: nearestValue_(row, instructorColumns, c),
+          instructors: instructorsAt[nearestColumn_(instructorColumns, c)] || [],
           hour: hour,
           block: n,
           table: Number(table),
-          letter: letter
+          letter: seatRow.letter,
+          letterFrom: seatRow.from
         });
       });
-    }
+    });
   });
 
   return seats;
@@ -222,7 +354,7 @@ function seatingCandidates_(chartName, names) {
   return names.filter(function (n) { return seatingMatchRank_(chartName, n) === 1; });
 }
 
-/** "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved. */
+/** "1C | IN3 IN2", or "1C, 2A | IN3 IN1" for a student who moved. */
 function formatSeating_(matches) {
   const config = CONFIG.SEATING;
   const seats = [];
@@ -230,9 +362,11 @@ function formatSeating_(matches) {
 
   matches.forEach(function (match) {
     if (match.seat && seats.indexOf(match.seat) === -1) seats.push(match.seat);
-    if (match.instructor && instructors.indexOf(match.instructor) === -1) {
-      instructors.push(match.instructor);
-    }
+    // A student who sat in two pods across the day has two sets of
+    // instructors, and somebody who worked both is named once.
+    (match.instructors || []).forEach(function (name) {
+      if (name && instructors.indexOf(name) === -1) instructors.push(name);
+    });
   });
 
   const left = seats.join(config.SEAT_JOIN);
@@ -241,17 +375,143 @@ function formatSeating_(matches) {
   return right ? left + config.SEPARATOR + right : left;
 }
 
+/**
+ * The id of the spreadsheet holding the chart, or '' for this one.
+ *
+ * What was pasted in through the menu wins over what is in CONFIG, so the
+ * link can be changed without editing the code -- and so it does not have to
+ * live in the file at all.
+ */
+function seatingSpreadsheetId_() {
+  const stored = PropertiesService.getScriptProperties()
+    .getProperty(CONFIG.SEATING.SOURCE_PROPERTY);
+  return String(stored || CONFIG.SEATING.SPREADSHEET_ID || '').trim();
+}
+
+/**
+ * A spreadsheet id out of whatever was pasted.
+ *
+ * People paste the whole address bar, so the id is dug out of it. A bare id
+ * is accepted too, since that is what somebody who has done this before will
+ * paste. Anything else comes back empty rather than being half-understood.
+ */
+function spreadsheetIdFromLink_(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return '';
+  const inUrl = raw.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (inUrl) return inUrl[1];
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(raw)) return raw;
+  return '';
+}
+
+/**
+ * Which tab today's chart is on.
+ *
+ * The weekday and Saturday charts are the same shape, so the only thing that
+ * decides between them is the day. Sunday names no tab, and that is an answer
+ * rather than a gap: the centre is shut, and reading Saturday's chart on a
+ * Sunday would seat everybody where they sat yesterday.
+ */
+function seatingSheetName_(when) {
+  const day = (when || new Date()).getDay();
+  return String((CONFIG.SEATING.DAY_SHEETS || [])[day] || '').trim();
+}
+
 /** Opens the seating chart, wherever it has been put. */
-function seatingSheet_() {
-  const id = String(CONFIG.SEATING.SPREADSHEET_ID || '').trim();
-  const book = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = book.getSheetByName(CONFIG.SEATING.SHEET_NAME);
+function seatingSheet_(when) {
+  const name = seatingSheetName_(when);
+  if (!name) {
+    throw new Error('CONFIG.SEATING.DAY_SHEETS names no seating chart for a ' +
+      CONFIG.CHANGELOG.DAY_LABELS[(when || new Date()).getDay()] +
+      '. If the centre now opens that day, add its tab name there.');
+  }
+
+  const id = seatingSpreadsheetId_();
+  let book;
+  try {
+    book = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+  } catch (err) {
+    throw new Error('Could not open the seating chart spreadsheet (id "' + id +
+      '"): ' + err.message + ' Check the link with Tools → Seating chart: set ' +
+      'the link, and that the account running this script can open it.');
+  }
+
+  const sheet = book.getSheetByName(name);
   if (!sheet) {
-    throw new Error('No sheet named "' + CONFIG.SEATING.SHEET_NAME + '" ' +
+    const tabs = book.getSheets().map(function (s) { return s.getName(); });
+    throw new Error('No tab named "' + name + '" ' +
       (id ? 'in the seating chart spreadsheet.' : 'in this spreadsheet.') +
-      ' Set CONFIG.SEATING.SHEET_NAME to the name of its tab.');
+      ' It has: ' + (tabs.length ? tabs.join(', ') : 'nothing') +
+      '. Either rename the tab or change CONFIG.SEATING.DAY_SHEETS.');
   }
   return sheet;
+}
+
+/**
+ * Menu entry: point the script at the spreadsheet holding the seating charts.
+ *
+ * Checks the link there and then rather than at six o'clock in the evening,
+ * and says which tabs it can actually see -- a link to the wrong document, or
+ * to one this account cannot open, looks identical to a right one until
+ * somebody needs it.
+ */
+function setSeatingSource() {
+  const ui = SpreadsheetApp.getUi();
+  const current = seatingSpreadsheetId_();
+  const wanted = (CONFIG.SEATING.DAY_SHEETS || []).filter(function (name) {
+    return name;
+  }).filter(function (name, i, all) { return all.indexOf(name) === i; });
+
+  const response = ui.prompt('Seating chart: set the link',
+    'Open the Google Sheet holding the seating charts and copy its address ' +
+    'from the browser, then paste it here. A bare id works too.\n\n' +
+    'It needs a tab for each of: ' + wanted.join(', ') + '.\n\n' +
+    'The account running this script must be able to open it — share it with ' +
+    'the same Google account you are in now.\n\n' +
+    (current ? 'Currently set to: ' + current : 'Nothing is set, so the chart ' +
+      'is looked for in this spreadsheet.'),
+    ui.ButtonSet.OK_CANCEL);
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const typed = String(response.getResponseText()).trim();
+  if (!typed) {
+    showError_('Nothing pasted, so the link was left as it was.');
+    return;
+  }
+
+  const id = spreadsheetIdFromLink_(typed);
+  if (!id) {
+    showError_('That does not look like a Google Sheets link or id. A link ' +
+      'looks like https://docs.google.com/spreadsheets/d/<id>/edit');
+    return;
+  }
+
+  let book;
+  try {
+    book = SpreadsheetApp.openById(id);
+  } catch (err) {
+    showError_('That link could not be opened: ' + err.message +
+      '\n\nNothing was saved. Most often this is sharing: the account running ' +
+      'this script has to have access to that document too.');
+    return;
+  }
+
+  const tabs = book.getSheets().map(function (s) { return s.getName(); });
+  const missing = wanted.filter(function (name) {
+    return tabs.indexOf(name) === -1;
+  });
+
+  PropertiesService.getScriptProperties()
+    .setProperty(CONFIG.SEATING.SOURCE_PROPERTY, id);
+
+  showError_('Saved. "' + book.getName() + '" has these tabs: ' +
+    tabs.join(', ') + '.' +
+    (missing.length
+      ? '\n\nNo tab named ' + missing.join(' or ') + ' though, which is what ' +
+        'the import will look for. Rename the tabs, or change ' +
+        'CONFIG.SEATING.DAY_SHEETS to match what is there.'
+      : '\n\nBoth charts are there.'));
 }
 
 /**
@@ -281,7 +541,7 @@ function importSeatingChart() {
     const seats = parseSeatingChart_(seatingSheet_().getDataRange().getValues());
     if (!seats.length) {
       showError_('No students found on the seating chart. Check that ' +
-        'CONFIG.SEATING.SHEET_NAME points at the right tab, and that the chart ' +
+        'the link is right (Tools → Seating chart: set the link) and that the chart ' +
         'has its table numbers along the top of each hour.');
       return;
     }
@@ -436,9 +696,11 @@ function planSeatingOrder_(seats, nameFor) {
     const pods = block.pods;
     if (!pods[pod]) pods[pod] = { pod: pod, students: [], instructors: [] };
     pods[pod].students.push({ name: resolved, chart: entry.occupant });
-    if (entry.instructor && pods[pod].instructors.indexOf(entry.instructor) === -1) {
-      pods[pod].instructors.push(entry.instructor);
-    }
+    (entry.instructors || []).forEach(function (name) {
+      if (name && pods[pod].instructors.indexOf(name) === -1) {
+        pods[pod].instructors.push(name);
+      }
+    });
   });
 
   hours.sort(function (a, b) { return hourSortKey_(a) - hourSortKey_(b); });
@@ -549,7 +811,7 @@ function organizeSeatingRows() {
     const seats = parseSeatingChart_(seatingSheet_().getDataRange().getValues());
     if (!seats.length) {
       showError_('No students found on the seating chart. Check that ' +
-        'CONFIG.SEATING.SHEET_NAME points at the right tab.');
+        'the link is right (Tools → Seating chart: set the link).');
       return;
     }
 

@@ -364,20 +364,83 @@ student sat, and who sat with them, in **column N**:
 ```
 
 The chart is a grid of tables drawn one block per hour: a row of table numbers,
-then the seat rows C, B and A, with an instructor column between each pair of
-tables.
+then the seat rows, with an instructor column between each pair of tables. The
+pairs are the pods — `(8|Wall|7) (6|Wall|5) (4|Wall|3) (2|Wall|1)` — laid out
+right to left, so pod 1 is the pair nearest the right of the sheet.
 
-**A seat is never read from the cell it is in.** The cells are printed with
-`1C`, `2A` and so on, but a student's name is written *over* that label, so by
-the time it matters the label is gone. The seat is worked out from position
-instead — the table number from the block header directly above, and the row
-letter from the markers running down the side. There is a test asserting that
-while the labels are still present, every derived seat equals the label sitting
-in it; that is the premise the whole thing rests on.
+### Where the chart lives
 
-Set `CONFIG.SEATING.SHEET_NAME` to the chart's tab. If it lives in a separate
-document, put that document's id in `CONFIG.SEATING.SPREADSHEET_ID` — the part
-of its URL between `/d/` and `/edit`.
+**Tools → Seating chart: set the link.** Paste the Google Sheet's address (a
+bare id works too) and it is stored in Script Properties, so the link is not
+written into the code. It checks the link **there and then** and says which
+tabs it can actually see — a link to the wrong document, or to one this account
+cannot open, looks identical to a right one until six o'clock in the evening.
+The account running the script has to be able to open that document, which
+means sharing it with the same Google account you are signed in as.
+
+`CONFIG.SEATING.SPREADSHEET_ID` is the fallback when nothing has been pasted,
+and blank means "a tab in this same spreadsheet".
+
+### Which tab: weekdays or saturday
+
+`CONFIG.SEATING.DAY_SHEETS` maps the day of the week to a tab, and the two
+charts are the same layout with different hours. **Sunday names no tab**, and
+that is an answer rather than a gap: reading Saturday's chart on a Sunday would
+seat everybody where they sat yesterday.
+
+### How a seat is worked out
+
+**A seat is never read from the cell it is in**, because a student's name is
+written *over* the printed label. The table number comes from the header row;
+the row letter is looked for in three places, in this order, because charts in
+the wild carry different amounts of help:
+
+1. **A seat still showing its label.** `1C` in the cell names its row outright,
+   and one such seat names the row for every table beside it.
+2. **Single-letter markers down the side**, which the older chart had.
+3. **Position in the block**, against `CONFIG.SEATING.SEAT_ROW_ORDER` — `C`,
+   `B`, `A` top to bottom.
+
+Only the third is an assumption, so each seat records which of the three named
+it. **The real chart uses the third**: it has no labels and no markers. If the
+rows run the other way, `SEAT_ROW_ORDER` is the one line to flip — everything
+else follows from it.
+
+A cell still showing its own label is an **empty seat**, not a student.
+
+### One room, drawn four times
+
+The room does not move between four o'clock and seven, so every header row is
+the same layout drawn again — and the real chart's later headers have *lost*
+the middle pod, leaving columns for tables 4 and 3 blank. Read block by block,
+every student at those two tables vanishes.
+
+So the column-to-table map is built from **every header row together**: one
+complete drawing anywhere on the sheet names the columns for all of them. Two
+headers naming the same column differently is the room having actually moved,
+and that is **reported rather than resolved** — the last drawing is not
+obviously more right than the first. A column no header ever names seats
+nobody, rather than putting somebody at a guessed table.
+
+### Instructors belong to the pod, not the row
+
+The names down a wall column are the instructors who worked that **pod** that
+**hour**, listed one to a line because there may be several of them — not one
+per seat row beside them. On the real chart the two instructors of a pod sit
+one line above and one line below the middle seat row, so reading them row by
+row left the student in the middle with nobody at all while two people were
+plainly there.
+
+So every student in a pod gets every instructor of that pod for that hour:
+
+```
+4C | AZ HR        Neil D, table 4 seat C, with both
+3B | AZ HR        Luca B, the other table of the same pod
+```
+
+The format says the same thing — `1C | IN1 IN2 IN3` is a list. A student who
+sat in two pods across the day gets both sets, and somebody who worked both is
+named once.
 
 ### A student who came twice
 

@@ -170,10 +170,31 @@ const CONFIG = {
   // The seating chart: a grid of tables drawn one block per hour, with the
   // students written into the seat cells by hand.
   SEATING: {
-    // Blank means a tab in this same spreadsheet. To read a separate document,
-    // paste the id out of its URL: .../spreadsheets/d/<this part>/edit
+    // Where the chart lives. Blank means a tab in this same spreadsheet. For a
+    // separate document, use Tools -> Seating chart: set the link and paste
+    // the URL -- it is stored in this script's properties, so the link does
+    // not have to be written in here and does not travel with the code. An id
+    // put here is the fallback when nothing has been pasted.
     SPREADSHEET_ID: '',
-    SHEET_NAME: 'Seating Chart',
+
+    // Where the pasted link is kept. Script properties, not the spreadsheet.
+    SOURCE_PROPERTY: 'SEATING_SPREADSHEET_ID',
+
+    // Which tab holds the chart, by the day the script is run. 0 is Sunday.
+    // The weekday and Saturday charts are laid out identically and differ only
+    // in their hours, which is why they are two tabs rather than one.
+    // A day with no tab named is a day the centre does not open, and the
+    // import says so rather than reading somebody else's chart.
+    DAY_SHEETS: ['', 'weekdays', 'weekdays', 'weekdays', 'weekdays', 'weekdays',
+      'saturday'],
+
+    // What the seat rows of a block are called, top to bottom.
+    //
+    // Only used when the chart itself does not say -- a seat still showing its
+    // "1C" label names its own row, and so do single-letter markers down the
+    // side. When neither is there the rows are named in this order by
+    // position, and the report says that is what happened.
+    SEAT_ROW_ORDER: ['C', 'B', 'A'],
 
     // Where the result lands on the Daily WOP.
     TARGET_COLUMN: 14,   // N

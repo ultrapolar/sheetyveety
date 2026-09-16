@@ -135,6 +135,12 @@ function install(globalObj, sheets, activeSheetName) {
   const dialogs = [];
   const alerts = [];
   const uiAnswer = { value: 'OK' };
+
+  // ui.prompt(). `next` is what the person types; `button` is which one they
+  // press. Both are read once and the text cleared, so a test that forgets to
+  // set it gets an empty box rather than the previous test's answer.
+  const promptAnswer = { next: '', button: 'OK' };
+  const prompts = [];
   let lockHeld = false;
 
   const spreadsheet = {
@@ -160,6 +166,15 @@ function install(globalObj, sheets, activeSheetName) {
       alert: (...args) => {
         alerts.push(args.length > 1 ? args.join(' | ') : args[0]);
         return args.length > 2 ? uiAnswer.value : undefined;
+      },
+      prompt: (...args) => {
+        prompts.push(args.length > 1 ? args.join(' | ') : args[0]);
+        const typed = promptAnswer.next;
+        promptAnswer.next = '';
+        return {
+          getSelectedButton: () => promptAnswer.button,
+          getResponseText: () => typed
+        };
       },
       ButtonSet: { OK_CANCEL: 'OK_CANCEL' },
       Button: { OK: 'OK', CANCEL: 'CANCEL' },
@@ -262,15 +277,17 @@ function install(globalObj, sheets, activeSheetName) {
   globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
 
   // Register an extra spreadsheet that openById can find.
-  const addBook = (id, bookSheets) => {
+  const addBook = (id, bookSheets, bookName) => {
     booksById[id] = {
+      getName: () => bookName || id,
+      getSheets: () => bookSheets.slice(),
       getSheetByName: name => bookSheets.filter(sh => sh.getName() === name)[0] || null,
       getSpreadsheetTimeZone: () => 'UTC'
     };
   };
 
-  return { dialogs, alerts, uiAnswer, fetchLog, fetchHandler, scriptProps, addBook,
-    sheets: byName };
+  return { dialogs, alerts, uiAnswer, promptAnswer, prompts, fetchLog,
+    fetchHandler, scriptProps, addBook, sheets: byName };
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */

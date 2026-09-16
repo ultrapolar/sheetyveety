@@ -39,5 +39,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Radius: sign in (set session cookie)', 'setRadiusCookie')
     .addItem('Radius: test connection', 'testRadiusConnection')
+    .addSeparator()
+    .addItem('Seating chart: set the link', 'setSeatingSource')
     .addToUi();
 }

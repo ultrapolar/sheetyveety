@@ -37,6 +37,8 @@ function loadScript(context) {
   importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
+  seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
+  seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
   changelogColumnPlan_, changelogCreate, changelogGrade,
   changelogLearningPlan, percentValue_, starsFor_, nextOpenDay_,
@@ -936,20 +938,43 @@ const DECK_FILLER_ROWS = [
   const BLOCK = JSON.parse(fs.readFileSync('tests/fixtures/seating-block.json', 'utf8'));
   const clone = () => BLOCK.map(r => r.slice());
 
-  // While the chart still carries its printed labels, every seat derived from
-  // position has to come out equal to the label sitting in it. That is the
-  // whole premise: once a student is written over the label, position is all
-  // there is left to read.
-  const labelled = api.parseSeatingChart_(clone());
-  const disagreed = labelled.filter(e => e.seat !== e.occupant);
-  check('seating: derived seat matches every printed label', disagreed, []);
-  check('seating: found every occupied seat', labelled.length, 23);
+  // A seat still showing its printed label is an empty seat. Nobody is
+  // sitting in "1C" until somebody's name is written over it.
+  check('seating: a printed label is not a student',
+    api.parseSeatingChart_(clone()).length, 0);
+
+  // Write a name into every labelled seat, and the seat each one comes back as
+  // has to equal the label it replaced. That is the whole premise: once a
+  // student is written over the label, position is all there is left to read.
+  const written = clone();
+  const wasLabelled = {};
+  written.forEach(function (row, r) {
+    row.forEach(function (cell, c) {
+      if (!/^\d+[A-C]$/.test(String(cell))) return;
+      const name = 'Student ' + r + '-' + c;
+      wasLabelled[name] = String(cell);
+      written[r][c] = name;
+    });
+  });
+
+  const labelled = api.parseSeatingChart_(written);
+  check('seating: found every seat that had a label',
+    labelled.length, Object.keys(wasLabelled).length);
+  check('seating: found the twenty-three the sample has', labelled.length, 23);
+  check('seating: every derived seat matches the label it replaced',
+    labelled.filter(e => e.seat !== wasLabelled[e.occupant]), []);
+  check('seating: this sample names its rows from the side markers',
+    labelled.filter(e => e.letterFrom !== 'marker'), []);
 
   const seatOf = name => labelled.filter(e => e.seat === name)[0] || {};
   check('seating: 1C is read from table 1 and row C', seatOf('1C').seat, '1C');
-  check('seating: 1C takes the instructor beside it', seatOf('1C').instructor, 'IN3');
-  check('seating: row A takes the row A instructor',
-    seatOf('1A').instructor, 'IN1');
+  // The instructors are the pod's, for that hour -- not one per seat row.
+  check('seating: 1C takes every instructor of its pod',
+    seatOf('1C').instructors, ['IN3', 'IN2', 'IN1']);
+  check('seating: and so does row A of the same pod',
+    seatOf('1A').instructors, ['IN3', 'IN2', 'IN1']);
+  check('seating: a different pod has its own',
+    seatOf('8C').instructors, ['IN3', 'IN2', 'IN1']);
   check('seating: the far table reads its own number', seatOf('8C').seat, '8C');
 
   // 8A is empty on the sample, and an empty seat is not a seating.
@@ -966,7 +991,163 @@ const DECK_FILLER_ROWS = [
   const seated = api.parseSeatingChart_(live);
   const amalie = seated.filter(e => e.occupant === 'Amalie L')[0];
   check('seating: a name over the label still resolves to that seat',
-    [amalie.seat, amalie.instructor], ['1C', 'IN3']);
+    [amalie.seat, amalie.instructors.join(' ')], ['1C', 'IN3 IN2 IN1']);
+}
+
+// 45d2. The chart as it is actually drawn: no seat labels, no side markers,
+//       and three of the four header rows missing the middle pod.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const LIVE = JSON.parse(fs.readFileSync('tests/fixtures/seating-live-layout.json', 'utf8'));
+  const live = () => LIVE.map(r => r.slice());
+
+  const seats = api.parseSeatingChart_(live());
+  const of = name => seats.filter(e => e.occupant === name)[0] || {};
+
+  check('live chart: everybody on it is found', seats.length, 5);
+  check('live chart: nobody is invented', seats.map(e => e.occupant).sort(),
+    ['April V', 'Audrina S', 'Luca B', 'Neil D', 'Sharon Y']);
+
+  // Tables 4 and 3 are named only in the very top header row. Reading each
+  // block on its own header left these five students at no table at all.
+  check('live chart: a table named only once still names its column',
+    [of('Neil D').seat, of('Audrina S').seat], ['4C', '3C']);
+  check('live chart: down the rows in order',
+    [of('Sharon Y').seat, of('Luca B').seat, of('April V').seat],
+    ['4B', '3B', '3A']);
+
+  // Nothing on this chart says which row is which, so position decides, and
+  // the parser records that it did.
+  check('live chart: the rows were named from position',
+    seats.filter(e => e.letterFrom !== 'position'), []);
+
+  // The two instructors are one line apart in the wall column. Per row, the
+  // middle of the pod would have had nobody.
+  check('live chart: everyone in the pod gets both instructors',
+    seats.map(e => (e.instructors || []).join(' ')),
+    ['AZ HR', 'AZ HR', 'AZ HR', 'AZ HR', 'AZ HR']);
+
+  check('live chart: the hour comes off the left of the block',
+    seats.map(e => e.hour), ['7:00', '7:00', '7:00', '7:00', '7:00']);
+
+  // The empty hours are empty, not full of the decoration around them.
+  checkTruthy('live chart: no seat is a time or a wall',
+    !seats.some(e => /^\d+:\d\d$|^Wall$/.test(e.occupant)));
+
+  // The headers on this chart differ by omission, which is not a disagreement.
+  check('live chart: a header missing a table is not a conflict',
+    seats.conflicts, []);
+
+  // Moving a table between hours is, and is said rather than resolved.
+  const moved = live();
+  moved[7][1] = 6;        // the 5:00 header calls column B table 6, not 8
+  const after = api.parseSeatingChart_(moved);
+  check('live chart: a table that moved between hours is reported',
+    after.conflicts.length, 1);
+  check('live chart: and the report says which column and what to what',
+    after.conflicts.length ? [after.conflicts[0].was, after.conflicts[0].now] : [],
+    [8, 6]);
+
+  // On this chart the complete header happens to be the first one. The rule is
+  // not "the first header wins" but "every header together", so the same has
+  // to hold when the complete drawing is further down.
+  const late = live();
+  late[2][9] = '';    // take tables 4 and 3 off the top header
+  late[2][11] = '';
+  late[7][9] = 4;     // and give them to the five o'clock one instead
+  late[7][11] = 3;
+  const fromLater = api.parseSeatingChart_(late);
+  check('live chart: a header further down names the columns just as well',
+    fromLater.map(e => e.seat).sort(), ['3A', '3B', '3C', '4B', '4C']);
+
+  // And with the tables named nowhere at all, those students are not guessed
+  // into a seat -- the chart genuinely does not say which table they are at.
+  const never = live();
+  never[2][9] = '';
+  never[2][11] = '';
+  const nameless = api.parseSeatingChart_(never);
+  check('live chart: a column no header names seats nobody', nameless.length, 0);
+
+  // A unit check on the merge itself, so it is not resting on one fixture.
+  const layout = api.seatingLayout_(
+    [['', 8, '', '', '', 6], ['', 8, '', 7, '', 6]],
+    [{ row: 0, columns: [1, 5] }, { row: 1, columns: [1, 3, 5] }]);
+  check('layout: a column named only by the later header is still known',
+    layout.tableOf[3], 7);
+  check('layout: the columns come back in order', layout.columns, [1, 3, 5]);
+  check('layout: agreeing headers are not a conflict', layout.conflicts, []);
+}
+
+// 45d3. Which chart, and which document it is in.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  // Monday to Friday is the weekday chart; Saturday has its own.
+  const on = iso => api.seatingSheetName_(new Date(iso + 'T12:00:00Z'));
+  check('which chart: a Wednesday', on('2026-08-19'), 'weekdays');
+  check('which chart: a Monday', on('2026-08-17'), 'weekdays');
+  check('which chart: a Friday', on('2026-08-21'), 'weekdays');
+  check('which chart: a Saturday', on('2026-08-22'), 'saturday');
+
+  // Sunday names no chart, and that is an answer rather than a gap -- reading
+  // Saturday's on a Sunday would seat everybody where they sat yesterday.
+  check('which chart: a Sunday has none', on('2026-08-23'), '');
+
+  // The link, however it arrives.
+  const ID = '1AbC-dEf_GhIjKlMnOpQrStUvWxYz0123456789';
+  check('link: a whole address bar',
+    api.spreadsheetIdFromLink_('https://docs.google.com/spreadsheets/d/' + ID +
+      '/edit#gid=0'), ID);
+  check('link: without the tail',
+    api.spreadsheetIdFromLink_('https://docs.google.com/spreadsheets/d/' + ID), ID);
+  check('link: a bare id, for somebody who has done this before',
+    api.spreadsheetIdFromLink_(ID), ID);
+  check('link: with spaces round it', api.spreadsheetIdFromLink_('  ' + ID + ' '), ID);
+  check('link: a link to something else is not half-understood',
+    api.spreadsheetIdFromLink_('https://docs.google.com/document/d/' + ID + '/edit'), '');
+  check('link: prose is not a link',
+    api.spreadsheetIdFromLink_('the one in my drive'), '');
+  check('link: nothing is nothing', api.spreadsheetIdFromLink_(''), '');
+
+  // Setting it: what it says back is what it can actually see.
+  h.addBook('BOOKOK_00000000000000000000',
+    [new FakeSheet('weekdays', [['']]), new FakeSheet('saturday', [['']])],
+    'Centre charts');
+  h.promptAnswer.next = 'https://docs.google.com/spreadsheets/d/BOOKOK_00000000000000000000/edit';
+  api.setSeatingSource();
+  check('link: stored', api.seatingSpreadsheetId_(), 'BOOKOK_00000000000000000000');
+  checkTruthy('link: and it says what it found',
+    h.alerts.join(' ').includes('Centre charts') &&
+    h.alerts.join(' ').includes('Both charts are there'));
+
+  // A document missing one of the tabs is saved, and said so.
+  h.addBook('BOOKHALF_0000000000000000000', [new FakeSheet('weekdays', [['']])], 'Half a chart');
+  h.promptAnswer.next = 'BOOKHALF_0000000000000000000';
+  api.setSeatingSource();
+  check('link: a half-right document is still stored',
+    api.seatingSpreadsheetId_(), 'BOOKHALF_0000000000000000000');
+  checkTruthy('link: with the missing tab named',
+    h.alerts.join(' ').includes('No tab named saturday'));
+
+  // Rubbish is refused and changes nothing.
+  h.promptAnswer.next = 'thats the one on my desktop';
+  api.setSeatingSource();
+  check('link: rubbish leaves the old link alone',
+    api.seatingSpreadsheetId_(), 'BOOKHALF_0000000000000000000');
+  checkTruthy('link: and says what one looks like',
+    h.alerts.join(' ').includes('/spreadsheets/d/'));
+
+  // An empty box is not an instruction to forget the link.
+  h.promptAnswer.next = '   ';
+  api.setSeatingSource();
+  check('link: an empty box leaves it alone', api.seatingSpreadsheetId_(), 'BOOKHALF_0000000000000000000');
 }
 
 // 45e. Matching a hurried chart name to a Daily WOP name.
@@ -1011,15 +1192,15 @@ const DECK_FILLER_ROWS = [
 
   // Formatting, including a student who moved between hours.
   check('format: one seat, one instructor',
-    api.formatSeating_([{ seat: '1C', instructor: 'IN3' }]), '1C | IN3');
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3'] }]), '1C | IN3');
   check('format: two hours, same seat, two instructors',
-    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
-                        { seat: '1C', instructor: 'IN2' }]), '1C | IN3 IN2');
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3'] },
+                        { seat: '1C', instructors: ['IN2'] }]), '1C | IN3 IN2');
   check('format: moved seats',
-    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
-                        { seat: '2A', instructor: 'IN1' }]), '1C, 2A | IN3 IN1');
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3'] },
+                        { seat: '2A', instructors: ['IN1'] }]), '1C, 2A | IN3 IN1');
   check('format: a seat with no instructor beside it',
-    api.formatSeating_([{ seat: '1C', instructor: '' }]), '1C');
+    api.formatSeating_([{ seat: '1C', instructors: [] }]), '1C');
   check('format: nothing found is nothing written', api.formatSeating_([]), '');
 }
 
@@ -1042,10 +1223,11 @@ const DECK_FILLER_ROWS = [
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
     wop.setSelection(1, wopRows.length);
-    const seating = new FakeSheet('Seating Chart', chart,
+    const seating = new FakeSheet('weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
 
-    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number,
       Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = opts.separate
       ? install(ctx, [deck, wop], 'Daily WOP')
@@ -1062,12 +1244,12 @@ const DECK_FILLER_ROWS = [
   }
 
   let r = run();
-  check('seating sheet: seat and instructor land in column N', r.N(0), '1C | IN3');
+  check('seating sheet: seat and instructor land in column N', r.N(0), '1C | IN3 IN2 IN1');
 
   // The chart can live in its own document.
   r = run({ separate: true });
   check('seating sheet: a chart in another spreadsheet works the same',
-    r.N(0), '1C | IN3');
+    r.N(0), '1C | IN3 IN2 IN1');
 
   // A student nobody sat: said out loud, not silently skipped.
   r = run({ students: ['Ghost Student'] });
@@ -1078,7 +1260,7 @@ const DECK_FILLER_ROWS = [
   // Two hours in different seats.
   r = run({ place: [[3, 15, 'Amalie L'], [5, 13, 'Amalie L']] });
   check('seating sheet: a student who moved gets both seats',
-    r.N(0), '1C, 2A | IN3 IN1');
+    r.N(0), '1C, 2A | IN3 IN2 IN1');
 
   // "Amalie L" cannot be resolved when two Amalie L-somethings are selected.
   r = run({ students: ['Amalie Laz', 'Amalie Lee'] });
@@ -1089,13 +1271,14 @@ const DECK_FILLER_ROWS = [
 
   // Replacing something already in N is reported rather than done quietly.
   r = run({ existing: '9Z | someone' });
-  check('seating sheet: a stale seat is corrected', r.N(0), '1C | IN3');
+  check('seating sheet: a stale seat is corrected', r.N(0), '1C | IN3 IN2 IN1');
   checkTruthy('seating sheet: and the replacement is named',
     r.said().includes('replaced') && r.said().includes('9Z | someone'));
 
   // Running it twice changes nothing the second time.
-  r = run({ existing: '1C | IN3' });
-  check('seating sheet: an already correct cell is left alone', r.N(0), '1C | IN3');
+  r = run({ existing: '1C | IN3 IN2 IN1' });
+  check('seating sheet: an already correct cell is left alone',
+    r.N(0), '1C | IN3 IN2 IN1');
   checkTruthy('seating sheet: and is not counted as a replacement',
     !r.said().includes('replaced'));
 }
@@ -1124,10 +1307,11 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
-    const seating = new FakeSheet('Seating Chart', chart,
+    const seating = new FakeSheet('weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
 
-    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number,
       Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = install(ctx, [deck, wop, seating], 'Daily WOP');
     const api = loadScript(ctx);
@@ -1202,9 +1386,10 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
-    const seating = new FakeSheet('Seating Chart', chart,
+    const seating = new FakeSheet('weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
-    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number,
       Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = install(ctx, [deck, wop, seating], 'Daily WOP');
     const api = loadScript(ctx);
@@ -1489,9 +1674,10 @@ const DECK_FILLER_ROWS = [
   const deck = new FakeSheet('Deck List',
     [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
   const wop = new FakeSheet('Daily WOP', wopRows, makeGrid(1, 26, '#ffffff'));
-  const seating = new FakeSheet('Seating Chart', chart,
+  const seating = new FakeSheet('weekdays', chart,
     makeGrid(chart.length, chart[0].length, '#ffffff'));
-  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+  const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
   const h = install(ctx, [deck, wop, seating], 'Daily WOP');
   loadScript(ctx).organizeSeatingRows();
@@ -1634,9 +1820,10 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(names.length, 26, '#ffffff'));
-    const seating = new FakeSheet('Seating Chart', chart,
+    const seating = new FakeSheet('weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
-    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number,
       Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = install(ctx, [deck, wop, seating], 'Daily WOP');
     loadScript(ctx).organizeSeatingRows();
@@ -1788,7 +1975,8 @@ const DECK_FILLER_ROWS = [
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(names.length, 26, '#ffffff'));
     wop.setSelection(1, names.length);
-    const seating = new FakeSheet('Seating Chart', chart,
+    // Pinned to a Saturday, so this block reads the Saturday tab throughout.
+    const seating = new FakeSheet('saturday', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-22'), String, Number, Object, Array, RegExp,
@@ -1802,14 +1990,14 @@ const DECK_FILLER_ROWS = [
   // Sat at 1C at noon and 3A at one o'clock: each row gets its own hour.
   const twice = [[3, 15, 'Amalie L'], [10, 11, 'Amalie L']];
   let r = go(['12:00 Amalie Laz', '1:00 Amalie Laz'], twice);
-  check('per hour: the noon row gets the noon seat', r.N(0), '1C | AA');
-  check('per hour: the one o\'clock row gets its own', r.N(1), '3A | DD');
+  check('per hour: the noon row gets the noon seat', r.N(0), '1C | AA BB');
+  check('per hour: the one o\'clock row gets its own', r.N(1), '3A | CC DD');
   checkTruthy('per hour: not reported as an ambiguity',
     !r.said().includes('could be'));
 
   // A row with no hour on it still gets everywhere they sat, as before.
   r = go(['Amalie Laz'], twice);
-  check('no hour: every seat of the day', r.N(0), '1C, 3A | AA DD');
+  check('no hour: every seat of the day', r.N(0), '1C, 3A | AA BB CC DD');
 
   // A row headed at an hour they were not there is not given someone else's
   // seat, and says which hour it looked for.
