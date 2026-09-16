@@ -634,12 +634,50 @@ student's data.
 just returns the sign-in page — with a perfectly normal `200`, which is why
 `looksLikeLoginPage_` exists rather than trusting the status code.
 
-**Tools → Set Radius session cookie** stores a cookie copied from a logged-in
-browser in Script Properties. It is not in the spreadsheet and is not visible
-to people the sheet is shared with, and no password is stored anywhere. The
-trade-off is that it expires; when it does, the import says so plainly.
-**Tools → Test Radius connection** checks the cookie *and* the roster without
-touching the spreadsheet.
+**Tools → Radius: sign in** stores a cookie copied from a logged-in browser in
+Script Properties. It is not in the spreadsheet and is not visible to people
+the sheet is shared with, and no password is stored anywhere. The trade-off is
+that it expires; when it does, the import says so plainly. **Tools → Radius:
+test connection** checks the cookie *and* the roster without touching the
+spreadsheet.
+
+#### Getting the cookie
+
+The steps are **in the dialog itself** — that is the moment somebody needs
+them, and instructions filed somewhere else are instructions nobody reads.
+Repeated here so they exist in both places:
+
+1. In a normal browser tab, sign in to **radius.mathnasium.com** as usual.
+2. Press **F12** to open DevTools (or right-click → **Inspect**).
+3. Click the **Network** tab. If it is not visible, click the **»** at the end
+   of the tab row.
+4. With DevTools open, press **F5** to reload. A list of requests fills in.
+5. Click the **first row** — it is named after the page you are on.
+6. Find **Request Headers**, scroll to the line starting **`Cookie:`**, and
+   right-click → **Copy value**.
+7. Paste it into the box. A leading `Cookie:`, surrounding quotes, or a paste
+   that wrapped over several lines are all tidied up.
+
+In Firefox, or if there is no Network tab: DevTools → **Storage** (Firefox) or
+**Application** (Chrome, Edge) → **Cookies** → `https://radius.mathnasium.com`,
+and copy **all** of them joined as `name=value; name=value`. Not just the one
+that looks important — Radius needs the sign-in cookie and its antiforgery
+partner together.
+
+#### The one thing not to do
+
+**Do not use the Console and `document.cookie`.** It is the first thing the
+internet suggests for this and it is wrong here: the sign-in cookie is
+HttpOnly, so `document.cookie` cannot see it and silently leaves it out. What
+you get looks exactly like a cookie string and fails later as a sign-in page,
+which is the hardest kind of wrong to diagnose.
+
+So the save step checks for it. If none of the cookies pasted look like a
+sign-in cookie, it **still saves** — Radius could rename its cookie and
+refusing on a name I happen to know would lock somebody out of a tool that
+would have worked — but it says plainly that this is probably a
+`document.cookie` paste and points at the Network tab method. The list of
+names it recognises is `AUTH_COOKIE_NAMES_` in `Radius.gs`.
 
 ### How names are matched
 

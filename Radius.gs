@@ -21,27 +21,184 @@
 // Session cookie
 // ------------------------------------------------------------------
 
-/** Menu entry: stores the session cookie without going near Project Settings. */
-function setRadiusCookie() {
-  const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt('Radius session cookie',
-    'In a browser logged in to Radius, open DevTools → Application → Cookies, ' +
-    'and copy the whole cookie string for radius.mathnasium.com.\n\n' +
-    'It is stored in this script\'s properties, not in the spreadsheet, and is ' +
-    'not visible to people you share the sheet with.',
-    ui.ButtonSet.OK_CANCEL);
+/**
+ * Names browsers give the cookie that actually proves you are signed in.
+ *
+ * All of these are marked HttpOnly, which is the whole reason the console
+ * trick below does not work: script on the page cannot read them, and neither
+ * can document.cookie. If a pasted string contains none of them it probably
+ * came from there, and would fail later with a sign-in page and no clue why.
+ */
+const AUTH_COOKIE_NAMES_ = ['.aspnet.applicationcookie', '.aspnetcore.identity.application',
+  '.aspxauth', '.aspnet.cookies', '.aspnet.federationauthentication'];
 
-  if (response.getSelectedButton() !== ui.Button.OK) return;
+/**
+ * Tidies a pasted cookie string into what UrlFetchApp wants to send.
+ *
+ * People paste the whole header line, quotes and all, straight out of
+ * DevTools, and a leading "Cookie:" or a stray newline would be sent as part
+ * of the first cookie's name. Stripping them is not being clever with the
+ * input -- it is accepting the exact thing the instructions tell them to copy.
+ */
+function normalizeCookieString_(raw) {
+  let text = String(raw == null ? '' : raw).trim();
+  text = text.replace(/^cookie\s*:\s*/i, '');          // the header name
+  text = text.replace(/^["']|["']$/g, '');              // "Copy value" quotes
+  return text.replace(/\s+/g, ' ').trim();             // a paste that wrapped
+}
 
-  const cookie = String(response.getResponseText()).trim();
-  if (!cookie) {
-    showError_('Nothing entered — the stored cookie was left as it was.');
-    return;
+/**
+ * What is wrong with a pasted cookie string, in words, or '' if it looks fine.
+ *
+ * Only the first is fatal. The second is a warning because Radius could rename
+ * its sign-in cookie tomorrow and refusing on a name I happen to know would
+ * lock somebody out of a tool that would have worked.
+ */
+function cookieComplaint_(cookie) {
+  if (cookie.indexOf('=') === -1) {
+    return 'That does not look like a cookie string — there is no "=" in it. ' +
+      'A cookie string looks like "name=value; othername=othervalue".';
   }
+
+  const lower = cookie.toLowerCase();
+  const hasAuth = AUTH_COOKIE_NAMES_.some(function (name) {
+    return lower.indexOf(name) !== -1;
+  });
+  if (!hasAuth) {
+    return 'Saved, but none of the cookies in it look like the sign-in one. ' +
+      'If you got this from the Console with document.cookie, that is the ' +
+      'problem: the sign-in cookie is HttpOnly and document.cookie leaves it ' +
+      'out, so what you get looks right and will not work. Use the Network ' +
+      'tab method instead. If you did use the Network tab, Radius may simply ' +
+      'have renamed its cookie — run Test connection and see.';
+  }
+  return '';
+}
+
+/**
+ * Menu entry: the instructions for getting a session cookie, and a box to put
+ * it in.
+ *
+ * The instructions are here rather than in a document because this is the
+ * moment somebody needs them, and a document nobody has open is a document
+ * nobody reads. It is a dialog rather than a prompt box for the same reason:
+ * a prompt cannot show six numbered steps and the one thing not to do.
+ */
+function setRadiusCookie() {
+  const stored = PropertiesService.getScriptProperties()
+    .getProperty(CONFIG.RADIUS.COOKIE_PROPERTY);
+
+  const step = 'margin: 0 0 8px; padding-left: 4px;';
+  const html = '<div style="font-family: Arial, sans-serif; font-size: 14px; ' +
+    'line-height: 1.55; padding: 5px; color: #1e293b;">' +
+
+    '<p style="margin: 0 0 10px;">Radius has no proper sign-in for scripts, so ' +
+    'this borrows the one from your own browser. It lasts until Radius signs ' +
+    'you out — when the import starts saying you are not signed in, come back ' +
+    'here and do this again.</p>' +
+
+    '<div style="background: #f8fafc; border: 1px solid #e2e8f0; ' +
+    'border-radius: 6px; padding: 12px; margin-bottom: 10px;">' +
+    '<div style="font-weight: bold; margin-bottom: 6px;">Getting it ' +
+    '(Chrome or Edge)</div>' +
+    '<ol style="margin: 0; padding-left: 20px;">' +
+    '<li style="' + step + '">In a normal browser tab, sign in to ' +
+    '<b>radius.mathnasium.com</b> as you always do.</li>' +
+    '<li style="' + step + '">Press <b>F12</b> to open DevTools. (Or right-click ' +
+    'the page → <b>Inspect</b>.)</li>' +
+    '<li style="' + step + '">Click the <b>Network</b> tab along the top of ' +
+    'DevTools. If you cannot see it, click the <b>»</b> at the end of the row.</li>' +
+    '<li style="' + step + '">With DevTools still open, press <b>F5</b> to ' +
+    'reload the page. A list of requests fills in.</li>' +
+    '<li style="' + step + '">Click the <b>first row</b> in that list — it will ' +
+    'be named after the page you are on.</li>' +
+    '<li style="' + step + '">In the panel that opens, find <b>Request ' +
+    'Headers</b> and scroll to the line starting <b>Cookie:</b>. Right-click it ' +
+    '→ <b>Copy value</b>, or select the whole line and copy it.</li>' +
+    '<li style="' + step + '">Paste it below. A leading "Cookie:" is fine — it ' +
+    'gets tidied up.</li>' +
+    '</ol></div>' +
+
+    '<div style="background: #fef2f2; border: 1px solid #fecaca; ' +
+    'border-radius: 6px; padding: 10px; margin-bottom: 10px;">' +
+    '<b>Do not use the Console and <code>document.cookie</code>.</b> It is the ' +
+    'first thing the internet suggests and it quietly leaves out the sign-in ' +
+    'cookie, which is HttpOnly. You get a string that looks right and fails ' +
+    'with a sign-in page.' +
+    '</div>' +
+
+    '<details style="margin-bottom: 10px;"><summary style="cursor: pointer;">' +
+    'Firefox, or no Network tab</summary>' +
+    '<div style="padding: 8px 0 0 4px;">DevTools → <b>Storage</b> in Firefox, ' +
+    '<b>Application</b> in Chrome and Edge → <b>Cookies</b> → ' +
+    '<b>https://radius.mathnasium.com</b>. That lists every cookie by name and ' +
+    'value. Copy <b>all</b> of them, joined as ' +
+    '<code>name=value; name=value</code> — not just the one that looks ' +
+    'important. Radius needs the sign-in cookie and its antiforgery partner ' +
+    'together.</div></details>' +
+
+    '<form id="cookieForm">' +
+    '<textarea name="cookie" id="cookie" placeholder="' +
+    (stored ? 'A cookie is already stored. Paste a new one to replace it.'
+            : 'Paste the whole Cookie line here') +
+    '" style="width: 100%; height: 90px; font-family: Consolas, monospace; ' +
+    'font-size: 12px; padding: 8px; box-sizing: border-box; border: 1px solid ' +
+    '#cbd5e1; border-radius: 6px;"></textarea>' +
+    '</form>' +
+
+    '<p style="color: #64748b; margin: 8px 0;">It is stored in this script\'s ' +
+    'properties, not in the spreadsheet, so people you share the sheet with ' +
+    'cannot see it. It is still a live key to your Radius account while it ' +
+    'lasts — do not paste it into a cell, a chat or a screenshot.</p>' +
+
+    '<div id="err" style="display: none; background: #fef2f2; color: #b91c1c; ' +
+    'border: 1px solid #fecaca; border-radius: 6px; padding: 8px; ' +
+    'margin-bottom: 8px;"></div>' +
+
+    '<button id="go" style="padding: 7px 16px; font-size: 14px; background: ' +
+    '#2563eb; color: white; border: none; border-radius: 6px; cursor: pointer;">' +
+    'Save</button>' +
+
+    '<script>' +
+    'document.getElementById("cookie").focus();' +
+    'document.getElementById("go").onclick = function () {' +
+    '  var go = document.getElementById("go");' +
+    '  var err = document.getElementById("err");' +
+    '  err.style.display = "none";' +
+    '  go.disabled = true; go.textContent = "Saving...";' +
+    '  go.style.background = "#9ca3af";' +
+    '  google.script.run' +
+    '    .withSuccessHandler(function () { google.script.host.close(); })' +
+    '    .withFailureHandler(function (e) {' +
+    '      go.disabled = false; go.textContent = "Save";' +
+    '      go.style.background = "#2563eb";' +
+    '      err.textContent = (e && e.message ? e.message : e);' +
+    '      err.style.display = "block";' +
+    '    })' +
+    '    .saveRadiusCookie_FromUI(document.getElementById("cookieForm"));' +
+    '};' +
+    '</script></div>';
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(600).setHeight(640),
+    'Radius: sign in');
+}
+
+/** Phase two of setRadiusCookie: stores what was pasted. */
+function saveRadiusCookie_FromUI(form) {
+  const cookie = normalizeCookieString_(form && form.cookie);
+  if (!cookie) {
+    throw new Error('Nothing was pasted, so the stored cookie was left as it was.');
+  }
+
+  const complaint = cookieComplaint_(cookie);
+  if (complaint && cookie.indexOf('=') === -1) throw new Error(complaint);
 
   PropertiesService.getScriptProperties()
     .setProperty(CONFIG.RADIUS.COOKIE_PROPERTY, cookie);
-  showError_('Cookie saved. Run Radius → Test connection to check it works.');
+
+  showError_((complaint || 'Cookie saved.') +
+    '\n\nRun Tools → Radius: test connection to check it works.');
 }
 
 function radiusCookie_() {

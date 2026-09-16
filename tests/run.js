@@ -41,6 +41,8 @@ function loadScript(context) {
   changelogColumnPlan_, changelogCreate, changelogGrade,
   changelogLearningPlan, percentValue_, starsFor_, nextOpenDay_,
   previousAssessment_, monthDay_, dayLabel_, monthDayValue_,
+  setRadiusCookie, saveRadiusCookie_FromUI, normalizeCookieString_,
+  cookieComplaint_,
   draftProgressReport, nameColumnFor_, highlightedStudents_, upcomingTopics_,
   masteredTopics_, progressDraft_, topicLines_, PROGRESS_EXTRACTORS,
   progressAssessmentUrl_
@@ -2375,6 +2377,89 @@ const DECK_FILLER_ROWS = [
   checkTruthy('PR: a row with no name in it is refused',
     p.said().includes('No student name'));
   check('PR: and nothing was drafted', p.draft(), '');
+}
+
+// 45ac. Signing in: the instructions, and what comes back from the paste box.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  // The instructions are in the dialog, because that is where somebody is
+  // standing when they need them.
+  api.setRadiusCookie();
+  const dialog = h.dialogs[h.dialogs.length - 1];
+  const shown = dialog.html;
+  checkTruthy('cookie help: it is a dialog, not a one-line prompt',
+    dialog.title === 'Radius: sign in');
+  checkTruthy('cookie help: says which site to sign in to',
+    shown.includes('radius.mathnasium.com'));
+  checkTruthy('cookie help: names the key to press', shown.includes('F12'));
+  checkTruthy('cookie help: names the Network tab', shown.includes('Network'));
+  checkTruthy('cookie help: names the header to copy',
+    shown.includes('Request Headers') && shown.includes('Cookie:'));
+  checkTruthy('cookie help: warns off document.cookie',
+    shown.includes('document.cookie') && shown.includes('HttpOnly'));
+  checkTruthy('cookie help: covers Firefox too', shown.includes('Firefox'));
+  checkTruthy('cookie help: says it expires and what that looks like',
+    shown.includes('signs you out'));
+  checkTruthy('cookie help: says where it is kept and not to spread it',
+    shown.includes('not in the spreadsheet') && shown.includes('screenshot'));
+
+  // A paste straight out of DevTools brings furniture with it.
+  check('cookie tidy: a leading header name',
+    api.normalizeCookieString_('Cookie: a=1; b=2'), 'a=1; b=2');
+  check('cookie tidy: the quotes from "Copy value"',
+    api.normalizeCookieString_('"a=1; b=2"'), 'a=1; b=2');
+  check('cookie tidy: a paste that wrapped over lines',
+    api.normalizeCookieString_('a=1;\n  b=2'), 'a=1; b=2');
+  check('cookie tidy: nothing at all', api.normalizeCookieString_('   '), '');
+  check('cookie tidy: a real one is left alone',
+    api.normalizeCookieString_('.AspNet.ApplicationCookie=xyz'),
+    '.AspNet.ApplicationCookie=xyz');
+
+  // What is wrong with it, said in words.
+  checkTruthy('cookie check: prose is not a cookie string',
+    api.cookieComplaint_('I could not find it').includes('no "=" in it'));
+  check('cookie check: a sign-in cookie passes quietly',
+    api.cookieComplaint_('.AspNet.ApplicationCookie=xyz; __RequestVerificationToken=abc'),
+    '');
+  check('cookie check: the newer ASP.NET Core name passes too',
+    api.cookieComplaint_('.AspNetCore.Identity.Application=xyz'), '');
+  checkTruthy('cookie check: a document.cookie paste is named for what it is',
+    api.cookieComplaint_('ai_user=1; _ga=GA1.2.3')
+      .includes('document.cookie'));
+  checkTruthy('cookie check: and says which way round to do it instead',
+    api.cookieComplaint_('ai_user=1; _ga=GA1.2.3').includes('Network tab'));
+
+  // Saving it.
+  api.saveRadiusCookie_FromUI({ cookie: 'Cookie: .ASPXAUTH=abc; other=1' });
+  check('cookie save: stored tidied up',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("RADIUS_COOKIE")', ctx),
+    '.ASPXAUTH=abc; other=1');
+
+  let refused = '';
+  try { api.saveRadiusCookie_FromUI({ cookie: '   ' }); }
+  catch (e) { refused = e.message; }
+  checkTruthy('cookie save: an empty box is refused', refused.includes('Nothing was pasted'));
+  check('cookie save: and the old one is left alone',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("RADIUS_COOKIE")', ctx),
+    '.ASPXAUTH=abc; other=1');
+
+  // A cookie with no recognisable sign-in name is still saved -- Radius may
+  // rename it -- but the doubt is put in front of the person.
+  api.saveRadiusCookie_FromUI({ cookie: 'mystery=1' });
+  check('cookie save: an unrecognised one is still saved',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("RADIUS_COOKIE")', ctx),
+    'mystery=1');
+  checkTruthy('cookie save: with the doubt said out loud',
+    h.alerts.join(' ').includes('document.cookie'));
+  checkTruthy('cookie save: and always points at the next step',
+    h.alerts.join(' ').includes('test connection'));
 }
 
 // 46. A logged-out response is the sign-in page with a 200, so the status
