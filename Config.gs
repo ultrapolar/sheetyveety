@@ -80,17 +80,24 @@ const CONFIG = {
     // Which values to pull out of each DWP page, and which Daily WOP column
     // each one lands in. Add entries here as more values are identified --
     // every one needs a matching extractor in RADIUS_EXTRACTORS.
+    //
+    // tally names a counter in RADIUS_TALLIES_. A field carrying one is
+    // counted into the figures at the top of the import report, but only
+    // when its value actually reaches a cell. A test asserts every name here
+    // resolves, because a typo would silently count nothing.
     FIELDS: [
       { key: 'problemOfTheWeekFlag', column: 6,  label: 'Problem of the Week' }, // F
-      { key: 'masteryAndAssessment', column: 7,  label: 'Mastery / assessment' },// G
+      { key: 'masteryAndAssessment', column: 7,  label: 'Mastery / assessment',
+        tally: 'masteryAndAssessment' },                                        // G
       { key: 'pagesCompleted',       column: 8,  label: 'Pages completed' },     // H
-      { key: 'finalizedFlag',        column: 10, label: 'Finalized' },           // J
+      { key: 'finalizedFlag',        column: 10, label: 'Finalized',
+        tally: 'finalized' },                                                   // J
       // Column K is the EOD script's Y/P status column, and a deck update is
       // the same thing as a P there. merge: 'statusLetters' folds the P into
       // whatever the cell already holds instead of replacing it, skips rows
       // EOD has already finished, and leaves EOD's markers untouched.
       { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (Y)',
-        merge: 'statusLetters' },                                               // K
+        merge: 'statusLetters', tally: 'deckUpdate' },                          // K
       { key: 'signedIn',             column: 12, label: 'Signed in' },           // L
       { key: 'signedOut',            column: 13, label: 'Signed out' },          // M
       { key: 'sessionSummary',       column: 15, label: 'Session summary',
@@ -98,6 +105,28 @@ const CONFIG = {
       { key: 'internalNotes',        column: 16, label: 'Internal notes',
         prefix: true }                                                          // P
     ],
+
+    // How a finished mastery check reads in column G: "PK3918(P)" for one
+    // the student mastered, "PK3902(F)" for one they completed without
+    // mastering. A row that was only worked on is not a finished check at
+    // all and never appears.
+    //
+    // The report counts these back out of the very string it wrote, so both
+    // halves read the marks from here and cannot drift apart. Changing them
+    // changes what lands in the sheet from the next run onwards; it does not
+    // rewrite what is already there.
+    MASTERY_PASS: 'P',
+    MASTERY_FAIL: 'F',
+
+    // Which assessment statuses the report counts as finished. Matched as
+    // whole words, without regard to case, against the status Radius shows
+    // on the Cool Down tab -- so "Pre completed" and "Post completed" count
+    // and "Pre in progress" does not. Whole words rather than substrings so
+    // that an "incomplete" never reads as a "complete".
+    //
+    // Radius offers pre and post at this centre. A progress check, if yours
+    // words one differently, goes here too.
+    ASSESSMENT_DONE_WORDS: ['completed'],
 
     // How long a session is expected to run, and what to say when it does not.
     //

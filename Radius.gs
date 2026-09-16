@@ -856,12 +856,16 @@ const RADIUS_EXTRACTORS = {
   },
 
   /**
-   * Every completed assignment as "PK3918(100)" or "PK3902(0)", comma
+   * Every completed assignment as "PK3918(P)" or "PK3902(F)", comma
    * separated, in the order the learning plan lists them.
    *
-   * Mastered scores 100, completed-but-not-mastered scores 0. A row that was
-   * only worked on -- neither box ticked -- is left out entirely, so this
-   * column is a record of what was finished rather than what was attempted.
+   * Mastered passes, completed-but-not-mastered fails. A row that was only
+   * worked on -- neither box ticked -- is left out entirely, so this column
+   * is a record of what was finished rather than what was attempted.
+   *
+   * The marks come from CONFIG.RADIUS.MASTERY_PASS and MASTERY_FAIL, which
+   * the report's tally also reads, so what gets written and what gets counted
+   * cannot disagree.
    *
    * The page's own script stops both boxes being ticked at once; if one ever
    * slips through, mastered wins.
@@ -880,7 +884,8 @@ const RADIUS_EXTRACTORS = {
       // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
       const code = formatPkCode_(htmlCellText_(cells[1] === undefined ? '' : cells[1]));
       const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
-      scored.push((code || topic || '(unnamed)') + '(' + (mastered ? '100' : '0') + ')');
+      scored.push((code || topic || '(unnamed)') + '(' +
+        (mastered ? CONFIG.RADIUS.MASTERY_PASS : CONFIG.RADIUS.MASTERY_FAIL) + ')');
     });
     return scored.join(', ');
   },
@@ -1266,6 +1271,137 @@ function buildRadiusPlan_(sheets, selection, log) {
   return plan;
 }
 
+// ------------------------------------------------------------------
+// The day's tally
+// ------------------------------------------------------------------
+
+/**
+ * The figures at the top of the import report: how the day went, as opposed
+ * to how the run went.
+ *
+ * Every one counts what this run actually put in a cell. Not what the column
+ * holds -- a Y somebody typed on Tuesday is not this run's to claim -- and
+ * not what was fetched, because a value the append-or-overwrite choice left
+ * out never reached the sheet at all. So the counting happens at the moment
+ * of writing rather than off the plan, and a student left unticked in the
+ * preview contributes nothing.
+ */
+function RadiusTally_() {
+  return {
+    masteryPass: 0,
+    masteryFail: 0,
+    assessmentsDone: 0,
+    deckUpdates: 0,
+    unfinalized: 0,
+    stillOpen: 0
+  };
+}
+
+/**
+ * Whether an assessment status reads as a finished one.
+ *
+ * Whole-word matching, so an "incomplete" is never read as a "complete".
+ */
+function assessmentIsDone_(label) {
+  const text = String(label == null ? '' : label).toLowerCase();
+  return (CONFIG.RADIUS.ASSESSMENT_DONE_WORDS || []).some(function (word) {
+    const pattern = new RegExp('\\b' + escapeForRegex_(String(word).toLowerCase()) + '\\b');
+    return pattern.test(text);
+  });
+}
+
+/**
+ * One counter per tallied field, named by the field's `tally` in Config.gs.
+ * Each is handed the value that just landed in the cell.
+ */
+const RADIUS_TALLIES_ = {
+  /**
+   * Column G holds the finished mastery checks and then, if one was given,
+   * the assessment status -- all as one comma-separated list. A mastery
+   * check is an item ending in the pass or fail mark; the status is the item
+   * that ends in neither.
+   *
+   * The marks are compared against Config.gs rather than written out here,
+   * so a centre that prefers other letters gets a tally that still counts.
+   */
+  masteryAndAssessment: function (counts, value) {
+    splitList_(value).forEach(function (item) {
+      const mark = (item.match(/\(([^()]*)\)$/) || [])[1];
+      if (mark === CONFIG.RADIUS.MASTERY_PASS) { counts.masteryPass++; return; }
+      if (mark === CONFIG.RADIUS.MASTERY_FAIL) { counts.masteryFail++; return; }
+      if (assessmentIsDone_(item)) counts.assessmentsDone++;
+    });
+  },
+
+  /**
+   * Column J: N is a session that finished with its DWP never finalised --
+   * somebody has to go and finalise it. Blank is a session still running, so
+   * there is nothing to chase yet. A Y needs no counting; it is the whole
+   * point of the column being there.
+   */
+  finalized: function (counts, value) {
+    const text = String(value == null ? '' : value).trim();
+    if (text === CONFIG.RADIUS.UNFINALIZED_VALUE) counts.unfinalized++;
+    else if (!text) counts.stillOpen++;
+  },
+
+  /**
+   * Column K is a merge field: it carries a value only when a letter was
+   * genuinely folded in, and the only letter this import ever adds is the
+   * deck one. So a value arriving here is exactly one deck update, whatever
+   * it sits beside -- "PY" is somebody else's P plus this run's Y.
+   *
+   * An empty value is still turned away rather than trusted to be
+   * impossible, so the count stays right if column K ever stops being a
+   * merge field.
+   */
+  deckUpdate: function (counts, value) {
+    if (String(value == null ? '' : value).trim()) counts.deckUpdates++;
+  }
+};
+
+/**
+ * Counts a value that has just been written. Silent for a field with no
+ * tally; loud for one naming a tally that does not exist, because a typo
+ * there would otherwise just count nothing for the rest of time.
+ */
+function tallyWritten_(counts, field, value) {
+  if (!field.tally) return;
+  const counter = RADIUS_TALLIES_[field.tally];
+  if (!counter) {
+    throw new Error('CONFIG.RADIUS.FIELDS gives column ' +
+      columnLetter_(field.column) + ' the tally "' + field.tally +
+      '", which is not one of: ' + Object.keys(RADIUS_TALLIES_).join(', ') + '.');
+  }
+  counter(counts, value);
+}
+
+/** The tally as report rows, in the order the columns run. */
+function radiusTallyRows_(counts) {
+  const cfg = CONFIG.RADIUS;
+  function columnOf(key) {
+    const field = CONFIG.RADIUS.FIELDS.filter(function (f) {
+      return f.key === key;
+    })[0];
+    return field ? columnLetter_(field.column) : '?';
+  }
+  const mastery = columnOf('masteryAndAssessment');
+  const finalized = columnOf('finalizedFlag');
+  const deck = columnOf('deckNeedsUpdateFlag');
+
+  return [
+    { label: 'Mastery checks passed (' + cfg.MASTERY_PASS + ') in ' + mastery,
+      value: counts.masteryPass },
+    { label: 'Mastery checks failed (' + cfg.MASTERY_FAIL + ') in ' + mastery,
+      value: counts.masteryFail },
+    { label: 'Assessments completed in ' + mastery, value: counts.assessmentsDone },
+    { label: 'Deck updates added to ' + deck, value: counts.deckUpdates },
+    { label: 'Not finalized (' + cfg.UNFINALIZED_VALUE + ') in ' + finalized,
+      value: counts.unfinalized },
+    { label: 'Still in progress (blank) in ' + finalized, value: counts.stillOpen }
+  ];
+}
+
 /**
  * Phase two: write the plan for the chosen students.
  *
@@ -1275,7 +1411,7 @@ function buildRadiusPlan_(sheets, selection, log) {
  * Column K is exempt -- it always uses its own merge.
  */
 function applyRadiusPlan_(sheets, plan, picked, mode, log) {
-  const stats = { imported: 0, skippedCells: 0 };
+  const stats = { imported: 0, skippedCells: 0, tally: RadiusTally_() };
   const columns = {};
   const timing = CONFIG.RADIUS.TIMING;
 
@@ -1298,6 +1434,7 @@ function applyRadiusPlan_(sheets, plan, picked, mode, log) {
 
         if (field.merge === 'statusLetters') {
           column.setValue(student.index, value);
+          tallyWritten_(stats.tally, field, value);
           written.push(field.label + ': ' + value);
           return;
         }
@@ -1306,12 +1443,16 @@ function applyRadiusPlan_(sheets, plan, picked, mode, log) {
           if (mode === 'skip') { stats.skippedCells++; return; }
           if (mode === 'append') {
             column.setValue(student.index, current + ' | ' + value);
+            // Counted on what this run added, not on the joined cell: the
+            // half that was already there was counted the day it was written.
+            tallyWritten_(stats.tally, field, value);
             written.push(field.label + ': ' + current + ' | ' + value);
             return;
           }
         }
 
         column.setValue(student.index, value);
+        tallyWritten_(stats.tally, field, value);
         if (String(value) !== '') written.push(field.label + ': ' + value);
       });
 
@@ -1637,6 +1778,7 @@ function applyRadiusPlan_FromUI(formObject) {
       CONFIG.RADIUS.ABSENT_MARK + '" in the sign-in and sign-out columns.');
   });
 
+  // How the run went, then how the day went, then which columns were touched.
   showReport_('Radius Import', '🔗 Import Summary', [
     { label: 'Students written', value: stats.imported },
     { label: 'Left out', value: plan.students.length - picked.length },
@@ -1648,9 +1790,10 @@ function applyRadiusPlan_FromUI(formObject) {
       alert: (plan.unreachable || []).length > 0 },
     { label: 'Could not be fetched', value: plan.problems.length,
       alert: plan.problems.length > 0 },
-    { label: 'Cells left alone', value: stats.skippedCells },
+    { label: 'Cells left alone', value: stats.skippedCells }
+  ].concat(radiusTallyRows_(stats.tally), [
     { label: 'Columns', value: radiusColumnList_() }
-  ], log);
+  ]), log);
 }
 
 /**

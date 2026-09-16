@@ -29,7 +29,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-421 assertions covering the parsing rules and both scripts end to end,
+593 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -193,10 +193,10 @@ the replacement is named in the report. One already correct is left alone.
 | Column | Field | Written as |
 | --- | --- | --- |
 | F | Problem of the Week | `Y`, or blank |
-| G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
+| G | Mastery / assessment | `PK3918(P), PK3902(F), Pre completed` |
 | H | Pages completed | the number |
 | J | Finalized | `Y`; `N` once the session is over and it still is not |
-| K | Deck update | `P`, folded into the existing cell |
+| K | Deck update | `Y`, folded into the existing cell |
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
 | O | Session summary | `ALB: ` then the note text |
@@ -221,6 +221,46 @@ leaves empty is never stamped, and re-importing does not stack the mark.
 An empty field returns empty — that is a real answer. A **missing** element
 throws instead, because it means the page changed shape, and a wrong value is
 worse than a loud failure.
+
+### The day's tally
+
+The import report opens with how the run went — students written, left out,
+could not be fetched — and then, before the column list, six figures on how the
+**day** went:
+
+| Figure | Counts |
+| --- | --- |
+| Mastery checks passed (P) in G | every `(P)` written to column G |
+| Mastery checks failed (F) in G | every `(F)` |
+| Assessments completed in G | statuses reading as finished — `Pre completed`, `Post completed`, and any progress check worded the same way |
+| Deck updates added to K | the `Y`s this run folded into column K |
+| Not finalized (N) in J | sessions that ended without the DWP being finalised |
+| Still in progress (blank) in J | sessions still running |
+
+**They count what actually reached a cell**, not what the column holds and not
+what was fetched:
+
+- A `Y` somebody typed on Tuesday is not this run's to claim.
+- A student left unticked in the preview contributes nothing.
+- A cell the append-or-overwrite choice left alone was never written, so it is
+  not counted. On **append** only the half this run added is counted; the half
+  that was already there was counted the day it was written.
+- An absent student's `?` touches neither G, J nor K, so they add nothing to
+  any of the six.
+
+So the figures are a record of the import, not an audit of the sheet. Reading
+them as the latter would credit the run with everyone else's typing.
+
+A finished assessment is recognised by whole word against
+`CONFIG.RADIUS.ASSESSMENT_DONE_WORDS` — `['completed']` — so `Pre in progress`
+is not counted and a hypothetical `Pre incomplete` is not mistaken for one. If
+your centre's Radius words a finished status some other way, add it there.
+
+Which columns are counted is set by a `tally:` on the field in
+`CONFIG.RADIUS.FIELDS`, naming a counter in `RADIUS_TALLIES_`. The labels take
+their column letters from the same config, so moving a column moves its label
+with it. A `tally:` naming a counter that does not exist throws rather than
+quietly counting nothing, and a test asserts every name in the config resolves.
 
 ### Only today's session
 
@@ -335,19 +375,20 @@ The Mathlete score is last and only appears when Radius carries one.
 ### Column K is shared with the EOD script
 
 Column K is `CONFIG.WOP_COL.STATUS` — the Y/P column EOD reads and writes.
-A deck update belongs there, because **a deck update and a P are the same
-thing**: EOD writes pink into Deck List column C, and SOD then moves that
-student's queue into column E. That is what Radius calls a deck update.
+A deck update belongs there, because it is an instruction to EOD about that
+student's Deck List row.
 
-So the import writes **`P`**, never `Y`. A `Y` there would read as *finish a
-task* and make EOD advance the student's Deck List row.
+The import writes **`Y`**: the student worked through their deck, so EOD should
+advance them — archive column B to the history column and pull the next item
+out of column E. Change `deckNeedsUpdateFlag` to return `'P'` if a deck update
+should instead mark them pink for new paperwork without advancing the task.
 
 Because the column is shared, that one field writes differently from the rest
 (`merge: 'statusLetters'` in the field config):
 
-- The P is **folded into** whatever the cell already holds rather than
-  replacing it, so a hand-typed `Y` plus a deck update becomes `YP`.
-- A cell that already carries a P is left alone rather than doubled.
+- The Y is **folded into** whatever the cell already holds rather than
+  replacing it, so a hand-typed `P` plus a deck update becomes `PY`.
+- A cell that already carries a Y is left alone rather than doubled.
 - A row EOD has already finished — green — is **skipped entirely**, text and
   colour untouched, and the report says why.
 - A cell holding one of EOD's markers (`YYP - B empty?`,
@@ -367,18 +408,23 @@ column A.
 Column U lists every assignment that was **finished**, in learning-plan order:
 
 ```
-PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)
+PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F)
 ```
 
-`100` is Completed & Mastered, `0` is Completed but Not Mastered. A row that
+`P` is Completed & Mastered, `F` is Completed but Not Mastered. A row that
 was only *worked on* — neither box ticked — is left out, so the column records
 what was finished rather than what was attempted. On the completed sample all
 seven topics were worked on but only six were finished, and only three of
 those mastered.
 
+The two marks are `CONFIG.RADIUS.MASTERY_PASS` and `MASTERY_FAIL`. The report's
+tally reads them from there too, so what gets written and what gets counted
+cannot drift apart. Changing them changes what lands in the sheet from the next
+run onwards; it does not rewrite what is already there.
+
 The page writes `PK-3918-00`; the trailing segment is a revision number and is
 dropped, giving `PK3918`. A completed row with no PK code falls back to its
-topic name rather than emitting a bare `(100)`.
+topic name rather than emitting a bare `(P)`.
 
 The page's own script stops both boxes being ticked at once. If one ever slips
 through, mastered wins.

@@ -37,7 +37,8 @@ function loadScript(context) {
   importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
-  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_
+  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
+  RadiusTally_, RADIUS_TALLIES_, tallyWritten_, radiusTallyRows_, assessmentIsDone_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -112,6 +113,15 @@ function confirmRadiusImport(s, options) {
 /** The report shown after the import, which is always the last dialog. */
 function lastDialog(s) {
   return s.harness.dialogs[s.harness.dialogs.length - 1];
+}
+
+/** The stat table at the top of a report dialog, as a label -> value map. */
+function reportStats(s) {
+  const stats = {};
+  const row = /<tr><td[^>]*>([\s\S]*?)<\/td><td[^>]*><b>([\s\S]*?)<\/b><\/td><\/tr>/g;
+  let m;
+  while ((m = row.exec(lastDialog(s).html)) !== null) stats[m[1].trim()] = m[2].trim();
+  return stats;
 }
 
 // ==========================================================================
@@ -1892,7 +1902,7 @@ const DECK_FILLER_ROWS = [
 }
 
 
-// 52b. Mastery scores: completed rows only, as PK code plus a percentage.
+// 52b. Mastery scores: completed rows only, as PK code plus a pass/fail mark.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
     Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
@@ -1905,12 +1915,12 @@ const DECK_FILLER_ROWS = [
   // absent from the list even though all seven were worked on.
   check('mastery: completed page, worked-on-only row omitted',
     score('dwp-complete.html'),
-    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)');
+    'PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F)');
   check('mastery: order follows the learning plan, not mastered-first',
-    score('dwp-complete.html').split(', ')[0], 'PK3918(100)');
+    score('dwp-complete.html').split(', ')[0], 'PK3918(P)');
 
   check('mastery: partly filled page', score('dwp-filled.html'),
-    'PK3909(100), PK3902(0)');
+    'PK3909(P), PK3902(F)');
   check('mastery: nothing completed yet', score('dwp-live.html'), '');
 
   // The page shows PK-3918-00; the sheet wants PK3918.
@@ -1932,10 +1942,10 @@ const DECK_FILLER_ROWS = [
     '<td><input id="1_CBNM_checkbox x" checked /></td>' +
     '</tr></tbody>';
   check('mastery: mastered wins if both are somehow ticked',
-    api.RADIUS_EXTRACTORS.masteryScores(bothTicked), 'PK1234(100)');
+    api.RADIUS_EXTRACTORS.masteryScores(bothTicked), 'PK1234(P)');
 
   // A completed row with no PK code falls back to the topic name rather than
-  // emitting a bare "(100)".
+  // emitting a bare "(P)".
   const noCode =
     '<tbody id="dwpPKsBody"><tr>' +
     '<td><div></div></td><td><div></div></td><td><div>Unnamed Topic</div></td>' +
@@ -1944,7 +1954,7 @@ const DECK_FILLER_ROWS = [
     '<td><input id="2_CBNM_checkbox x" /></td>' +
     '</tr></tbody>';
   check('mastery: falls back to the topic name when the PK cell is blank',
-    api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(100)');
+    api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(P)');
 }
 
 // 52c. The Daily WOP column layout, and the values that land in each.
@@ -1982,14 +1992,14 @@ const DECK_FILLER_ROWS = [
   // Column G folds the assessment status onto the end of the mastery list.
   check('column G: mastery plus assessment, one comma-separated list',
     get('masteryAndAssessment'),
-    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0), ' +
+    'PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F), ' +
     'Pre completed');
   check('column G: empty when nothing is finished',
     get('masteryAndAssessment', LIVE), '');
   check('column G: mastery alone when no assessment was given',
     api.RADIUS_EXTRACTORS.masteryAndAssessment(
       dwp('filled')),
-    'PK3909(100), PK3902(0)');
+    'PK3909(P), PK3902(F)');
 
   // The layout itself, so a stray edit to Config.gs shows up here.
   const layout = {};
@@ -2025,6 +2035,111 @@ const DECK_FILLER_ROWS = [
     .concat(api.CONFIG.RADIUS.TIMING.SHADE_FIELDS);
   check('every timing field key resolves to a real field',
     timingKeys.filter(k => fieldKeys.indexOf(k) === -1), []);
+}
+
+// 52c2. The day's tally: what the figures at the top of the report count.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+  const field = key => api.CONFIG.RADIUS.FIELDS.filter(f => f.key === key)[0];
+  const count = (key, value) => {
+    const counts = api.RadiusTally_();
+    api.tallyWritten_(counts, field(key), value);
+    return counts;
+  };
+
+  // Column G carries the finished mastery checks and then the assessment
+  // status, all in one list. Each item is counted as whichever it is.
+  let c = count('masteryAndAssessment',
+    'PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F), Pre completed');
+  check('tally G: passes, fails and the assessment, from one string',
+    [c.masteryPass, c.masteryFail, c.assessmentsDone], [3, 3, 1]);
+
+  c = count('masteryAndAssessment', 'PK3909(P), PK3902(F)');
+  check('tally G: no assessment given, so none counted',
+    [c.masteryPass, c.masteryFail, c.assessmentsDone], [1, 1, 0]);
+
+  c = count('masteryAndAssessment', '');
+  check('tally G: an empty column counts nothing',
+    [c.masteryPass, c.masteryFail, c.assessmentsDone], [0, 0, 0]);
+
+  // An unfinished assessment is not a finished one.
+  c = count('masteryAndAssessment', 'PK3918(P), Pre in progress');
+  check('tally G: an in-progress assessment is not counted',
+    [c.masteryPass, c.assessmentsDone], [1, 0]);
+
+  // Pre, post -- and anything else worded as finished -- land in one figure.
+  c = count('masteryAndAssessment', 'Post completed');
+  check('tally G: a post assessment counts the same as a pre', c.assessmentsDone, 1);
+
+  // A topic name with brackets of its own must not read as a mark, and the
+  // no-code fallback still ends in one.
+  c = count('masteryAndAssessment', 'Fractions (advanced)(P), Unnamed Topic(F)');
+  check('tally G: a bracketed topic name is not mistaken for a mark',
+    [c.masteryPass, c.masteryFail], [1, 1]);
+
+  // Column J: an N has to be chased, a blank is a session still running.
+  check('tally J: N is a DWP left unfinalised',
+    [count('finalizedFlag', 'N').unfinalized, count('finalizedFlag', 'N').stillOpen],
+    [1, 0]);
+  check('tally J: blank is a session still in progress',
+    [count('finalizedFlag', '').unfinalized, count('finalizedFlag', '').stillOpen],
+    [0, 1]);
+  check('tally J: a finalised Y is neither',
+    [count('finalizedFlag', 'Y').unfinalized, count('finalizedFlag', 'Y').stillOpen],
+    [0, 0]);
+
+  // Column K only ever arrives here having genuinely gained its Y, so the
+  // letters it sits beside are somebody else's and change nothing.
+  check('tally K: a Y into an empty cell is one deck update',
+    count('deckNeedsUpdateFlag', 'Y').deckUpdates, 1);
+  check('tally K: a Y folded onto a hand-typed P is still one',
+    count('deckNeedsUpdateFlag', 'PY').deckUpdates, 1);
+  check('tally K: an empty value is not a deck update',
+    count('deckNeedsUpdateFlag', '').deckUpdates, 0);
+
+  // A field with no tally is silent; one naming a tally that does not exist
+  // is loud, because a typo would otherwise count nothing for ever.
+  const quiet = api.RadiusTally_();
+  api.tallyWritten_(quiet, field('pagesCompleted'), '33');
+  check('tally: an untallied field counts nothing', quiet,
+    api.RadiusTally_());
+  let err = '';
+  try {
+    api.tallyWritten_(api.RadiusTally_(), { column: 7, tally: 'nonesuch' }, 'x');
+  } catch (e) { err = e.message; }
+  checkTruthy('tally: an unknown tally name is refused, by name',
+    err.includes('nonesuch') && err.includes('column G'));
+
+  // Every tally named in Config.gs must resolve, for the same reason.
+  check('every tally name in FIELDS resolves to a counter',
+    api.CONFIG.RADIUS.FIELDS
+      .filter(f => f.tally && !api.RADIUS_TALLIES_[f.tally])
+      .map(f => f.key), []);
+
+  // Whole words, so "incomplete" is not read as "complete".
+  check('assessment done: the finished statuses', [
+    api.assessmentIsDone_('Pre completed'), api.assessmentIsDone_('Post completed'),
+    api.assessmentIsDone_('Progress check completed')
+  ], [true, true, true]);
+  check('assessment done: the unfinished ones', [
+    api.assessmentIsDone_('Pre in progress'), api.assessmentIsDone_('Post in progress'),
+    api.assessmentIsDone_('Pre incomplete'), api.assessmentIsDone_(''),
+    api.assessmentIsDone_(null)
+  ], [false, false, false, false, false]);
+
+  // The report labels name the columns from the config, so moving a column
+  // moves the label with it.
+  const rows = api.radiusTallyRows_(api.RadiusTally_());
+  check('tally rows: one line each, six in all', rows.length, 6);
+  checkTruthy('tally rows: named after the columns they count',
+    rows[0].label.endsWith(' in G') && rows[4].label.endsWith(' in J') &&
+    rows[3].label.endsWith(' to K'));
+  checkTruthy('tally rows: the marks come from the config, not the label',
+    rows[0].label.includes('(' + api.CONFIG.RADIUS.MASTERY_PASS + ')') &&
+    rows[1].label.includes('(' + api.CONFIG.RADIUS.MASTERY_FAIL + ')'));
 }
 
 // 52d. Column K is shared with the EOD script, so the deck-update P is folded
@@ -2744,6 +2859,162 @@ const DECK_FILLER_ROWS = [
   check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
   checkTruthy('unset roster URL: says what to set',
     s.harness.alerts.some(a => String(a).includes('ROSTER_URL')));
+}
+
+
+// 55. The day's tally on the finished report: counted from what actually
+//     reached a cell, summed over every student the run wrote.
+{
+  // Two students, both on the completed page, so the figures are the single
+  // student's doubled -- which is the thing worth asserting about a sum.
+  // Both sit the same completed session, so each contributes the same figures
+  // and the report should show them doubled -- the thing worth asserting
+  // about a sum. The second student's page is the fixture under their own
+  // name, because the import refuses a page belonging to somebody else.
+  function twoComplete(mode, existingG) {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['John Roe', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }, { name: 'John Roe' }],
+      { start: 1, rows: 2 }, '2026-08-22');
+    if (existingG !== undefined) {
+      s.wop.values[0][6] = existingG;
+      s.wop.values[1][6] = existingG;
+    }
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('complete');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? rosterReply(['Amalie Laz', 'John Roe'])
+        : (url.indexOf('studentId=1001') !== -1
+            ? page.replace('<title>Amalie Laz</title>', '<title>John Roe</title>')
+            : page) });
+    confirmRadiusImport(s, { mode: mode });
+    return s;
+  }
+
+  let stats = reportStats(twoComplete('overwrite'));
+  check('tally report: mastery passes summed over both students',
+    stats['Mastery checks passed (P) in G'], '6');
+  check('tally report: and the fails', stats['Mastery checks failed (F) in G'], '6');
+  check('tally report: one finished assessment each',
+    stats['Assessments completed in G'], '2');
+  check('tally report: one deck update each',
+    stats['Deck updates added to K'], '2');
+  check('tally report: both were finalised, so nothing to chase',
+    stats['Not finalized (N) in J'], '0');
+  check('tally report: and neither is still running',
+    stats['Still in progress (blank) in J'], '0');
+
+  // A cell the operator chose to leave alone was never written, so it is not
+  // counted. Overwriting the same cell is.
+  stats = reportStats(twoComplete('skip', 'typed by hand'));
+  check('tally report: a skipped column G counts nothing',
+    [stats['Mastery checks passed (P) in G'], stats['Assessments completed in G']],
+    ['0', '0']);
+  stats = reportStats(twoComplete('overwrite', 'typed by hand'));
+  check('tally report: overwriting the same cell does count',
+    stats['Mastery checks passed (P) in G'], '6');
+
+  // Students left unticked in the preview contribute nothing at all.
+  const onlyTicked = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['John Roe', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }, { name: 'John Roe' }],
+      { start: 1, rows: 2 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('complete');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1
+        ? rosterReply(['Amalie Laz', 'John Roe'])
+        : (url.indexOf('studentId=1001') !== -1
+            ? page.replace('<title>Amalie Laz</title>', '<title>John Roe</title>')
+            : page) });
+    confirmRadiusImport(s, { only: [0] });
+    return reportStats(s);
+  })();
+  check('tally report: an unticked student is not counted',
+    [onlyTicked['Mastery checks passed (P) in G'],
+     onlyTicked['Assessments completed in G'],
+     onlyTicked['Deck updates added to K']], ['3', '1', '1']);
+
+  const onlyOne = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('complete');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return reportStats(s);
+  })();
+  check('tally report: one student alone is the unsummed figure',
+    [onlyOne['Mastery checks passed (P) in G'],
+     onlyOne['Mastery checks failed (F) in G'],
+     onlyOne['Assessments completed in G'],
+     onlyOne['Deck updates added to K']], ['3', '3', '1', '1']);
+
+  // A session still running leaves column J blank, and that is its own count.
+  const live = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('live');
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return reportStats(s);
+  })();
+  check('tally report: a session still running is counted as still open',
+    [live['Still in progress (blank) in J'], live['Not finalized (N) in J']],
+    ['1', '0']);
+  check('tally report: nothing was finished, so nothing is counted',
+    [live['Mastery checks passed (P) in G'],
+     live['Assessments completed in G'], live['Deck updates added to K']],
+    ['0', '0', '0']);
+
+  // A session that finished without being finalised is the one that needs
+  // chasing, and is counted apart from the still-running ones.
+  const unfinalised = (function () {
+    const s = scenario([HEADER, ...DECK_FILLER_ROWS,
+      ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '']],
+      [{ name: 'Amalie Laz' }], { start: 1, rows: 1 }, '2026-08-22');
+    s.harness.scriptProps.RADIUS_COOKIE = 'session=abc';
+    vm.runInContext(
+      'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
+      'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    const page = dwp('complete').replace(/finalizedDate\s*=\s*'[^']*'/g,
+      "finalizedDate = ''");
+    s.harness.fetchHandler.value = url => ({ code: 200, body:
+      url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
+    confirmRadiusImport(s);
+    return reportStats(s);
+  })();
+  check('tally report: an unfinalised finished session is counted as N',
+    [unfinalised['Not finalized (N) in J'],
+     unfinalised['Still in progress (blank) in J']], ['1', '0']);
+
+  // The figures sit above the column list, which stays the last line.
+  const html = lastDialog(twoComplete('overwrite')).html;
+  checkTruthy('tally report: the figures come before the column list',
+    html.indexOf('Mastery checks passed') < html.indexOf('F, G, H, J, K, L, M, O, P'));
+  checkTruthy('tally report: and after the run figures',
+    html.indexOf('Students written') < html.indexOf('Mastery checks passed'));
 }
 
 
