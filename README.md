@@ -41,7 +41,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 
 | Menu | Entries |
 | --- | --- |
-| **SOD** | Pinks Printed · Organise rows from the seating chart |
+| **SOD** | Jump to today · Start a new day · Pinks Printed · Organise rows from the seating chart |
 | **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
@@ -314,6 +314,40 @@ reason the mastered half is present-and-marked rather than left out.**
 many topics of each kind, and what counts as mastered. Change the shape of the
 draft there rather than in the code.
 
+## The day log
+
+The Daily WOP is one long log. Each day opens with a row reading
+`9/17/2026 Thursday` in column A, and that day's students are written under it.
+After a year that is a thousand rows, and finding today means scrolling.
+
+**SOD → Jump to today** puts the cursor on today's row. **SOD → Start a new
+day** adds today's row at the bottom and takes you to it. Neither touches a
+student's data, and both work from any tab — they switch you over.
+
+A header is read by **parsing the date out of it**, not by matching the text,
+so `9/17/2026` and `09/17/2026` are the same day and the day name on the end is
+decoration. A date that does not exist (`2/31/2026`) is a typo, not a day —
+taking it for the last of February would put the cursor on the wrong row and
+say nothing.
+
+**Jump to today says nothing when it works.** The cursor moving is the answer,
+and a dialog every time is one more click on a thing meant to save clicks. It
+speaks only when today is not there yet, or when the day has been **opened
+twice** — two headers means the day's students are split between two blocks and
+nothing downstream would notice, so it names both rows.
+
+**Start a new day refuses twice**, both times because a log that is out of
+order or opened twice is quietly wrong:
+
+- **A day already open** gets no second row. You are taken to the existing one.
+- **A day further ahead already started** — somebody made tomorrow's block —
+  means where today belongs is a judgement. It says which row is ahead and
+  changes nothing.
+
+The new row takes the **formatting of the day before**, so it is not the one
+row on the sheet that is a different colour. On a sheet with no earlier day it
+is written plain and says so.
+
 ## Start of day: organising the rows
 
 **SOD → Organise rows from the seating chart** rewrites columns **A and B** of
@@ -365,6 +399,28 @@ claims would otherwise be deleted by the rebuild — and the one student nobody
 remembered to seat is exactly the one that must not vanish. They are kept,
 listed at the end with no hour and no pod, their row marked yellow, and named
 in the report.
+
+### It organises today's block, not the whole sheet
+
+On a sheet that keeps a day per block, only **today's** block is organised —
+from the row under today's header down to the row before the next day opens.
+Read from row one it would shuffle every student who has ever been in, which
+the pinned-data guard below would refuse, so the organiser simply would not
+run. A sheet with **no** day headers is not a log, and is organised from
+`CONFIG.SEATING.ORGANIZE_START_ROW` as before.
+
+Two consequences worth knowing:
+
+- **Today not opened yet → it refuses.** Organising would write today's
+  students into yesterday's block. It says to use **Start a new day** first.
+- **A day already started below today's → it will not write past the end of
+  today's block.** The list is as long as the chart makes it, and writing past
+  the end would overwrite tomorrow's students with today's. It stops, says how
+  many rows it needs and where to insert them, and changes nothing. Where today
+  is the last block there is nothing below to overwrite, and it simply grows.
+
+Yesterday's filled-in columns are history, not this morning's pinned data, so
+they do not block today.
 
 ### It refuses to run mid-day
 

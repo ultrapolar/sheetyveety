@@ -38,6 +38,15 @@ const CONFIG = {
   // uses here; anything not listed will be treated as unprocessed and re-run.
   DONE_COLORS: ['#00ff00'],
 
+  // The row that opens each day on the Daily WOP: "9/17/2026 Thursday".
+  DAY_HEADER: {
+    DAY_NAMES: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+      'Friday', 'Saturday'],
+
+    // How many rows to add when the sheet has run out of them.
+    ROWS_TO_ADD: 200
+  },
+
   PINK_VALUE: 'pink',
   ARCHIVE_SEPARATOR: ' | ',
 

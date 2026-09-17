@@ -14,6 +14,9 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu('SOD')
+    .addItem('Jump to today', 'jumpToToday')
+    .addItem('Start a new day', 'startNewDay')
+    .addSeparator()
     .addItem('Pinks Printed', 'processSodPinks')
     .addSeparator()
     .addItem('Organise rows from the seating chart', 'organizeSeatingRows')

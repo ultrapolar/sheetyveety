@@ -72,6 +72,30 @@ class FakeRange {
   getValue() { return this.sheet.values[this.row - 1][this.col - 1]; }
   setValue(v) { this.sheet.values[this.row - 1][this.col - 1] = v; this.sheet.writeCount++; return this; }
   setBackground(c) { this.sheet.backgrounds[this.row - 1][this.col - 1] = c; return this; }
+  activate() {
+    this.sheet.activeRange = this;
+    this.sheet.activated = { row: this.row, col: this.col };
+    return this;
+  }
+  /** Format-only copy, which is all the day-header row needs. */
+  copyTo(target, options) {
+    const opts = options || {};
+    for (let r = 0; r < this.numRows; r++) {
+      for (let c = 0; c < this.numCols; c++) {
+        const from = { row: this.row - 1 + r, col: this.col - 1 + c };
+        const to = { row: target.row - 1 + r, col: target.col - 1 + c };
+        if (!this.sheet.backgrounds[to.row]) continue;
+        this.sheet.backgrounds[to.row][to.col] =
+          this.sheet.backgrounds[from.row][from.col];
+        this.sheet.fontColors[to.row][to.col] =
+          this.sheet.fontColors[from.row][from.col];
+        if (!opts.formatOnly) {
+          this.sheet.values[to.row][to.col] = this.sheet.values[from.row][from.col];
+        }
+      }
+    }
+    return this;
+  }
   clearContent() {
     for (let r = 0; r < this.numRows; r++) {
       for (let c = 0; c < this.numCols; c++) {
@@ -126,6 +150,11 @@ class FakeSheet {
     this.activeRange = new FakeRange(this, row, 1, numRows, 1);
   }
   getActiveRange() { return this.activeRange; }
+  setActiveRange(range) {
+    this.activeRange = range;
+    this.activated = { row: range.row, col: range.col };
+    return range;
+  }
 }
 
 function install(globalObj, sheets, activeSheetName) {
@@ -153,8 +182,10 @@ function install(globalObj, sheets, activeSheetName) {
   // has to be able to hand one back rather than only the active spreadsheet.
   const booksById = {};
 
+  const activatedSheets = [];
   globalObj.SpreadsheetApp = {
     getActiveSpreadsheet: () => spreadsheet,
+    setActiveSheet: sheet => { activatedSheets.push(sheet.getName()); return sheet; },
     openById: id => {
       if (!booksById[id]) {
         throw new Error('Unable to open the spreadsheet with id ' + id + '.');
@@ -324,7 +355,8 @@ function install(globalObj, sheets, activeSheetName) {
   };
 
   return { dialogs, alerts, uiAnswer, promptAnswer, prompts, fetchLog,
-    fetchHandler, scriptProps, addBook, addCalendar, sheets: byName };
+    fetchHandler, scriptProps, addBook, addCalendar, activatedSheets,
+    sheets: byName };
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */

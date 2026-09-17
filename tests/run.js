@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Progress.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Day.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Progress.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -37,6 +37,7 @@ function loadScript(context) {
   importSeatingChart, parseSeatingChart_, seatingMatchRank_,
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
+  jumpToToday, startNewDay, parseDayHeader_, dayHeaderText_, dayHeaderRows_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
@@ -929,6 +930,111 @@ const DECK_FILLER_ROWS = [
     api.headerFor_([['Pages']], 1), { text: 'Pages', row: 1 });
 }
 
+// 45c2. Getting to the right row on a day log.
+{
+  function day(rows, options) {
+    const opts = options || {};
+    const values = rows.map(function (r) {
+      const row = new Array(26).fill('');
+      if (typeof r === 'string') row[0] = r;
+      else Object.keys(r).forEach(function (k) { row[Number(k) - 1] = r[k]; });
+      return row;
+    });
+    if (!values.length) values.push(new Array(26).fill(''));
+    const bg = makeGrid(values.length, 26, '#ffffff');
+    (opts.fills || []).forEach(function (f) { bg[f[0] - 1][f[1] - 1] = f[2]; });
+
+    const wop = new FakeSheet('Daily WOP', values, bg);
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate(opts.today || '2026-09-17'), String, Number, Object,
+      Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop], opts.on || 'Daily WOP');
+    return { wop: wop, api: loadScript(ctx), harness: h,
+      at: () => wop.activated ? wop.activated.row : 0,
+      A: i => String((wop.values[i - 1] || [])[0] || ''),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // 17 September 2026 is a Thursday.
+  const api0 = day([]).api;
+  check('day header: written the way the sheet writes it',
+    api0.dayHeaderText_(new Date(2026, 8, 17)), '9/17/2026 Thursday');
+
+  // Read by the date in it, not by matching the text.
+  const on = v => api0.parseDayHeader_(v);
+  checkTruthy('day header: the sheet\'s own form', on('9/17/2026 Thursday') !== null);
+  checkTruthy('day header: zero-padded reads the same',
+    on('09/17/2026 Thursday').getTime() === on('9/17/2026 Thursday').getTime());
+  checkTruthy('day header: the day name is decoration',
+    on('9/17/2026').getTime() === on('9/17/2026 Wednesday').getTime());
+  check('day header: a student is not a day', on('7:00 Sharon Yoo'), null);
+  check('day header: nor is a note', on('NOTE: Noted to Mr. HR that'), null);
+  check('day header: nor a date that does not exist', on('2/31/2026 Tuesday'), null);
+  check('day header: nor a bare number', on('899'), null);
+
+  // --- jump to today ----------------------------------------------------
+  let d = day(['9/15/2026 Tuesday', '7:00 Ira Morjaria',
+               '9/17/2026 Thursday', '7:00 Sharon Yoo']);
+  d.api.jumpToToday();
+  check('jump: lands on today\'s row', d.at(), 3);
+  check('jump: and says nothing when it works', d.said(), '');
+
+  // Not there yet is said, with somewhere to go.
+  d = day(['9/15/2026 Tuesday', '7:00 Ira Morjaria']);
+  d.api.jumpToToday();
+  checkTruthy('jump: a day not opened yet is said',
+    d.said().includes('9/17/2026 Thursday') && d.said().includes('Start a new day'));
+
+  // Opened twice: go to the first, then say so -- the day is split in two.
+  d = day(['9/17/2026 Thursday', '7:00 Ira Morjaria', '9/17/2026 Thursday']);
+  d.api.jumpToToday();
+  check('jump: a day opened twice still lands somewhere', d.at(), 1);
+  checkTruthy('jump: and names both rows',
+    d.said().includes('1, 3') && d.said().includes('split'));
+
+  // --- start a new day --------------------------------------------------
+  d = day(['9/15/2026 Tuesday', '7:00 Ira Morjaria'],
+    { fills: [[1, 1, '#ff9999']] });
+  d.api.startNewDay();
+  check('new day: opened under the last populated row', d.A(3), '9/17/2026 Thursday');
+  check('new day: and the cursor is on it', d.at(), 3);
+  check('new day: wearing the last day\'s colour',
+    String(d.wop.backgrounds[2][0]), '#ff9999');
+  check('new day: nothing above it was touched',
+    [d.A(1), d.A(2)], ['9/15/2026 Tuesday', '7:00 Ira Morjaria']);
+
+  // Already open: go there, add nothing. Two headers for one day would split
+  // the day's students between them and nothing downstream would notice.
+  d = day(['9/17/2026 Thursday', '7:00 Sharon Yoo']);
+  d.api.startNewDay();
+  check('new day: today already open adds nothing', d.A(3), '');
+  check('new day: and takes you to the one that is there', d.at(), 1);
+  checkTruthy('new day: saying as much', d.said().includes('already open'));
+
+  // A day further ahead already started: adding today below it would put the
+  // log out of order, so it refuses and says where the problem is.
+  d = day(['9/15/2026 Tuesday', '9/20/2026 Sunday']);
+  d.api.startNewDay();
+  check('new day: refuses to open today under a later day', d.A(3), '');
+  checkTruthy('new day: and names the row that is ahead',
+    d.said().includes('9/20/2026') && d.said().includes('out of order'));
+
+  // An empty sheet has no day to copy the look of, and says so.
+  d = day([]);
+  d.api.startNewDay();
+  check('new day: the first day of all still opens', d.A(1), '9/17/2026 Thursday');
+  checkTruthy('new day: and admits it could not copy a colour',
+    d.said().includes('no earlier day'));
+
+  // Reached from another tab, both entries bring you over.
+  d = day(['9/17/2026 Thursday'], { on: 'Deck List' });
+  d.api.jumpToToday();
+  checkTruthy('jump: switches tab when you were looking elsewhere',
+    d.harness.activatedSheets.indexOf('Daily WOP') !== -1);
+}
+
 // 45d. The seating chart, read from the real sample layout.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
@@ -1302,6 +1408,13 @@ const DECK_FILLER_ROWS = [
       return row;
     });
     (opts.dirty || []).forEach(d => { wopRows[d[0]][d[1]] = d[2]; });
+    // Rows put above the students, for the day-log case: a previous day and
+    // today's own header.
+    (opts.above || []).slice().reverse().forEach(function (text) {
+      const row = [text];
+      while (row.length < 26) row.push('');
+      wopRows.unshift(row);
+    });
     if (!wopRows.length) wopRows.push(new Array(26).fill(''));
 
     const deck = new FakeSheet('Deck List',
@@ -1366,6 +1479,91 @@ const DECK_FILLER_ROWS = [
     [r.Bfont(0), r.Bfont(6)], ['#0000ff', '#ff0000']);
   check('organise: the hour shade alternates', [r.Afill(0), r.Afill(12)],
     ['#ffffff', '#d9d9d9']);
+}
+
+// 45g2. The organiser on a sheet that keeps a day per block.
+{
+  const POPULATED = 'tests/fixtures/seating-populated.json';
+
+  function log(options) {
+    const opts = options || {};
+    const chart = JSON.parse(fs.readFileSync(POPULATED, 'utf8')).map(r => r.slice());
+    const rows = (opts.rows || []).map(function (text) {
+      const row = [text];
+      while (row.length < 26) row.push('');
+      return row;
+    });
+    (opts.dirty || []).forEach(d => { rows[d[0]][d[1]] = d[2]; });
+
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
+    const wop = new FakeSheet('Daily WOP', rows, makeGrid(rows.length, 26, '#ffffff'));
+    const seating = new FakeSheet('weekdays', chart,
+      makeGrid(chart.length, chart[0].length, '#ffffff'));
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number, Object, Array, RegExp,
+      Error, isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop, seating], 'Daily WOP');
+    loadScript(ctx).organizeSeatingRows();
+    return { wop: wop,
+      A: i => String(wop.values[i - 1][0]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  // Yesterday's block is history. Only today's is organised, and yesterday is
+  // left exactly as it was -- read from row one this would shuffle every
+  // student who has ever been in.
+  let r = log({ rows: [
+    '8/18/2026 Tuesday', '9:00 Student 7', '10:00 Student 8',
+    '8/19/2026 Wednesday', 'Student 1', 'Student 2', 'Student 3'] });
+  check('day log: yesterday is left alone',
+    [r.A(1), r.A(2), r.A(3)],
+    ['8/18/2026 Tuesday', '9:00 Student 7', '10:00 Student 8']);
+  check('day log: today\'s header is left alone', r.A(4), '8/19/2026 Wednesday');
+  checkTruthy('day log: and today\'s block is organised under it',
+    r.A(5).indexOf('12:00 ') === 0);
+
+  // Yesterday's filled-in columns are not this morning's pinned data.
+  r = log({ rows: [
+    '8/18/2026 Tuesday', '9:00 Student 7',
+    '8/19/2026 Wednesday', 'Student 1', 'Student 2'],
+    dirty: [[1, 10, 'Y'], [1, 13, '1C | AA']] });
+  checkTruthy('day log: yesterday\'s own data does not block today',
+    r.A(4).indexOf('12:00 ') === 0);
+  checkTruthy('day log: and nothing was refused', !r.said().includes('nothing has'));
+
+  // A day already started below today's -- somebody made tomorrow's block
+  // early -- stops today's block where it should stop.
+  r = log({ rows: [
+    '8/19/2026 Wednesday', 'Student 1', 'Student 2',
+    '8/20/2026 Thursday', '9:00 Student 7', '10:00 Student 8'] });
+  check('day log: tomorrow\'s block is not overwritten with today\'s',
+    [r.A(4), r.A(5), r.A(6)],
+    ['8/20/2026 Thursday', '9:00 Student 7', '10:00 Student 8']);
+  check('day log: and today\'s is left as it was too',
+    [r.A(2), r.A(3)], ['Student 1', 'Student 2']);
+  checkTruthy('day log: with the rows it would need spelled out',
+    r.said().includes('Insert 16 more rows above row 4'));
+
+  // Room enough, and it fills the block without touching what is below.
+  const roomy = ['8/19/2026 Wednesday'];
+  for (let i = 0; i < 24; i++) roomy.push('Student ' + ((i % 12) + 1));
+  roomy.push('8/20/2026 Thursday', '9:00 Student 7');
+  r = log({ rows: roomy });
+  checkTruthy('day log: a block with room is organised',
+    r.A(2).indexOf('12:00 ') === 0);
+  check('day log: right up to its last row', r.A(25).indexOf('1:00 ') === 0, true);
+  check('day log: and the day below is untouched',
+    [r.A(26), r.A(27)], ['8/20/2026 Thursday', '9:00 Student 7']);
+
+  // Today not opened yet: organising would write today's students into
+  // yesterday's block, so it refuses and says how to open today.
+  r = log({ rows: ['8/18/2026 Tuesday', '9:00 Student 7', 'Student 1'] });
+  check('day log: today not opened means nothing is organised',
+    [r.A(1), r.A(3)], ['8/18/2026 Tuesday', 'Student 1']);
+  checkTruthy('day log: and it says to open today first',
+    r.said().includes('Start a new day') &&
+    r.said().includes('8/19/2026 Wednesday'));
 }
 
 // 45h. What the organiser refuses, and what it is told.

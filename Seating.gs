@@ -417,6 +417,41 @@ function seatingSheetName_(when) {
   return String((CONFIG.SEATING.DAY_SHEETS || [])[day] || '').trim();
 }
 
+/**
+ * The rows the organiser should work over: today's day block, or the whole
+ * sheet when it does not keep day blocks.
+ *
+ * Returns { startRow, lastRow } or { problem } -- a sheet that keeps day blocks
+ * but has not opened today is not a sheet to guess about, because the guess is
+ * "append to yesterday".
+ */
+function todaysBlock_(wop) {
+  const headers = dayHeaderRows_(wop);
+  const lastRow = wop.getLastRow();
+
+  if (!headers.length) {
+    return { startRow: CONFIG.SEATING.ORGANIZE_START_ROW, lastRow: lastRow };
+  }
+
+  const today = new Date();
+  let mine = -1;
+  for (let i = 0; i < headers.length; i++) {
+    if (sameDayAs_(headers[i].date, today)) { mine = i; break; }
+  }
+  if (mine === -1) {
+    return { problem: 'This sheet opens each day with a dated row, and there ' +
+      'is none for ' + dayHeaderText_(today) + ' yet. Organising now would ' +
+      'write today\'s students into yesterday\'s block.\n\n' +
+      'SOD → Start a new day adds today\'s row first.' };
+  }
+
+  // The block runs to the row before the next day opens, or to the end.
+  const next = headers[mine + 1];
+  return { startRow: headers[mine].row + 1,
+    lastRow: next ? next.row - 1 : lastRow,
+    bounded: !!next };
+}
+
 /** Opens the seating chart, wherever it has been put. */
 function seatingSheet_(when) {
   const name = seatingSheetName_(when);
@@ -774,9 +809,23 @@ function organizeSeatingRows() {
 
   try {
     const wop = sheets.wop;
-    const startRow = CONFIG.SEATING.ORGANIZE_START_ROW;
     const instructorCol = CONFIG.SEATING.INSTRUCTOR_COLUMN;
-    const lastRow = wop.getLastRow();
+
+    // Where today's block is.
+    //
+    // A Daily WOP that opens each day with a "9/17/2026 Thursday" row is a log
+    // going back a year, and the only block worth organising is today's. Read
+    // from row one it would shuffle every student who has ever been in --
+    // which the pinned-data guard below would refuse, so the organiser simply
+    // would not run. A sheet with no day headers on it is not a log, and is
+    // organised from CONFIG.SEATING.ORGANIZE_START_ROW as before.
+    const block = todaysBlock_(wop);
+    if (block.problem) {
+      showError_(block.problem);
+      return;
+    }
+    const startRow = block.startRow;
+    const lastRow = block.lastRow;
 
     // Everything already on the sheet, so a name can keep the spelling the
     // Daily WOP uses rather than the shorthand the chart was filled in with.
@@ -873,6 +922,21 @@ function organizeSeatingRows() {
       log.warn(name, 'is on the Daily WOP but not on the seating chart, so they ' +
         'are listed at the end with no seat.');
     });
+
+    // On a day log, today's block ends where tomorrow's begins, and the list
+    // is as long as the chart makes it. Writing past the end would overwrite
+    // the next day's students with today's -- so it stops instead and says how
+    // much room it needs. Where today is the last block there is nothing below
+    // to overwrite, and it simply grows.
+    if (block.bounded && rows.length > lastRow - startRow + 1) {
+      showError_('Today\'s block is rows ' + startRow + ' to ' + lastRow +
+        ', which is ' + (lastRow - startRow + 1) + ' rows, and the chart has ' +
+        rows.length + ' students on it. Writing them would overwrite the day ' +
+        'below, so nothing has been changed.\n\nInsert ' +
+        (rows.length - (lastRow - startRow + 1)) + ' more rows above row ' +
+        (lastRow + 1) + ' and run this again.');
+      return;
+    }
 
     // A sheet trimmed to yesterday's length has nowhere to put today's list. Counted
     // after the unseated are added, or the last of them falls off the end.
