@@ -113,13 +113,55 @@ highlighted and it acts on every row that has a student name.
 
 ### 1. Create — date it and find the next session
 
-You put the name in **B**. The stage fills **A** with today, and **C** and
-**D** with the next day the centre is open. Which days those are is
-`CONFIG.CHANGELOG.OPEN_DAYS`, so a Saturday assessment rolls over the closed
-Sunday to Monday without anybody teaching the script about weekends.
+You put the name in **B**. The stage fills **A** with today, then looks the
+student up in Google Calendar and fills **C** with the day they are next in
+(`M`, `T`, `W`, `Th`, `F`, `S`) and **D** with that date as `m/dd`.
+
+**Next means strictly after today.** An assessment done this morning is
+followed up next time they are in, not this afternoon, so today's own session
+is never the answer. Of several sessions ahead, the soonest wins.
 
 A row that already has a date in A is left alone. Re-running is for the rows
 nobody has got to yet, not a way to re-stamp finished work.
+
+#### Which calendar
+
+**Tools → Calendar: set the calendar.** Paste the Calendar ID from Google
+Calendar's settings — it looks like an email address, and several can be given
+separated by commas. Leave the box empty and press OK to go back to this
+account's own calendar. It checks each one on the spot and says what it found,
+because a calendar this account has not been given access to comes back as
+nothing at all — indistinguishable from a calendar with no sessions on it,
+until somebody is staring at a column of question marks.
+
+`CONFIG.CHANGELOG.CALENDAR_IDS` is the same setting in the code, and
+`LOOKAHEAD_DAYS` (28) is how far ahead it looks.
+
+#### How a session is matched to a student
+
+The event's **title** and its **guests** are both read, so `Amalie Laz`,
+`4:00 Amalie Laz — session` and a session called `Tutoring` with Amalie as a
+guest all count. The name is looked for *inside* the text rather than the text
+having to equal it, and the matching is the same ranking the seating chart
+uses — so shorthand means the same thing in both places.
+
+Two things it will not do:
+
+- **Take a session that merely starts the same way.** `Amalie Bourne` is not
+  `Amalie Laz`.
+- **Choose between two children behind one shorthand.** A calendar saying
+  `Amalie L` is taken when only one person on it could be; when both
+  `Amalie Laz` and `Amalie Lee` are there, it refuses.
+
+A calendar that will not hand over its guest list — some do not — still has its
+titles read, rather than the whole event being lost.
+
+#### When the calendar does not say
+
+**C gets `?` and D gets `?/?`**, the row is still dated today, and the report
+says why: not on the calendar within the lookahead, the calendar could not be
+opened, shorthand that could be two people. A question mark says nobody knows
+yet. A plausible date nobody checked is the one that gets acted on.
 
 ### 2. Grade — the change since last time, and the stars
 
@@ -193,17 +235,14 @@ column over.
 
 ### Still open
 
-Columns 1, 3, 4 and 5 were once expected to come from Radius. Stages 1 and 3
-now fill 1, 3 and 4 from the calendar instead, which needs nothing from Radius
-at all. Column 5 is still typed by a person, and would need something I have
-not seen:
+Columns 1, 3, 4 and 5 were once expected to come from Radius. Column 1 is
+today's date, and 3 and 4 now come from Google Calendar, so none of those needs
+Radius at all. Column 5 is still typed by a person, and would need something I
+have not seen:
 
 - **Most recent assessment** — the DWP page has an assessment status behind
   `AssessmentStatusId`, but nothing naming or dating one. A page for a student
   who has just had an assessment graded would settle it.
-
-`CONFIG.CHANGELOG.OPEN_DAYS` currently says Monday to Saturday. If the centre's
-hours differ, that line is the only thing to change.
 
 ## Writing a progress report
 

@@ -41,5 +41,6 @@ function onOpen() {
     .addItem('Radius: test connection', 'testRadiusConnection')
     .addSeparator()
     .addItem('Seating chart: set the link', 'setSeatingSource')
+    .addItem('Calendar: set the calendar', 'setSessionCalendar')
     .addToUi();
 }

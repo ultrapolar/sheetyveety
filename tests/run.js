@@ -41,7 +41,8 @@ function loadScript(context) {
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
   changelogColumnPlan_, changelogCreate, changelogGrade,
-  changelogLearningPlan, percentValue_, starsFor_, nextOpenDay_,
+  changelogLearningPlan, percentValue_, starsFor_, nextSessionFor_,
+  sessionCalendars_, calendarNames_, eventNameFields_, setSessionCalendar,
   previousAssessment_, monthDay_, dayLabel_, monthDayValue_,
   setRadiusCookie, saveRadiusCookie_FromUI, normalizeCookieString_,
   cookieComplaint_,
@@ -2267,6 +2268,17 @@ const DECK_FILLER_ROWS = [
       Date: fixedDate(opts.today || '2026-08-19'), String, Number, Object,
       Array, RegExp, Error, isNaN, parseInt, parseFloat });
     const h = install(ctx, [deck, wop, log], 'Deck Changelog');
+    if (opts.events) {
+      h.addCalendar('own@example.com', 'My calendar', opts.events, true);
+    }
+    (opts.calendars || []).forEach(function (c) {
+      h.addCalendar(c.id, c.name, c.events, false);
+    });
+    if (opts.calendarIds) {
+      vm.runInContext('PropertiesService.getScriptProperties().setProperty(' +
+        JSON.stringify('CHANGELOG_CALENDAR_IDS') + ', ' +
+        JSON.stringify(opts.calendarIds) + ');', ctx);
+    }
     const api = loadScript(ctx);
     if (opts.counts) {
       vm.runInContext('CONFIG.CHANGELOG.QUESTION_COUNTS = ' +
@@ -2281,18 +2293,129 @@ const DECK_FILLER_ROWS = [
     PERCENT: 8, STARS: 9, CHANGE: 10, LP_DATE: 15, BOOK: 18, LP_COUNT: 19 };
 
   // --- creation ---------------------------------------------------------
-  // 19 August 2026 is a Wednesday, so the next open day is Thursday the 20th.
-  let b = book([{ 2: 'Amalie Laz' }]);
+  const at = (iso, hour) => new Date(iso + 'T' + (hour || '16') + ':00:00');
+
+  // The next session comes off the calendar. 24 August 2026 is a Monday.
+  let b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-08-24') }]
+  });
   b.api.changelogCreate();
   check('create: today goes in', b.cell(1, C3.DATE_DONE), '8/19');
-  check('create: the next open day', [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)],
-    ['Th', '8/20']);
-
-  // Saturday rolls over the closed Sunday to Monday.
-  b = book([{ 2: 'Amalie Laz' }], { today: '2026-08-22' });
-  b.api.changelogCreate();
-  check('create: Saturday skips the closed Sunday',
+  check('create: the day and date come off the calendar',
     [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['M', '8/24']);
+
+  // Nothing on the calendar is said as nothing, not guessed at.
+  b = book([{ 2: 'Amalie Laz' }]);
+  b.api.changelogCreate();
+  check('create: no calendar, no date invented',
+    [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['?', '?/?']);
+  check('create: the row is still dated today', b.cell(1, C3.DATE_DONE), '8/19');
+  checkTruthy('create: and the report says so',
+    b.said().includes('question marks') || b.said().includes('calendar'));
+
+  // Strictly after today: an assessment done this morning is followed up next
+  // time they are in, not this afternoon.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-08-19', '18') },
+             { title: 'Amalie Laz', start: at('2026-08-21') }]
+  });
+  b.api.changelogCreate();
+  check('create: today\'s own session is not "next time"',
+    [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['F', '8/21']);
+
+  // The earliest of several is the one that counts.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-09-02') },
+             { title: 'Amalie Laz', start: at('2026-08-20') },
+             { title: 'Amalie Laz', start: at('2026-08-26') }]
+  });
+  b.api.changelogCreate();
+  check('create: the soonest session wins', b.cell(1, C3.NEXT), '8/20');
+
+  // A name buried in a longer title is still that student.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: '4:00 Amalie Laz — session', start: at('2026-08-20') }]
+  });
+  b.api.changelogCreate();
+  check('create: a name inside a longer title is found', b.cell(1, C3.NEXT), '8/20');
+
+  // A guest on an event nobody named in the title.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Tutoring', start: at('2026-08-20'),
+               guests: [{ name: 'Amalie Laz', email: 'amalie@example.com' }] }]
+  });
+  b.api.changelogCreate();
+  check('create: a guest counts as being named', b.cell(1, C3.NEXT), '8/20');
+
+  // A calendar that will not hand over its guest list still yields its titles.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-08-20'), guestsThrow: true }]
+  });
+  b.api.changelogCreate();
+  check('create: a refused guest list does not lose the event',
+    b.cell(1, C3.NEXT), '8/20');
+
+  // Somebody else's session is not theirs.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'John Roe', start: at('2026-08-20') }]
+  });
+  b.api.changelogCreate();
+  check('create: another student\'s session is not taken',
+    [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['?', '?/?']);
+
+  // Nor is a different child who happens to share a first name.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Bourne', start: at('2026-08-20') }]
+  });
+  b.api.changelogCreate();
+  check('create: a shared first name is not a match',
+    b.cell(1, C3.NEXT), '?/?');
+
+  // Beyond the lookahead is as good as not there, and says so rather than
+  // reaching further than it was told to.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-11-02') }]
+  });
+  b.api.changelogCreate();
+  check('create: a session past the lookahead is not found',
+    b.cell(1, C3.NEXT), '?/?');
+  checkTruthy('create: and the report says how far it looked',
+    b.said().includes('28 days'));
+
+  // Shorthand on the calendar: taken when it can only be one person.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie L', start: at('2026-08-20') }]
+  });
+  b.api.changelogCreate();
+  check('create: an abbreviation with one owner is taken',
+    b.cell(1, C3.NEXT), '8/20');
+
+  // ...and refused when it could be either of two.
+  b = book([{ 2: 'Amalie L' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-08-20') },
+             { title: 'Amalie Lee', start: at('2026-08-21') }]
+  });
+  b.api.changelogCreate();
+  check('create: shorthand that could be two children is refused',
+    [b.cell(1, C3.DAY), b.cell(1, C3.NEXT)], ['?', '?/?']);
+
+  // A named calendar is used in place of the account's own.
+  b = book([{ 2: 'Amalie Laz' }], {
+    events: [{ title: 'Amalie Laz', start: at('2026-08-20') }],
+    calendars: [{ id: 'centre@example.com', name: 'Centre',
+                  events: [{ title: 'Amalie Laz', start: at('2026-08-25') }] }],
+    calendarIds: 'centre@example.com'
+  });
+  b.api.changelogCreate();
+  check('create: the named calendar is the one read', b.cell(1, C3.NEXT), '8/25');
+
+  // A calendar id nothing answers to is said, not silently empty.
+  b = book([{ 2: 'Amalie Laz' }], { calendarIds: 'nobody@example.com' });
+  b.api.changelogCreate();
+  check('create: an unreachable calendar leaves question marks',
+    b.cell(1, C3.NEXT), '?/?');
+  checkTruthy('create: and names the calendar it could not open',
+    b.said().includes('nobody@example.com'));
 
   // A row somebody already dated is left exactly as it is.
   b = book([{ 1: '8/01', 2: 'Amalie Laz', 3: 'F', 4: '8/07' }]);

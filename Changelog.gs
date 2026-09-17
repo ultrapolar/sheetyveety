@@ -46,20 +46,129 @@ function starsFor_(percent, questions) {
 }
 
 /**
- * The next day the centre is open after the one given.
+ * The calendars to look in, in order.
  *
- * Which days those are is CONFIG.CHANGELOG.OPEN_DAYS, so a centre that opens
- * on a Sunday or shuts on a Saturday says so there rather than here.
+ * Nothing set means the account's own calendar. Ids pasted in through
+ * Tools -> Calendar: set the calendar win over CONFIG.CHANGELOG.CALENDAR_IDS,
+ * so the centre's booking calendar can be pointed at without editing the code.
  */
-function nextOpenDay_(from) {
-  const open = CONFIG.CHANGELOG.OPEN_DAYS || [];
-  if (!open.length) return null;
-  const date = new Date(from.getTime());
-  for (let step = 0; step < 14; step++) {
-    date.setDate(date.getDate() + 1);
-    if (open.indexOf(date.getDay()) !== -1) return date;
+function sessionCalendars_() {
+  const stored = PropertiesService.getScriptProperties()
+    .getProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
+  const ids = String(stored || '').trim()
+    ? splitList_(stored)
+    : (CONFIG.CHANGELOG.CALENDAR_IDS || []).slice();
+
+  if (!ids.length) {
+    const own = CalendarApp.getDefaultCalendar();
+    return own ? [own] : [];
   }
-  return null;
+
+  const found = [];
+  ids.forEach(function (id) {
+    const calendar = CalendarApp.getCalendarById(id);
+    if (calendar) found.push(calendar);
+  });
+  if (!found.length) {
+    throw new Error('None of the calendars could be opened: ' + ids.join(', ') +
+      '. Check them with Tools → Calendar: set the calendar, and that this ' +
+      'account has been given access to them.');
+  }
+  return found;
+}
+
+/**
+ * Whether a piece of calendar text names a student.
+ *
+ * An event is called all sorts of things -- "Amalie Laz", "Amalie Laz -
+ * Session", "4:00 Amalie" -- so the student's name is looked for inside the
+ * text rather than the text being expected to equal it. The ranking is the one
+ * the seating chart uses, so "Amalie L" on a calendar means the same student
+ * it means on the chart, with the same rules about what counts as a match.
+ */
+function calendarNames_(text, name) {
+  const words = normalizeStudentName_(text).split(' ').filter(Boolean);
+  const wanted = normalizeStudentName_(name).split(' ').filter(Boolean);
+  if (!words.length || !wanted.length) return 0;
+
+  let best = 0;
+  // Every run of words the length of the name, so a name buried in a longer
+  // title is found without a bare first name matching the wrong child.
+  for (let i = 0; i + wanted.length <= words.length; i++) {
+    const run = words.slice(i, i + wanted.length).join(' ');
+    best = Math.max(best, seatingMatchRank_(run, name));
+    if (best === 2) return 2;
+  }
+  return best;
+}
+
+/** Everything an event might carry a name in: its title, and its guests. */
+function eventNameFields_(event) {
+  const fields = [event.getTitle()];
+  let guests = [];
+  try {
+    guests = event.getGuestList() || [];
+  } catch (err) {
+    guests = [];   // some calendars refuse the guest list; the title still works
+  }
+  guests.forEach(function (guest) {
+    fields.push(guest.getName());
+    fields.push(String(guest.getEmail() || '').split('@')[0].replace(/[._]+/g, ' '));
+  });
+  return fields.filter(Boolean);
+}
+
+/**
+ * When the student is next in, after the day given.
+ *
+ * Strictly after: an assessment done today is followed up next time they are
+ * here, not this afternoon. The search runs forward
+ * CONFIG.CHANGELOG.LOOKAHEAD_DAYS and takes the earliest event that names
+ * them.
+ *
+ * Returns { date, title } or null. Null means the calendar does not say, which
+ * is not the same as the student never coming back, and the columns are filled
+ * with question marks rather than with a guess.
+ */
+function nextSessionFor_(calendars, name, after) {
+  const from = new Date(after.getFullYear(), after.getMonth(), after.getDate() + 1);
+  const to = new Date(from.getFullYear(), from.getMonth(),
+    from.getDate() + (CONFIG.CHANGELOG.LOOKAHEAD_DAYS || 28));
+
+  let exact = null;
+  const loose = [];
+
+  calendars.forEach(function (calendar) {
+    calendar.getEvents(from, to).forEach(function (event) {
+      let rank = 0;
+      eventNameFields_(event).forEach(function (field) {
+        rank = Math.max(rank, calendarNames_(field, name));
+      });
+      if (!rank) return;
+
+      const hit = { date: event.getStartTime(), title: event.getTitle(), rank: rank };
+      if (rank === 2) {
+        if (!exact || hit.date < exact.date) exact = hit;
+      } else {
+        loose.push(hit);
+      }
+    });
+  });
+
+  if (exact) return exact;
+  if (!loose.length) return null;
+
+  // Nothing named them outright. An abbreviation will do, but only when every
+  // event that matched is plainly the same person -- two different children
+  // behind one shorthand is not something to pick between.
+  const names = [];
+  loose.forEach(function (hit) {
+    const key = normalizeStudentName_(hit.title);
+    if (names.indexOf(key) === -1) names.push(key);
+  });
+  if (names.length > 1) return null;
+
+  return loose.sort(function (a, b) { return a.date - b.date; })[0];
 }
 
 function dayLabel_(date) {
@@ -159,7 +268,7 @@ function changelogSelection_(sheet, rows) {
  */
 function changelogCreate() {
   const log = ActionLog_();
-  const stats = { created: 0, already: 0, noName: 0 };
+  const stats = { created: 0, already: 0, noName: 0, noSession: 0 };
 
   const lock = LockService.getDocumentLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) {
@@ -173,12 +282,14 @@ function changelogCreate() {
     const rows = changelogRows_(sheet);
     const picked = changelogSelection_(sheet, rows);
     const today = new Date();
-    const next = nextOpenDay_(today);
 
-    if (!next) {
-      showError_('CONFIG.CHANGELOG.OPEN_DAYS lists no days the centre is open, ' +
-        'so there is no next session to work out.');
-      return;
+    // One read of the calendar for the whole run, not one per student.
+    let calendars = [];
+    let calendarProblem = '';
+    try {
+      calendars = sessionCalendars_();
+    } catch (err) {
+      calendarProblem = err.message;
     }
 
     picked.forEach(function (row) {
@@ -190,18 +301,43 @@ function changelogCreate() {
         return;
       }
 
+      let next = null;
+      let why = calendarProblem;
+      if (!why) {
+        try {
+          next = nextSessionFor_(calendars, name, today);
+        } catch (err) {
+          why = 'the calendar could not be read: ' + err.message;
+        }
+      }
+
       sheet.getRange(row.sheetRow, col.DATE_DONE).setValue(monthDay_(today));
-      sheet.getRange(row.sheetRow, col.DAY_OF_WEEK).setValue(dayLabel_(next));
-      sheet.getRange(row.sheetRow, col.NEXT_DATE).setValue(monthDay_(next));
+      sheet.getRange(row.sheetRow, col.DAY_OF_WEEK)
+        .setValue(next ? dayLabel_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DAY);
+      sheet.getRange(row.sheetRow, col.NEXT_DATE)
+        .setValue(next ? monthDay_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DATE);
       stats.created++;
-      log.ok(name, monthDay_(today) + ' — next in ' + dayLabel_(next) +
-        ' ' + monthDay_(next) + '.');
+
+      if (next) {
+        log.ok(name, monthDay_(today) + ' — next in ' + dayLabel_(next.date) +
+          ' ' + monthDay_(next.date) + ', from "' + next.title + '".');
+      } else {
+        stats.noSession++;
+        // A question mark is the honest answer and the person can fill it in.
+        // A plausible date nobody checked is the one that gets acted on.
+        log.warn(name, why || 'is not on the calendar in the next ' +
+          (CONFIG.CHANGELOG.LOOKAHEAD_DAYS || 28) + ' days, so columns ' +
+          columnLetter_(col.DAY_OF_WEEK) + ' and ' +
+          columnLetter_(col.NEXT_DATE) + ' are left as question marks.');
+      }
     });
 
     showReport_('Deck Changelog', 'Assessments dated', [
       { label: 'Rows created', value: stats.created },
       { label: 'Already dated', value: stats.already },
-      { label: 'No student name', value: stats.noName, alert: stats.noName > 0 }
+      { label: 'No student name', value: stats.noName, alert: stats.noName > 0 },
+      { label: 'No next session found', value: stats.noSession,
+        alert: stats.noSession > 0 }
     ], log);
   } catch (err) {
     showError_(err.message);
@@ -406,4 +542,70 @@ function changelogLearningPlan() {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ------------------------------------------------------------------
+// Which calendar
+// ------------------------------------------------------------------
+
+/**
+ * Menu entry: say which calendar the students' sessions are on.
+ *
+ * Checks each one on the spot and says what it found, because a calendar id
+ * that this account has not been given access to comes back as nothing at all
+ * -- indistinguishable from a calendar with no sessions on it until somebody
+ * is staring at a column of question marks.
+ */
+function setSessionCalendar() {
+  const ui = SpreadsheetApp.getUi();
+  const stored = PropertiesService.getScriptProperties()
+    .getProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
+
+  const response = ui.prompt('Calendar: set the calendar',
+    'Which calendar are the students\' sessions on?\n\n' +
+    'In Google Calendar, open the calendar\'s Settings and copy its ' +
+    '"Calendar ID" — it looks like an email address. Several can be pasted, ' +
+    'separated by commas.\n\n' +
+    'Leave blank and press OK to go back to this account\'s own calendar.\n\n' +
+    (stored ? 'Currently: ' + stored : 'Currently: this account\'s own calendar.'),
+    ui.ButtonSet.OK_CANCEL);
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const typed = String(response.getResponseText()).trim();
+  const props = PropertiesService.getScriptProperties();
+
+  if (!typed) {
+    props.deleteProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
+    showError_('Back to this account\'s own calendar.');
+    return;
+  }
+
+  const ids = splitList_(typed);
+  const found = [];
+  const missing = [];
+  ids.forEach(function (id) {
+    let calendar = null;
+    try {
+      calendar = CalendarApp.getCalendarById(id);
+    } catch (err) {
+      calendar = null;
+    }
+    if (calendar) found.push(calendar.getName() + ' (' + id + ')');
+    else missing.push(id);
+  });
+
+  if (!found.length) {
+    showError_('None of those could be opened: ' + missing.join(', ') +
+      '\n\nNothing was saved. Most often this is sharing — the account running ' +
+      'this script has to have been given access to the calendar too.');
+    return;
+  }
+
+  props.setProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY, ids.join(', '));
+  showError_('Saved. Looking in: ' + found.join(', ') + '.' +
+    (missing.length
+      ? '\n\nThese could not be opened and will be skipped: ' +
+        missing.join(', ') + '. Check they are shared with this account.'
+      : ''));
 }

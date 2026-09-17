@@ -276,6 +276,43 @@ function install(globalObj, sheets, activeSheetName) {
   // be reachable from the object the script actually holds.
   globalObj.SpreadsheetApp.getUi().Button = { OK: 'OK', CANCEL: 'CANCEL' };
 
+  // --- CalendarApp --------------------------------------------------------
+  // An event is {title, start, guests:[{name, email}]}. getEvents() windows on
+  // the start time the way the real one does, so a test can put a session just
+  // outside the window and see it left out.
+  const calendars = {};
+  let defaultCalendar = null;
+
+  const makeCalendar = (id, name, events) => ({
+    getId: () => id,
+    getName: () => name,
+    getEvents: (from, to) => (events || [])
+      .filter(e => e.start >= from && e.start < to)
+      .map(e => ({
+        getTitle: () => e.title,
+        getStartTime: () => e.start,
+        getGuestList: () => {
+          if (e.guestsThrow) throw new Error('No access to the guest list.');
+          return (e.guests || []).map(g => ({
+            getName: () => g.name || '',
+            getEmail: () => g.email || ''
+          }));
+        }
+      }))
+  });
+
+  const addCalendar = (id, name, events, asDefault) => {
+    const calendar = makeCalendar(id, name, events);
+    calendars[id] = calendar;
+    if (asDefault) defaultCalendar = calendar;
+    return calendar;
+  };
+
+  globalObj.CalendarApp = {
+    getDefaultCalendar: () => defaultCalendar,
+    getCalendarById: id => calendars[id] || null
+  };
+
   // Register an extra spreadsheet that openById can find.
   const addBook = (id, bookSheets, bookName) => {
     booksById[id] = {
@@ -287,7 +324,7 @@ function install(globalObj, sheets, activeSheetName) {
   };
 
   return { dialogs, alerts, uiAnswer, promptAnswer, prompts, fetchLog,
-    fetchHandler, scriptProps, addBook, sheets: byName };
+    fetchHandler, scriptProps, addBook, addCalendar, sheets: byName };
 }
 
 /** A Date whose no-arg constructor returns a fixed instant. */

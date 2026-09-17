@@ -305,10 +305,23 @@ const CONFIG = {
       WORKOUT_BOOK: 18, LP_COUNT: 19, WHATS_NEXT: 20
     },
 
-    // Which days the centre opens, 0 being Sunday, and how each is written in
-    // the day-of-week column.
-    OPEN_DAYS: [1, 2, 3, 4, 5, 6],
+    // How each day is written in the day-of-week column.
     DAY_LABELS: ['Su', 'M', 'T', 'W', 'Th', 'F', 'S'],
+
+    // Which calendars the next session is looked for in. Empty means the
+    // account's own calendar. Set them with Tools → Calendar: set the
+    // calendar, which stores them in this script's properties instead.
+    CALENDAR_IDS: [],
+    CALENDAR_PROPERTY: 'CHANGELOG_CALENDAR_IDS',
+
+    // How far forward to look for the student's next session.
+    LOOKAHEAD_DAYS: 28,
+
+    // What goes in columns C and D when the calendar does not say. A question
+    // mark is an answer -- it says nobody knows yet -- where a plausible date
+    // nobody checked is the one that gets acted on.
+    UNKNOWN_DAY: '?',
+    UNKNOWN_DATE: '?/?',
 
     // Written into the change column when the student has not sat this
     // assessment before, so an empty cell never has to stand for two things.
