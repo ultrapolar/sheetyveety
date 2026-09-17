@@ -929,15 +929,34 @@ const DECK_FILLER_ROWS = [
     api.seatingCandidates_('Amalie L', ['Amalie Laz', 'Amalie Lee']), ['Amalie Lee']);
   vm.runInContext('CONFIG.SEATING.ALIASES = {};', ctx);
 
-  // Formatting, including a student who moved between hours.
+  // Formatting. Column N holds one seat and everyone they worked with -- the
+  // hours the student was here are not what the column is for.
   check('format: one seat, one instructor',
     api.formatSeating_([{ seat: '1C', instructor: 'IN3' }]), '1C | IN3');
   check('format: two hours, same seat, two instructors',
     api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
                         { seat: '1C', instructor: 'IN2' }]), '1C | IN3 IN2');
-  check('format: moved seats',
+
+  // Moving tables means working with somebody new. The second seat goes; the
+  // second instructor stays, because it is a different person, not a repeat.
+  check('format: moved seats keeps one seat and both instructors',
     api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
-                        { seat: '2A', instructor: 'IN1' }]), '1C, 2A | IN3 IN1');
+                        { seat: '2A', instructor: 'IN1' }]), '1C | IN3 IN1');
+  check('format: the seat kept is the one they started in',
+    api.formatSeating_([{ seat: '3B', instructor: 'IN9' },
+                        { seat: '1C', instructor: 'IN9' }]), '3B | IN9');
+  check('format: moved, but the same instructor followed them',
+    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
+                        { seat: '2A', instructor: 'IN3' }]), '1C | IN3');
+  check('format: three hours, three tables, still one seat',
+    api.formatSeating_([{ seat: '1C', instructor: 'IN3' },
+                        { seat: '2A', instructor: 'IN1' },
+                        { seat: '4B', instructor: 'IN7' }]), '1C | IN3 IN1 IN7');
+
+  // A later block can supply the seat when the first one had none.
+  check('format: the first real seat wins, not the first match',
+    api.formatSeating_([{ seat: '', instructor: 'IN3' },
+                        { seat: '2A', instructor: 'IN1' }]), '2A | IN3 IN1');
   check('format: a seat with no instructor beside it',
     api.formatSeating_([{ seat: '1C', instructor: '' }]), '1C');
   check('format: nothing found is nothing written', api.formatSeating_([]), '');
@@ -995,10 +1014,10 @@ const DECK_FILLER_ROWS = [
   checkTruthy('seating sheet: and is reported',
     r.said().includes('not found on the seating chart'));
 
-  // Two hours in different seats.
+  // Two hours in different seats: the seat they started in, both instructors.
   r = run({ place: [[3, 15, 'Amalie L'], [5, 13, 'Amalie L']] });
-  check('seating sheet: a student who moved gets both seats',
-    r.N(0), '1C, 2A | IN3 IN1');
+  check('seating sheet: a student who moved gets one seat and both instructors',
+    r.N(0), '1C | IN3 IN1');
 
   // "Amalie L" cannot be resolved when two Amalie L-somethings are selected.
   r = run({ students: ['Amalie Laz', 'Amalie Lee'] });

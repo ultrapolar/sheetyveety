@@ -29,7 +29,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-593 assertions covering the parsing rules and both scripts end to end,
+597 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -155,8 +155,20 @@ student sat, and who sat with them, in **column N**:
 
 ```
 1C | IN3                 sat at table 1 seat C, with IN3
-1C, 2A | IN3 IN1         moved between hours
+1C | IN3 IN1             moved tables, so worked with two
 ```
+
+**One seat, however many hours the student was here.** The column answers where
+they sat and who they worked with; how their day was divided into hours is not
+what it is for, and the Daily WOP already has a row per hour to say that. A
+student who moved tables is recorded at the seat they **started** in — the
+chart is read top to bottom and the hours run down it, so the earliest block
+wins.
+
+The instructors are not thinned the same way. Moving tables means working with
+somebody new, and that is a different person rather than a repeat, so all of
+them are listed. A student who moved but kept the same instructor gets that
+instructor once.
 
 The chart is a grid of tables drawn one block per hour: a row of table numbers,
 then the seat rows C, B and A, with an instructor column between each pair of

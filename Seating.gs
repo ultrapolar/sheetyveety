@@ -222,23 +222,30 @@ function seatingCandidates_(chartName, names) {
   return names.filter(function (n) { return seatingMatchRank_(chartName, n) === 1; });
 }
 
-/** "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved. */
+/**
+ * "1C | IN3": where the student sat, and who they worked with.
+ *
+ * One seat, however many hours they were here. A student who moved tables is
+ * recorded at the seat they started the day in -- the chart is read top to
+ * bottom and hours run down it, so the first match is the earliest one. The
+ * instructors are not thinned the same way: moving tables means working with
+ * somebody new, and that is worth keeping, so all of them are listed.
+ */
 function formatSeating_(matches) {
   const config = CONFIG.SEATING;
-  const seats = [];
+  let seat = '';
   const instructors = [];
 
   matches.forEach(function (match) {
-    if (match.seat && seats.indexOf(match.seat) === -1) seats.push(match.seat);
+    if (match.seat && !seat) seat = match.seat;
     if (match.instructor && instructors.indexOf(match.instructor) === -1) {
       instructors.push(match.instructor);
     }
   });
 
-  const left = seats.join(config.SEAT_JOIN);
   const right = instructors.join(config.INSTRUCTOR_JOIN);
-  if (!left) return '';
-  return right ? left + config.SEPARATOR + right : left;
+  if (!seat) return '';
+  return right ? seat + config.SEPARATOR + right : seat;
 }
 
 /** Opens the seating chart, wherever it has been put. */

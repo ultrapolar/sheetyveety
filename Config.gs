@@ -202,9 +202,10 @@ const CONFIG = {
     // Where the result lands on the Daily WOP.
     TARGET_COLUMN: 14,   // N
 
-    // "1C | IN3", or "1C, 2A | IN3 IN1" for a student who moved during the day.
+    // "1C | IN3 IN1": the seat the student started the day in, then everyone
+    // they worked with. One seat however many hours they were here; a student
+    // who moved tables still gets both instructors.
     SEPARATOR: ' | ',
-    SEAT_JOIN: ', ',
     INSTRUCTOR_JOIN: ' ',
 
     // Shorthand written on the chart that cannot be worked out from the Daily
