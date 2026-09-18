@@ -126,13 +126,36 @@ nobody has got to yet, not a way to re-stamp finished work.
 
 #### Which calendar
 
-**Tools → Calendar: set the calendar.** Paste the Calendar ID from Google
-Calendar's settings — it looks like an email address, and several can be given
-separated by commas. Leave the box empty and press OK to go back to this
-account's own calendar. It checks each one on the spot and says what it found,
-because a calendar this account has not been given access to comes back as
-nothing at all — indistinguishable from a calendar with no sessions on it,
-until somebody is staring at a column of question marks.
+**Tools → Calendar: set the calendar** lists the calendars this account can
+already see. Tick the ones the sessions are on; tick none to use the account's
+own calendar. Each is checked on the spot and named back to you, because a
+calendar this account has not been given access to comes back as nothing at
+all — indistinguishable from a calendar with no sessions on it, until somebody
+is staring at a column of question marks.
+
+The box underneath is for a calendar that is not on the list, and takes
+**whatever Google Calendar actually hands you**:
+
+| What you copied | Looks like |
+| --- | --- |
+| Calendar ID | `c_9a8b@group.calendar.google.com` |
+| Secret or public iCal address | `…/calendar/ical/<id>/private-3f2a9/basic.ics` |
+| Embed code | `<iframe src="…/embed?src=<id>&ctz=…">` — paste the whole tag |
+| Share link | `…/calendar/u/0?cid=<id base64'd>` |
+
+The first version asked for the Calendar ID, which is the one string in those
+settings nobody copies first — everything else there is a link. Handing a link
+to Google as an id gets back "no such calendar", which reads like a sharing
+problem and is not one.
+
+A link that is not a calendar comes back refused and **nothing is saved**,
+rather than being passed through and reported as a calendar that does not
+exist. That includes a URL with an address buried in its path, which is shaped
+exactly like a calendar id.
+
+If the script has never been given calendar permission, the dialog says so and
+tells you to run it once more and accept — rather than showing an empty list,
+which looks like an account with no calendars.
 
 `CONFIG.CHANGELOG.CALENDAR_IDS` is the same setting in the code, and
 `LOOKAHEAD_DAYS` (28) is how far ahead it looks.

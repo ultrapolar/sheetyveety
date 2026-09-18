@@ -300,6 +300,7 @@ function install(globalObj, sheets, activeSheetName) {
     },
     base64Encode: s => Buffer.from(s, 'utf8').toString('base64'),
     base64Decode: s => Buffer.from(s, 'base64'),
+    newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8') }),
     Charset: { UTF_8: 'utf8' }
   };
 
@@ -341,7 +342,11 @@ function install(globalObj, sheets, activeSheetName) {
 
   globalObj.CalendarApp = {
     getDefaultCalendar: () => defaultCalendar,
-    getCalendarById: id => calendars[id] || null
+    getCalendarById: id => calendars[id] || null,
+    getAllCalendars: () => {
+      if (globalObj.__calendarsThrow) throw new Error('No calendar access.');
+      return Object.keys(calendars).map(id => calendars[id]);
+    }
   };
 
   // Register an extra spreadsheet that openById can find.

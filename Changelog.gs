@@ -548,42 +548,193 @@ function changelogLearningPlan() {
 // Which calendar
 // ------------------------------------------------------------------
 
+/** What a calendar id looks like: an address, or the word for your own. */
+function looksLikeCalendarId_(text) {
+  const raw = String(text || '').trim();
+  if (raw === 'primary') return true;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
+}
+
+/** A cid= parameter, which carries the id base64'd. */
+function decodeCalendarCid_(text) {
+  let raw = String(text || '').trim().replace(/-/g, '+').replace(/_/g, '/');
+  while (raw.length % 4) raw += '=';
+  try {
+    const bytes = Utilities.base64Decode(raw);
+    const id = Utilities.newBlob(bytes).getDataAsString().trim();
+    return looksLikeCalendarId_(id) ? id : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+/**
+ * A calendar id out of whatever was pasted.
+ *
+ * Asking for the "Calendar ID" was asking for the one string in Google
+ * Calendar's settings that nobody copies. What people find and copy is a
+ * link -- the iCal address, the embed code, the share link -- and every one of
+ * them carries the id somewhere inside it. So all of them are accepted.
+ *
+ * Returns '' for something that is not a calendar at all, rather than handing
+ * a URL to getCalendarById and reporting that the calendar does not exist.
+ */
+function calendarIdFromLink_(text) {
+  let raw = String(text == null ? '' : text).trim();
+  if (!raw) return '';
+
+  // The iCal address: /calendar/ical/<id>/private-xxxx/basic.ics
+  const ical = raw.match(/\/calendar\/ical\/([^/]+)\//);
+  if (ical) {
+    const id = decodeURIComponent(ical[1]);
+    return looksLikeCalendarId_(id) ? id : '';
+  }
+
+  // The embed address, and anything else carrying src=<id>.
+  const src = raw.match(/[?&]src=([^&#\s]+)/);
+  if (src) {
+    const id = decodeURIComponent(src[1]);
+    if (looksLikeCalendarId_(id)) return id;
+  }
+
+  // The share address: ...?cid=<the id, base64'd>
+  const cid = raw.match(/[?&]cid=([^&#\s]+)/);
+  if (cid) {
+    const id = decodeCalendarCid_(cid[1]);
+    if (id) return id;
+  }
+
+  // A link to something else entirely is not half-understood.
+  if (raw.indexOf('://') !== -1) return '';
+  return looksLikeCalendarId_(raw) ? raw : '';
+}
+
+/** Every calendar this account can see, or a reason it cannot look. */
+function allCalendars_() {
+  try {
+    return { calendars: CalendarApp.getAllCalendars() || [], problem: '' };
+  } catch (err) {
+    return { calendars: [], problem: err.message };
+  }
+}
+
 /**
  * Menu entry: say which calendar the students' sessions are on.
  *
- * Checks each one on the spot and says what it found, because a calendar id
- * that this account has not been given access to comes back as nothing at all
- * -- indistinguishable from a calendar with no sessions on it until somebody
- * is staring at a column of question marks.
+ * It lists the calendars this account can already see and you tick the ones
+ * you want, because the alternative -- go and find the Calendar ID -- sends
+ * somebody hunting through settings for a string that is not the one they will
+ * find first. The box underneath is for a calendar that is not on the list,
+ * and takes any of the links Google Calendar actually offers.
  */
 function setSessionCalendar() {
-  const ui = SpreadsheetApp.getUi();
-  const stored = PropertiesService.getScriptProperties()
-    .getProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
+  const stored = String(PropertiesService.getScriptProperties()
+    .getProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY) || '');
+  const chosen = splitList_(stored);
 
-  const response = ui.prompt('Calendar: set the calendar',
-    'Which calendar are the students\' sessions on?\n\n' +
-    'In Google Calendar, open the calendar\'s Settings and copy its ' +
-    '"Calendar ID" — it looks like an email address. Several can be pasted, ' +
-    'separated by commas.\n\n' +
-    'Leave blank and press OK to go back to this account\'s own calendar.\n\n' +
-    (stored ? 'Currently: ' + stored : 'Currently: this account\'s own calendar.'),
-    ui.ButtonSet.OK_CANCEL);
-
-  if (response.getSelectedButton() !== ui.Button.OK) return;
-
-  const typed = String(response.getResponseText()).trim();
-  const props = PropertiesService.getScriptProperties();
-
-  if (!typed) {
-    props.deleteProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
-    showError_('Back to this account\'s own calendar.');
+  const found = allCalendars_();
+  if (found.problem) {
+    showError_('This script cannot read your calendars yet: ' + found.problem +
+      '\n\nThis is usually the first time it has been asked to. Run it once ' +
+      'more and accept the permission Google asks for.');
     return;
   }
 
-  const ids = splitList_(typed);
-  const found = [];
-  const missing = [];
+  const rows = found.calendars.map(function (calendar, i) {
+    const id = calendar.getId();
+    const ticked = chosen.indexOf(id) !== -1 ? ' checked' : '';
+    return '<label style="display: block; padding: 3px 0;">' +
+      '<input type="checkbox" name="pick" value="' + escapeHtml_(id) + '"' +
+      ticked + '> <b>' + escapeHtml_(calendar.getName()) + '</b> ' +
+      '<span style="color: #64748b; font-size: 12px;">' + escapeHtml_(id) +
+      '</span></label>';
+  }).join('');
+
+  const html = '<div style="font-family: Arial, sans-serif; font-size: 14px; ' +
+    'line-height: 1.5; padding: 5px; color: #1e293b;">' +
+
+    '<p style="margin: 0 0 10px;">Which calendar are the students\' sessions ' +
+    'on? Tick as many as you need. Tick none to use this account\'s own ' +
+    'calendar.</p>' +
+
+    '<form id="calForm">' +
+    (rows
+      ? '<div style="max-height: 240px; overflow-y: auto; border: 1px solid ' +
+        '#e2e8f0; border-radius: 6px; padding: 8px; margin-bottom: 10px;">' +
+        rows + '</div>'
+      : '<p style="color: #b91c1c;">This account can see no calendars at all, ' +
+        'which is unusual. Paste one below.</p>') +
+
+    '<p style="margin: 0 0 4px;"><b>Not listed?</b> Paste its address — the ' +
+    'iCal address, the embed code, the share link or the Calendar ID all ' +
+    'work. Several, separated by commas.</p>' +
+    '<textarea name="pasted" style="width: 100%; height: 56px; font-family: ' +
+    'Consolas, monospace; font-size: 12px; padding: 6px; box-sizing: ' +
+    'border-box; border: 1px solid #cbd5e1; border-radius: 6px;"></textarea>' +
+    '</form>' +
+
+    '<div id="err" style="display: none; background: #fef2f2; color: #b91c1c; ' +
+    'border: 1px solid #fecaca; border-radius: 6px; padding: 8px; ' +
+    'margin: 8px 0;"></div>' +
+
+    '<button id="go" style="margin-top: 8px; padding: 7px 16px; font-size: ' +
+    '14px; background: #2563eb; color: white; border: none; border-radius: ' +
+    '6px; cursor: pointer;">Save</button>' +
+
+    '<script>' +
+    'document.getElementById("go").onclick = function () {' +
+    '  var go = document.getElementById("go");' +
+    '  var err = document.getElementById("err");' +
+    '  err.style.display = "none";' +
+    '  go.disabled = true; go.textContent = "Saving...";' +
+    '  go.style.background = "#9ca3af";' +
+    '  google.script.run' +
+    '    .withSuccessHandler(function () { google.script.host.close(); })' +
+    '    .withFailureHandler(function (e) {' +
+    '      go.disabled = false; go.textContent = "Save";' +
+    '      go.style.background = "#2563eb";' +
+    '      err.textContent = (e && e.message ? e.message : e);' +
+    '      err.style.display = "block";' +
+    '    })' +
+    '    .saveSessionCalendar_FromUI(document.getElementById("calForm"));' +
+    '};' +
+    '</script></div>';
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(560).setHeight(520),
+    'Calendar: set the calendar');
+}
+
+/** Phase two of setSessionCalendar: stores what was ticked and pasted. */
+function saveSessionCalendar_FromUI(form) {
+  const picked = form && form.pick;
+  const ids = (picked === undefined || picked === null) ? []
+    : (Array.isArray(picked) ? picked.slice() : [picked]);
+
+  const rejected = [];
+  splitList_(form && form.pasted).forEach(function (entry) {
+    const id = calendarIdFromLink_(entry);
+    if (!id) { rejected.push(entry); return; }
+    if (ids.indexOf(id) === -1) ids.push(id);
+  });
+
+  if (rejected.length) {
+    throw new Error('This is not a calendar address: ' + rejected.join(', ') +
+      '. Nothing was saved. In Google Calendar, open the calendar\'s settings ' +
+      'and copy any of: the Calendar ID, the iCal address, or the link under ' +
+      '"Integrate calendar".');
+  }
+
+  const props = PropertiesService.getScriptProperties();
+  if (!ids.length) {
+    props.deleteProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY);
+    showError_('Using this account\'s own calendar.');
+    return;
+  }
+
+  // Check each one now rather than at the end of a run that came back empty.
+  const opened = [];
+  const unreachable = [];
   ids.forEach(function (id) {
     let calendar = null;
     try {
@@ -591,21 +742,20 @@ function setSessionCalendar() {
     } catch (err) {
       calendar = null;
     }
-    if (calendar) found.push(calendar.getName() + ' (' + id + ')');
-    else missing.push(id);
+    if (calendar) opened.push(calendar.getName() + ' (' + id + ')');
+    else unreachable.push(id);
   });
 
-  if (!found.length) {
-    showError_('None of those could be opened: ' + missing.join(', ') +
-      '\n\nNothing was saved. Most often this is sharing — the account running ' +
+  if (!opened.length) {
+    throw new Error('None of those could be opened: ' + unreachable.join(', ') +
+      '. Nothing was saved. Most often this is sharing — the account running ' +
       'this script has to have been given access to the calendar too.');
-    return;
   }
 
   props.setProperty(CONFIG.CHANGELOG.CALENDAR_PROPERTY, ids.join(', '));
-  showError_('Saved. Looking in: ' + found.join(', ') + '.' +
-    (missing.length
+  showError_('Saved. Looking in: ' + opened.join(', ') + '.' +
+    (unreachable.length
       ? '\n\nThese could not be opened and will be skipped: ' +
-        missing.join(', ') + '. Check they are shared with this account.'
+        unreachable.join(', ') + '. Check they are shared with this account.'
       : ''));
 }

@@ -44,6 +44,8 @@ function loadScript(context) {
   changelogColumnPlan_, changelogCreate, changelogGrade,
   changelogLearningPlan, percentValue_, starsFor_, nextSessionFor_,
   sessionCalendars_, calendarNames_, eventNameFields_, setSessionCalendar,
+  calendarIdFromLink_, looksLikeCalendarId_, saveSessionCalendar_FromUI,
+  allCalendars_,
   previousAssessment_, monthDay_, dayLabel_, monthDayValue_,
   setRadiusCookie, saveRadiusCookie_FromUI, normalizeCookieString_,
   cookieComplaint_,
@@ -2728,6 +2730,128 @@ const DECK_FILLER_ROWS = [
     touched,
     b.api.CONFIG.CHANGELOG.COLUMNS
       .filter(c => c.fill === 'script').map(c => c.column));
+}
+
+// 45aa2. Saying which calendar, given what Google Calendar actually hands you.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const ID = 'c_9a8b7c@group.calendar.google.com';
+  const from = t => api.calendarIdFromLink_(t);
+
+  // The Calendar ID itself, which is the one string nobody copies first.
+  check('cal id: the bare id', from(ID), ID);
+  check('cal id: a personal calendar', from('someone@gmail.com'),
+    'someone@gmail.com');
+  check('cal id: your own', from('primary'), 'primary');
+  check('cal id: with spaces round it', from('  ' + ID + '  '), ID);
+
+  // The iCal address, which is what "Integrate calendar" offers first.
+  check('cal id: the secret iCal address',
+    from('https://calendar.google.com/calendar/ical/' +
+      encodeURIComponent(ID) + '/private-3f2a9/basic.ics'), ID);
+  check('cal id: the public iCal address',
+    from('https://calendar.google.com/calendar/ical/' +
+      encodeURIComponent(ID) + '/public/basic.ics'), ID);
+
+  // The embed address, and the whole embed code pasted in one go.
+  check('cal id: the embed address',
+    from('https://calendar.google.com/calendar/embed?src=' +
+      encodeURIComponent(ID) + '&ctz=America%2FNew_York'), ID);
+  check('cal id: the entire embed code',
+    from('<iframe src="https://calendar.google.com/calendar/embed?src=' +
+      encodeURIComponent(ID) + '&ctz=America%2FNew_York" width="800"></iframe>'),
+    ID);
+
+  // The share link, which carries the id base64'd behind cid=.
+  check('cal id: the share link',
+    from('https://calendar.google.com/calendar/u/0?cid=' +
+      Buffer.from(ID, 'utf8').toString('base64')), ID);
+  check('cal id: a share link with the padding stripped',
+    from('https://calendar.google.com/calendar/r?cid=' +
+      Buffer.from(ID, 'utf8').toString('base64').replace(/=+$/, '')), ID);
+
+  // Things that are not calendars come back empty rather than being handed
+  // to Google as an id and reported as a calendar that does not exist.
+  check('cal id: a link to something else', from('https://example.com/x'), '');
+  check('cal id: a link with an address buried in its path',
+    from('https://example.com/share/someone@x.com'), '');
+  check('cal id: a spreadsheet link',
+    from('https://docs.google.com/spreadsheets/d/abc/edit'), '');
+  check('cal id: prose', from('the one Sharon shares with me'), '');
+  check('cal id: nothing', from(''), '');
+
+  // --- the picker -------------------------------------------------------
+  h.addCalendar('own@example.com', 'My calendar', [], true);
+  h.addCalendar(ID, 'Centre sessions', []);
+
+  api.setSessionCalendar();
+  const shown = h.dialogs[h.dialogs.length - 1];
+  checkTruthy('cal picker: it lists what the account can see',
+    shown.html.includes('Centre sessions') && shown.html.includes('My calendar'));
+  checkTruthy('cal picker: with a box for one that is not listed',
+    shown.html.includes('iCal address') && shown.html.includes('embed code'));
+
+  // Ticking one.
+  const save = form => {
+    try { api.saveSessionCalendar_FromUI(form); return ''; }
+    catch (e) { return e.message; }
+  };
+  check('cal picker: ticking one is not refused', save({ pick: ID }), '');
+  check('cal picker: a ticked calendar is stored',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("CHANGELOG_CALENDAR_IDS")', ctx), ID);
+  checkTruthy('cal picker: and it says which, by name',
+    h.alerts.join(' ').includes('Centre sessions'));
+
+  // Ticking two.
+  check('cal picker: ticking two is not refused',
+    save({ pick: [ID, 'own@example.com'] }), '');
+  check('cal picker: two ticked are both stored',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("CHANGELOG_CALENDAR_IDS")', ctx),
+    ID + ', own@example.com');
+
+  // Pasting a link instead of ticking -- the case that was broken.
+  check('cal picker: a pasted iCal address is not refused', save({ pasted:
+    'https://calendar.google.com/calendar/ical/' + encodeURIComponent(ID) +
+    '/private-3f2a9/basic.ics' }), '');
+  check('cal picker: a pasted iCal address is understood',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("CHANGELOG_CALENDAR_IDS")', ctx), ID);
+
+  // Something that is not a calendar is refused, and nothing is saved.
+  let refused = '';
+  try { api.saveSessionCalendar_FromUI({ pasted: 'https://example.com/x' }); }
+  catch (e) { refused = e.message; }
+  checkTruthy('cal picker: a link that is not a calendar is refused',
+    refused.includes('not a calendar address'));
+  check('cal picker: and the old choice is left alone',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("CHANGELOG_CALENDAR_IDS")', ctx), ID);
+
+  // A calendar id nothing answers to is refused too, with the likely reason.
+  refused = '';
+  try { api.saveSessionCalendar_FromUI({ pasted: 'nobody@example.com' }); }
+  catch (e) { refused = e.message; }
+  checkTruthy('cal picker: an id nothing answers to is refused',
+    refused.includes('nobody@example.com') && refused.includes('sharing'));
+
+  // Ticking nothing goes back to the account's own calendar.
+  check('cal picker: ticking nothing is not refused', save({}), '');
+  check('cal picker: nothing ticked means your own calendar',
+    vm.runInContext('PropertiesService.getScriptProperties()' +
+      '.getProperty("CHANGELOG_CALENDAR_IDS")', ctx), null);
+
+  // The first run of all, before Google has been asked for permission.
+  vm.runInContext('__calendarsThrow = true;', ctx);
+  api.setSessionCalendar();
+  checkTruthy('cal picker: no permission yet is named for what it is',
+    h.alerts.join(' ').includes('accept the permission'));
+  vm.runInContext('__calendarsThrow = false;', ctx);
 }
 
 // 45ab. Drafting a progress report.
