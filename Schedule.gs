@@ -78,6 +78,25 @@ function sectionForTag_(tag) {
   return -1;
 }
 
+/**
+ * True for a title written the way an instructor's own line is written:
+ * "IC (Amanda)  AL", "@H (Bo)  BK".
+ *
+ * A second way of knowing one, because a shift put on the wrong calendar is
+ * still a shift, and belongs with the rest rather than in the leftovers.
+ */
+function looksLikeShiftTitle_(title) {
+  const text = String(title == null ? '' : title).trim();
+  return (CONFIG.SCHEDULE.SHIFT_MARKERS || []).some(function (marker) {
+    const mark = String(marker).trim();
+    if (!mark || text.toUpperCase().indexOf(mark.toUpperCase()) !== 0) return false;
+    // The marker has to be a word of its own, or "IC" would claim "ICU open
+    // day" and every name that happens to start with those letters.
+    const next = text.charAt(mark.length);
+    return next === '' || next === ' ' || next === '(';
+  });
+}
+
 /** True for a calendar whose items are shifts rather than sessions. */
 function isShiftCalendar_(name) {
   return (CONFIG.SCHEDULE.SHIFT_CALENDARS || []).some(function (wanted) {
@@ -139,7 +158,7 @@ function scheduleItemsFor_(calendars, date) {
       const item = { title: title, start: start, end: end, allDay: !!allDay,
         asIs: asIs, calendar: calendar.getName() };
 
-      if (fromShifts) {
+      if (fromShifts || looksLikeShiftTitle_(title)) {
         if (seen['shift|' + asIs]) return;
         seen['shift|' + asIs] = true;
         shifts.push(item);
@@ -207,7 +226,7 @@ function scheduleBlock_(items) {
     (section.header || []).forEach(function (cell) {
       header[cell.column] = cell.text;
     });
-    push(header);
+    rows.push({ cells: header, student: false, section: index });
 
     const mine = items.sessions.filter(function (s) { return s.section === index; });
 
@@ -240,6 +259,27 @@ function scheduleBlock_(items) {
   });
 
   return rows;
+}
+
+/**
+ * The last row above `before` that opens this section, or 0.
+ *
+ * A section header is more than its word: it is bold, it is coloured, it has
+ * links in it. Rather than typing the word and losing all of that, the day
+ * before's row is copied whole -- which is also the only way the links come
+ * with it, since nothing here knows what they point at.
+ */
+function sectionTemplateRow_(sheet, section, before) {
+  const wanted = ((section.header || [])[0] || {}).text;
+  if (!wanted || before < 2) return 0;
+
+  const values = sheet.getRange(1, 1, before - 1, 1).getValues();
+  for (let r = values.length - 1; r >= 0; r--) {
+    if (cellText_(values[r][0]).toLowerCase() === String(wanted).toLowerCase()) {
+      return r + 1;
+    }
+  }
+  return 0;
 }
 
 /** Menu entry: lay today out from the cursor down. */
@@ -344,6 +384,16 @@ function importCalendarFor_(date, source) {
   try {
     const items = scheduleItemsFor_(found.calendars, day.date);
     const rows = scheduleBlock_(items);
+    const sections = CONFIG.SCHEDULE.SECTIONS || [];
+    const width = sheet.getMaxColumns();
+
+    // A section header is copied from the day before where there is one, so
+    // its formatting and its links come with it. Only when there is no
+    // earlier day is the word typed out plain.
+    rows.forEach(function (row) {
+      if (row.section === undefined) return;
+      row.template = sectionTemplateRow_(sheet, sections[row.section], startRow);
+    });
     const bodyRows = items.shifts.length + items.other.length +
       items.sessions.length;
     if (!bodyRows) {
@@ -361,6 +411,7 @@ function importCalendarFor_(date, source) {
     // in the columns beside them stay where they are.
     const columns = {};
     rows.forEach(function (row, i) {
+      if (row.template) return;   // copied whole, not written cell by cell
       Object.keys(row.cells).forEach(function (column) {
         if (!columns[column]) columns[column] = {};
         columns[column][i] = row.cells[column];
@@ -401,6 +452,17 @@ function importCalendarFor_(date, source) {
         }
       });
     });
+    rows.forEach(function (row, i) {
+      if (!row.template) return;
+      const existing = sheet.getRange(startRow + i, 1, 1, width).getValues()[0];
+      for (let c = 0; c < existing.length; c++) {
+        if (cellText_(existing[c])) {
+          occupied.push(columnLetter_(c + 1) + (startRow + i) +
+            ' ("' + shorten_(cellText_(existing[c]), 40) + '")');
+        }
+      }
+    });
+
     if (occupied.length) {
       showError_('Nothing was pasted: the day needs ' + rows.length +
         ' rows from row ' + startRow + ', and there is already something in ' +
@@ -419,6 +481,16 @@ function importCalendarFor_(date, source) {
       sheet.getRange(startRow, Number(column), rows.length, 1).setValues(block);
     });
 
+    // The copied headers go down after the columns, so nothing written by the
+    // column pass lands on top of one.
+    let typedOut = 0;
+    rows.forEach(function (row, i) {
+      if (row.section === undefined) return;
+      if (!row.template) { typedOut++; return; }
+      sheet.getRange(row.template, 1, 1, width)
+        .copyTo(sheet.getRange(startRow + i, 1, 1, width));
+    });
+
     writeStudentFormulas_(sheet, startRow, rows);
 
     const log = ActionLog_();
@@ -427,6 +499,11 @@ function importCalendarFor_(date, source) {
         ', but ' + day.mismatch + '. That is fine when you are setting up ' +
         'ahead; it is not when you meant to paste under the heading you are ' +
         'sitting in. Ctrl+Z puts it back.');
+    }
+    if (typedOut) {
+      log.warn('Section headers', typedOut + ' of them had no earlier day to ' +
+        'copy from, so the word is there but the formatting and any links are ' +
+        'not. Style them once and the next day will match.');
     }
     items.unplaced.forEach(function (item) {
       log.warn(item.title, 'is a session, but nothing in CONFIG.SCHEDULE' +

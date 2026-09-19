@@ -42,6 +42,7 @@ function loadScript(context) {
   parseTypedDate_, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
+  looksLikeShiftTitle_, sectionTemplateRow_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1066,8 +1067,10 @@ const DECK_FILLER_ROWS = [
       return row;
     });
     while (rows.length < (opts.height || 40)) rows.push(new Array(26).fill(''));
+    const bg = makeGrid(rows.length, 26, '#ffffff');
+    (opts.fills || []).forEach(function (f) { bg[f[0] - 1][f[1] - 1] = f[2]; });
 
-    const wop = new FakeSheet('Daily WOP', rows, makeGrid(rows.length, 26, '#ffffff'));
+    const wop = new FakeSheet('Daily WOP', rows, bg);
     const deck = new FakeSheet('Deck List',
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     wop.activeRange = wop.getRange(opts.at || 1, 1, 1, 1);
@@ -1091,7 +1094,7 @@ const DECK_FILLER_ROWS = [
     } else {
       api.importCalendarToday();
     }
-    return { wop: wop, api: api, harness: h,
+    return { wop: wop, api: api, harness: h, writes: () => wop.writeCount,
       formula: (row, col) => String((wop.formulas || {})[row + ':' + col] || ''),
       cell: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
       colA: () => wop.values.map(r => String(r[0] || '')),
@@ -1204,15 +1207,26 @@ const DECK_FILLER_ROWS = [
     p.said().includes('@HOME') && p.said().includes('In-Center'));
 
   // A shift is a shift because of the calendar it is on, not its wording.
+  // An instructor on the wrong calendar is still an instructor: the line is
+  // written the way an instructor's line is written, and that is enough.
   p = paste(Object.assign({}, day, { shiftCalendars: [] }));
-  checkTruthy('day: with no shift calendar named, a shift is just another item',
-    p.colA().indexOf('8:45am - 1:15pm IC (Amanda)  AL') !== -1);
-  check('day: so none of them is listed as a shift',
-    p.colA().filter(v => v === '8:45am - 1:15pm IC (Amanda)  AL').length, 1);
-  checkTruthy('day: and the report says so',
-    p.said().includes('SHIFT_CALENDARS names no calendar'));
-  check('day: with nobody beside any hour',
-    p.wop.values.map(r => String(r[6] || '')).filter(Boolean), []);
+  check('day: a shift is grouped by how its line reads, not only by calendar',
+    [p.cell(2), p.cell(3), p.cell(4)],
+    ['8:45am - 1:15pm IC (Amanda)  AL', '9 - 11am IC (Bo)  BK',
+     '10am - 1pm IC (Cass)  CJ']);
+  checkTruthy('day: and is listed beside the hours it covers',
+    p.cell(9, 7).indexOf('IC (Amanda)') !== -1);
+
+  const api2 = paste({ calendars: [] }).api;
+  checkTruthy('shift title: in-centre', api2.looksLikeShiftTitle_('IC (Amanda)  AL'));
+  checkTruthy('shift title: at home', api2.looksLikeShiftTitle_('@H (Bo)  BK'));
+  checkTruthy('shift title: with no space before the bracket',
+    api2.looksLikeShiftTitle_('IC(Amanda) AL'));
+  check('shift title: a word that merely starts with it is not one',
+    api2.looksLikeShiftTitle_('ICU open day'), false);
+  check('shift title: nor is a student', api2.looksLikeShiftTitle_(
+    'Amalie Laz - (IN-CENTER) 1 hour session'), false);
+  check('shift title: nor anything else', api2.looksLikeShiftTitle_('Fire drill'), false);
 
   // A bracket nobody taught it about is kept and named, not filed by guess.
   p = paste({ at: 1, shiftCalendars: [], calendars: [
@@ -1318,6 +1332,78 @@ const DECK_FILLER_ROWS = [
     { id: 'a@x', name: 'Appointy', events: [] }] });
   check('day: an empty day writes nothing', p.cell(1), '');
   checkTruthy('day: and says which day', p.said().includes('9/17/2026 Thursday'));
+
+  // --- the section headers keep the look of the day before ---------------
+  // Yesterday's @HOME and In-Center rows carry formatting and links. Today's
+  // are copied off them rather than typed out, which is the only way the
+  // links come along -- nothing here knows what they point at.
+  p = paste({ at: 6, shiftCalendars: [],
+    rows: ['9/16/2026 Wednesday', '@HOME', '9:00 Someone',
+           { 1: 'In-Center', 2: 'Issue', 12: 'IAAT', 13: 'Hist' },
+           '9:00 Someone Else'],
+    fills: [[2, 1, '#ffd966'], [4, 1, '#a4c2f4'], [4, 13, '#a4c2f4']],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '10:00', '11:00')] }] });
+
+  check('headers: the words are there', [p.cell(6), p.cell(8)],
+    ['@HOME', 'In-Center']);
+  check('headers: and the rest of the In-Center row came with them',
+    [p.cell(8, 2), p.cell(8, 12), p.cell(8, 13)], ['Issue', 'IAAT', 'Hist']);
+  check('headers: wearing yesterday\'s formatting',
+    [String(p.wop.backgrounds[5][0]), String(p.wop.backgrounds[7][0])],
+    ['#ffd966', '#a4c2f4']);
+  check('headers: right across the row',
+    String(p.wop.backgrounds[7][12]), '#a4c2f4');
+  checkTruthy('headers: and nothing is said about it', !p.said().includes('no earlier day'));
+
+  // A copied header brings its own cells with it, so the columns only it
+  // would have needed -- Issue, IAAT, Hist -- are never written. Three fewer
+  // round trips each time, on a script with six minutes to work in.
+  checkTruthy('headers: a copied header costs no column writes of its own (' +
+    p.writes() + ')', p.writes() <= 14);
+
+
+  // Yesterday's own rows are left exactly as they were.
+  check('headers: yesterday is untouched',
+    [p.cell(2), p.cell(3), p.cell(4), p.cell(5)],
+    ['@HOME', '9:00 Someone', 'In-Center', '9:00 Someone Else']);
+
+  // The nearest one above wins, so a fortnight of days does not matter.
+  check('headers: the students still land under their own header',
+    [p.cell(7), p.cell(9)], ['10:00 Bubba Blue', '9:00 Student One']);
+
+  // Yesterday's styling, not a fortnight ago's: two earlier days, and the one
+  // just above is the one copied.
+  p = paste({ at: 10, shiftCalendars: [],
+    rows: ['9/14/2026 Monday', '@HOME', '9:00 Old One',
+           { 1: 'In-Center', 2: 'Issue' }, '9:00 Old Two', '',
+           '9/16/2026 Wednesday', '@HOME', '9:00 Newer One'],
+    fills: [[2, 1, '#cc0000'], [8, 1, '#ffd966']],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '10:00', '11:00')] }] });
+  check('headers: the nearest earlier day is the one copied',
+    String(p.wop.backgrounds[9][0]), '#ffd966');
+
+  // With no earlier day there is nothing to copy, so the word is typed out
+  // and the report says the styling is yours to do once.
+  p = paste({ at: 1, shiftCalendars: [],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  check('headers: the first day of all still gets its words',
+    [p.cell(1), p.cell(2, 1), p.cell(2, 13)], ['@HOME', 'In-Center', 'Hist']);
+  checkTruthy('headers: and is told the styling is not there',
+    p.said().includes('no earlier day'));
+
+  // A copied header needs its whole row clear, not just column A.
+  // The @HOME header would land on row 3, and there is something out at T3.
+  p = paste({ at: 3, shiftCalendars: [],
+    rows: ['9/16/2026 Wednesday', '@HOME', { 20: 'a note out to the side' }],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '10:00', '11:00')] }] });
+  check('headers: something anywhere on the row stops the paste',
+    [p.cell(3), p.cell(3, 20)], ['', 'a note out to the side']);
+  checkTruthy('headers: and is named', p.said().includes('T3'));
 
   // --- the formulas beside a student, and the text taken off them --------
   // The fake stands in for the lookup: column C works out a link, column D a

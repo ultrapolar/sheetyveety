@@ -389,6 +389,21 @@ In-Center | Issue | … | IAAT | Hist     the section header
 11:00 Student Three   8:45am - 1:15pm IC (Amanda)  AL
 ```
 
+### The section headers keep the day before's look
+
+`@HOME` and `In-Center` are more than their words — they are bold, they are
+coloured, they have links in them. So rather than typing the word and losing
+all of that, **the nearest earlier day's row is copied whole**. That is also
+the only way the links come along, since nothing here knows what they point at.
+
+The nearest one, not the first: yesterday's styling, not a fortnight ago's.
+
+With no earlier day there is nothing to copy, so the words are typed out plain
+and the report says the styling is yours to do once — the next day will match
+it. A copied header needs its **whole row** clear, not just column A, and
+brings its own cells with it, so the columns only it would have needed are
+never written at all.
+
 ### The columns beside a student
 
 Each student row also gets the sheet's own lookups — **column C** the link,
@@ -411,13 +426,22 @@ rather than becoming a formula of its own.
 | Kind | How it is told apart | Where it goes |
 | --- | --- | --- |
 | **A session** | its title has a bracket: `Amalie Laz - (IN-CENTER) 1 hour session - Appointy` | `9:00 Amalie Laz`, under the section the bracket names |
-| **A shift** | it is on the **Instructor Availability** calendar (`CONFIG.SCHEDULE.SHIFT_CALENDARS`), by name | the top of the block, as it stands — and beside each hour it covers |
+| **A shift** | it is on the **Instructor Availability** calendar, **or** its line reads like one: `IC (Amanda)  AL`, `@H (Bo)  BK` | the top of the block, as it stands — and beside each hour it covers |
 | **Anything else** | everything left | under the shifts, as it stands |
 
-A shift is a shift because of **which calendar it is on**, not how its title is
-worded — so nobody has to type one a particular way for it to land right. With
-no shift calendar named, nothing is read as a shift, no instructors are listed
-beside the hours, and the report says so rather than leaving you to notice.
+**All the instructors end up together**, whichever calendar they came from.
+Two ways of knowing one, because either alone lets somebody slip through:
+
+- it is on a calendar in `CONFIG.SCHEDULE.SHIFT_CALENDARS` (**Instructor
+  Availability**), so a shift titled any old way still lands right; **or**
+- its line reads the way an instructor's line reads — a marker from
+  `CONFIG.SCHEDULE.SHIFT_MARKERS` (`IC`, `@H`), then the name and initials — so
+  a shift put on the wrong calendar lands right too.
+
+The marker has to be a word of its own: `ICU open day` is not a shift.
+
+Everything that is neither a shift nor a session follows underneath in calendar
+order, still ahead of the two student sections.
 
 ### Reading a booking title
 

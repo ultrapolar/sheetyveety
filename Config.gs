@@ -56,6 +56,12 @@ const CONFIG = {
     // underneath.
     SHIFT_CALENDARS: ['Instructor Availability'],
 
+    // What an instructor's own line looks like, whichever calendar it came
+    // from: "IC (Amanda)  AL", "@H (Bo)  BK" -- where they are, whose shift it
+    // is, their initials. Anything starting this way is grouped with the
+    // shifts, so one put on the wrong calendar still lands with the rest.
+    SHIFT_MARKERS: ['IC', '@H'],
+
     // Between the two ends of a time range: "8:45am - 1:15pm".
     RANGE_SEPARATOR: ' - ',
 
