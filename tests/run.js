@@ -38,7 +38,9 @@ function loadScript(context) {
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
   jumpToToday, startNewDay, parseDayHeader_, dayHeaderText_, dayHeaderRows_,
-  importCalendarSchedule, scheduleDayFor_, calendarItemsFor_, scheduleRowText_,
+  importCalendarSchedule, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
+  parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
+  shiftCoversHour_, isShiftCalendar_, hourStartOf_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1052,7 +1054,7 @@ const DECK_FILLER_ROWS = [
     d.harness.activatedSheets.indexOf('Daily WOP') !== -1);
 }
 
-// 45c3. Pasting the day's calendar down a column.
+// 45c3. Laying the day out from the calendar.
 {
   function paste(options) {
     const opts = options || {};
@@ -1062,12 +1064,12 @@ const DECK_FILLER_ROWS = [
       else Object.keys(r).forEach(k => { row[Number(k) - 1] = r[k]; });
       return row;
     });
-    while (rows.length < (opts.height || 20)) rows.push(new Array(26).fill(''));
+    while (rows.length < (opts.height || 40)) rows.push(new Array(26).fill(''));
 
     const wop = new FakeSheet('Daily WOP', rows, makeGrid(rows.length, 26, '#ffffff'));
     const deck = new FakeSheet('Deck List',
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
-    wop.activeRange = wop.getRange(opts.at || 1, opts.column || 1, 1, 1);
+    wop.activeRange = wop.getRange(opts.at || 1, 1, 1, 1);
 
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate(opts.today || '2026-09-17'), String, Number, Object,
@@ -1075,119 +1077,187 @@ const DECK_FILLER_ROWS = [
     const h = install(ctx, [deck, wop], 'Daily WOP');
     (opts.calendars || []).forEach(c => h.addCalendar(c.id, c.name, c.events));
     const api = loadScript(ctx);
+    if (opts.shiftCalendars) {
+      vm.runInContext('CONFIG.SCHEDULE.SHIFT_CALENDARS = ' +
+        JSON.stringify(opts.shiftCalendars) + ';', ctx);
+    }
     api.importCalendarSchedule();
-    return { wop: wop,
-      col: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
+    return { wop: wop, api: api,
+      cell: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
+      colA: () => wop.values.map(r => String(r[0] || '')),
       said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
   }
 
   const at = (iso, hhmm) => new Date(iso + 'T' + hhmm + ':00');
-  const oneCal = events => [{ id: 'a@x', name: 'Sessions', events: events }];
+  const ev = (title, from, to) => ({ title: title,
+    start: at('2026-09-17', from), end: at('2026-09-17', to) });
 
-  // The plain case: a cell, and the day's items down the column from it.
-  let p = paste({ at: 3, column: 5, calendars: oneCal([
-    { title: 'Sharon Yoo', start: at('2026-09-17', '19:00') },
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') },
-    { title: 'Neil D', start: at('2026-09-17', '17:00') }]) });
-  check('paste: in the order the day runs, from the chosen cell',
-    [p.col(3, 5), p.col(4, 5), p.col(5, 5)],
-    ['4:00 Amalie Laz', '5:00 Neil D', '7:00 Sharon Yoo']);
-  check('paste: and nowhere else', p.col(6, 5), '');
-  check('paste: nor in another column', p.col(3, 1), '');
-  checkTruthy('paste: the report says where it went',
-    p.said().includes('E3:E5'));
+  // --- reading a booking title ------------------------------------------
+  const api0 = paste({ calendars: [] }).api;
+  check('title: the name and the bracket, the rest is the booking system',
+    api0.parseSessionTitle_('Amalie Laz - (IN-CENTER) 1 hour session - Appointy : Updated'),
+    { name: 'Amalie Laz', tag: 'IN-CENTER' });
+  check('title: a virtual one reads the same way',
+    api0.parseSessionTitle_('Bubba Blue - (VIRTUAL | @HOME) 1 hour session - Appointy'),
+    { name: 'Bubba Blue', tag: 'VIRTUAL | @HOME' });
+  check('title: an en dash is a dash',
+    api0.parseSessionTitle_('Bubba Blue – (IN-CENTER) 1 hour session').name,
+    'Bubba Blue');
+  check('title: a hyphenated name keeps its hyphen',
+    api0.parseSessionTitle_('Mary-Jane Lee - (IN-CENTER) 1 hour session').name,
+    'Mary-Jane Lee');
+  check('title: something that is not a booking is not one',
+    api0.parseSessionTitle_('Staff meeting'), null);
+  check('title: nor is a bracket with no name in front of it',
+    api0.parseSessionTitle_('- (IN-CENTER) 1 hour session'), null);
 
-  // A title that already carries a time does not get a second one.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: '4:00 Amalie Laz', start: at('2026-09-17', '16:00') }]) });
-  check('paste: a time already in the title is not doubled',
-    p.col(1), '4:00 Amalie Laz');
+  check('section: in-center', api0.sectionForTag_('IN-CENTER'), 1);
+  check('section: virtual and at home', api0.sectionForTag_('VIRTUAL | @HOME'), 0);
+  check('section: one nobody named', api0.sectionForTag_('OUTREACH'), -1);
 
-  // Every calendar the account can see, subscribed ones included.
-  p = paste({ at: 1, calendars: [
-    { id: 'a@x', name: 'Centre', events: [
-      { title: 'Amalie Laz', start: at('2026-09-17', '16:00') }] },
-    { id: 'b@x', name: 'Subscribed', events: [
-      { title: 'Neil D', start: at('2026-09-17', '17:00') }] }] });
-  check('paste: every calendar is read, not just one',
-    [p.col(1), p.col(2)], ['4:00 Amalie Laz', '5:00 Neil D']);
-  checkTruthy('paste: and the report says which gave what',
-    p.said().includes('Centre') && p.said().includes('Subscribed'));
+  // --- a time range, written the way a calendar writes one ---------------
+  const range = (from, to) =>
+    api0.timeRangeLabel_(at('2026-09-17', from), at('2026-09-17', to));
+  check('range: minutes are kept', range('08:45', '13:15'), '8:45am - 1:15pm');
+  check('range: a whole hour drops its minutes', range('09:00', '13:00'), '9am - 1pm');
+  check('range: one half of the day says so once', range('09:00', '11:00'), '9 - 11am');
+  check('range: and the afternoon likewise', range('18:00', '19:00'), '6 - 7pm');
+  check('range: noon is a pm', range('11:00', '12:00'), '11am - 12pm');
 
-  // The same item on two calendars is one item.
-  p = paste({ at: 1, calendars: [
-    { id: 'a@x', name: 'Centre', events: [
-      { title: 'Amalie Laz', start: at('2026-09-17', '16:00') }] },
+  // --- a shift covers an hour, or it does not ---------------------------
+  const covers = (from, to, hour) => api0.shiftCoversHour_(
+    { start: at('2026-09-17', from), end: at('2026-09-17', to) },
+    api0.hourStartOf_(at('2026-09-17', hour)));
+  checkTruthy('shift: nine to eleven is working the nine', covers('09:00', '11:00', '09:00'));
+  checkTruthy('shift: and the ten', covers('09:00', '11:00', '10:00'));
+  check('shift: but not the eleven it finishes on',
+    covers('09:00', '11:00', '11:00'), false);
+  checkTruthy('shift: a quarter to nine is working the nine',
+    covers('08:45', '13:15', '09:00'));
+  check('shift: someone starting at ten is not working the nine',
+    covers('10:00', '13:00', '09:00'), false);
+
+  // --- the whole day, laid out ------------------------------------------
+  const day = {
+    at: 2,
+    rows: ['9/17/2026 Thursday'],
+    shiftCalendars: ['Staff Schedule'],
+    calendars: [
+      { id: 'staff@x', name: 'Staff Schedule', events: [
+        ev('IC (Amanda)  AL', '08:45', '13:15'),
+        ev('IC (Bo)  BK', '09:00', '11:00'),
+        ev('IC (Cass)  CJ', '10:00', '13:00')] },
+      { id: 'book@x', name: 'Appointy', events: [
+        ev('Student One - (IN-CENTER) 1 hour session - Appointy', '09:00', '10:00'),
+        ev('Student Two - (IN-CENTER) 1 hour session - Appointy : Updated', '09:00', '10:00'),
+        ev('Student Three - (IN-CENTER) 1 hour session', '11:00', '12:00'),
+        ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session - Appointy', '10:00', '11:00')] },
+      { id: 'misc@x', name: 'Centre', events: [
+        ev('Fire drill', '12:00', '12:30')] }]
+  };
+
+  let p = paste(day);
+
+  // The shifts first, as they stand.
+  check('day: the shifts go in as they stand, in time order',
+    [p.cell(2), p.cell(3), p.cell(4)],
+    ['8:45am - 1:15pm IC (Amanda)  AL', '9 - 11am IC (Bo)  BK',
+     '10am - 1pm IC (Cass)  CJ']);
+
+  // Then anything that is not a session, also as it stands.
+  check('day: anything else follows, as it stands',
+    p.cell(5), '12 - 12:30pm Fire drill');
+
+  // Then @HOME and its students.
+  check('day: the @HOME header', p.cell(6), '@HOME');
+  check('day: and its student', p.cell(7), '10:00 Bubba Blue');
+
+  // Then In-Center, with the headings that belong on that row.
+  check('day: the In-Center header row',
+    [p.cell(8, 1), p.cell(8, 2), p.cell(8, 12), p.cell(8, 13)],
+    ['In-Center', 'Issue', 'IAAT', 'Hist']);
+  check('day: its students, in time order',
+    [p.cell(9), p.cell(10), p.cell(11)],
+    ['9:00 Student One', '9:00 Student Two', '11:00 Student Three']);
+
+  // The instructors covering each hour, from the row that hour opens on.
+  check('day: the nine is covered by the two who are in',
+    [p.cell(9, 7), p.cell(10, 7)],
+    ['8:45am - 1:15pm IC (Amanda)  AL', '9 - 11am IC (Bo)  BK']);
+  check('day: the eleven has lost the one who finished at eleven',
+    p.cell(11, 7), '8:45am - 1:15pm IC (Amanda)  AL');
+
+  // Nothing beyond the block.
+  check('day: and nothing after it', p.cell(12), '');
+
+  checkTruthy('day: the report counts each section',
+    p.said().includes('@HOME') && p.said().includes('In-Center'));
+
+  // A shift is a shift because of the calendar it is on, not its wording.
+  p = paste(Object.assign({}, day, { shiftCalendars: [] }));
+  checkTruthy('day: with no shift calendar named, a shift is just another item',
+    p.colA().indexOf('8:45am - 1:15pm IC (Amanda)  AL') !== -1);
+  check('day: so none of them is listed as a shift',
+    p.colA().filter(v => v === '8:45am - 1:15pm IC (Amanda)  AL').length, 1);
+  checkTruthy('day: and the report says so',
+    p.said().includes('SHIFT_CALENDARS names no calendar'));
+  check('day: with nobody beside any hour',
+    p.wop.values.map(r => String(r[6] || '')).filter(Boolean), []);
+
+  // A bracket nobody taught it about is kept and named, not filed by guess.
+  p = paste({ at: 1, shiftCalendars: [], calendars: [
+    { id: 'book@x', name: 'Appointy', events: [
+      ev('Odd One - (OUTREACH) 1 hour session', '09:00', '10:00')] }] });
+  checkTruthy('day: an unknown bracket is pasted as it stands',
+    p.colA().indexOf('9 - 10am Odd One - (OUTREACH) 1 hour session') !== -1);
+  checkTruthy('day: and named in the report',
+    p.said().includes('SECTIONS matches'));
+  check('day: not filed under the first section that came along',
+    p.colA().indexOf('9:00 Odd One'), -1);
+
+  // A student in twice in a day is two sessions; the same booking reached
+  // through two calendars is one.
+  p = paste({ at: 1, shiftCalendars: [], calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      ev('Amalie Laz - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Amalie Laz - (IN-CENTER) 1 hour session', '11:00', '12:00')] },
     { id: 'b@x', name: 'Shared', events: [
-      { title: 'Amalie Laz', start: at('2026-09-17', '16:00') }] }] });
-  check('paste: the same item on two calendars is pasted once',
-    [p.col(1), p.col(2)], ['4:00 Amalie Laz', '']);
+      ev('Amalie Laz - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  const listed = p.colA().filter(v => v.indexOf('Amalie Laz') !== -1);
+  check('day: in twice is two, and the same booking twice is one',
+    listed, ['9:00 Amalie Laz', '11:00 Amalie Laz']);
 
-  // Two students at one time are two items, not a repeat.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') },
-    { title: 'Neil D', start: at('2026-09-17', '16:00') }]) });
-  check('paste: two students at one hour are both kept',
-    [p.col(1), p.col(2)], ['4:00 Amalie Laz', '4:00 Neil D']);
+  // The day comes from the dated row above the cursor.
+  p = paste({ at: 4, shiftCalendars: [],
+    rows: ['9/15/2026 Tuesday', '7:00 Someone', '9/16/2026 Wednesday'],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      { title: 'Wednesday Child - (IN-CENTER) 1 hour session',
+        start: new Date('2026-09-16T09:00:00'), end: new Date('2026-09-16T10:00:00') },
+      ev('Thursday Child - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  checkTruthy('day: the dated row above the cursor decides which day',
+    p.colA().indexOf('9:00 Wednesday Child') !== -1 &&
+    p.colA().indexOf('9:00 Thursday Child') === -1);
+  checkTruthy('day: and the report says where it got it', p.said().includes('row 3'));
 
-  // A student who comes twice in a day is two items, not a repeat -- which is
-  // why it takes the time and the name together to be one.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') },
-    { title: 'Amalie Laz', start: at('2026-09-17', '19:00') }]) });
-  check('paste: a student in twice gets both sessions',
-    [p.col(1), p.col(2)], ['4:00 Amalie Laz', '7:00 Amalie Laz']);
+  // Nothing is written over.
+  p = paste({ at: 2, rows: ['9/17/2026 Thursday', '', '', 'do not lose me'],
+    shiftCalendars: [], calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Student Two - (IN-CENTER) 1 hour session', '10:00', '11:00')] }] });
+  check('day: a row in the way stops the whole paste',
+    [p.cell(2), p.cell(4)], ['', 'do not lose me']);
+  checkTruthy('day: and is named with what is in it',
+    p.said().includes('A4') && p.said().includes('do not lose me'));
 
-  // Another day's items are not this day's.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') },
-    { title: 'Tomorrow Person', start: at('2026-09-18', '16:00') }]) });
-  check('paste: only the day asked for', [p.col(1), p.col(2)],
-    ['4:00 Amalie Laz', '']);
-
-  // The day comes from the dated row above the cursor, not from the clock.
-  p = paste({ at: 4, rows: ['9/15/2026 Tuesday', '7:00 Someone',
-    '9/16/2026 Wednesday'], calendars: oneCal([
-      { title: 'Wednesday Child', start: at('2026-09-16', '16:00') },
-      { title: 'Thursday Child', start: at('2026-09-17', '16:00') }]) });
-  check('paste: the dated row above the cursor decides the day',
-    p.col(4), '4:00 Wednesday Child');
-  checkTruthy('paste: and the report says where it got the day',
-    p.said().includes('row 3'));
-
-  // Above every dated row, there is nothing to go on but today.
-  p = paste({ at: 1, rows: ['', '9/16/2026 Wednesday'], calendars: oneCal([
-    { title: 'Thursday Child', start: at('2026-09-17', '16:00') }]) });
-  check('paste: with no dated row above it, today', p.col(1), '4:00 Thursday Child');
-
-  // An all-day item has no hour to give, so it is not given one.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: 'Staff meeting', start: at('2026-09-17', '00:00'), allDay: true },
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') }]) });
-  check('paste: an all-day item keeps its name and no time',
-    [p.col(1), p.col(2)], ['Staff meeting', '4:00 Amalie Laz']);
-  checkTruthy('paste: and is called out', p.said().includes('all-day'));
-
-  // Nothing is ever written over.
-  p = paste({ at: 2, rows: ['', '', 'do not lose me'], calendars: oneCal([
-    { title: 'Amalie Laz', start: at('2026-09-17', '16:00') },
-    { title: 'Neil D', start: at('2026-09-17', '17:00') }]) });
-  check('paste: a column with something in it is left alone',
-    [p.col(2), p.col(3)], ['', 'do not lose me']);
-  checkTruthy('paste: and the row in the way is named',
-    p.said().includes('Row 3') && p.said().includes('do not lose me'));
-
-  // A day with nothing on it says so rather than pasting nothing quietly.
-  p = paste({ at: 1, calendars: oneCal([
-    { title: 'Amalie Laz', start: at('2026-09-18', '16:00') }]) });
-  check('paste: an empty day writes nothing', p.col(1), '');
-  checkTruthy('paste: and says which day it looked at',
-    p.said().includes('9/17/2026 Thursday'));
+  // A day with nothing on it says which day it looked at.
+  p = paste({ at: 1, shiftCalendars: [], calendars: [
+    { id: 'a@x', name: 'Appointy', events: [] }] });
+  check('day: an empty day writes nothing', p.cell(1), '');
+  checkTruthy('day: and says which day', p.said().includes('9/17/2026 Thursday'));
 
   // No calendars at all is its own answer.
   p = paste({ at: 1, calendars: [] });
-  checkTruthy('paste: no calendars is said plainly',
-    p.said().includes('no calendars'));
+  checkTruthy('day: no calendars is said plainly', p.said().includes('no calendars'));
 }
 
 // 45d. The seating chart, read from the real sample layout.

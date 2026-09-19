@@ -371,46 +371,77 @@ The new row takes the **formatting of the day before**, so it is not the one
 row on the sheet that is a different colour. On a sheet with no earlier day it
 is written plain and says so.
 
-## Pasting the day from the calendar
+## Laying the day out from the calendar
 
-**SOD → Paste the day from the calendar.** Click the cell you want the list to
-start in, run it, and every item on every calendar this account can see lands
-down that column, one to a row, written the way the sheet writes a session:
+**SOD → Paste the day from the calendar.** Click the cell the day should start
+in, run it, and the whole block is built from the top down:
 
 ```
-4:00 Amalie Laz
-5:00 Neil D
-7:00 Sharon Yoo
+8:45am - 1:15pm IC (Amanda)  AL         the shifts, as they stand
+9 - 11am IC (Bo)  BK
+12 - 12:30pm Fire drill                 anything else, as it stands
+@HOME                                   the section header
+10:00 Bubba Blue                        ...its students
+In-Center | Issue | … | IAAT | Hist     the section header
+9:00 Student One      8:45am - 1:15pm IC (Amanda)  AL
+9:00 Student Two      9 - 11am IC (Bo)  BK
+11:00 Student Three   8:45am - 1:15pm IC (Amanda)  AL
 ```
 
-**Every calendar**, subscribed ones included — that was the request, so nothing
-is filtered out and the report says how many items came from each.
+**Only the columns it fills are written**, so the formulas sitting in the
+columns beside them are left alone.
 
-### Which day it imports
+### Three kinds of calendar item
 
-The **dated row above the cursor**, if the sheet keeps them — so click into
-today's block and you get today. Above every dated row, or on a sheet with
-none, it is today. The report says which it used, so a surprising result
-explains itself.
+| Kind | How it is told apart | Where it goes |
+| --- | --- | --- |
+| **A session** | its title has a bracket: `Amalie Laz - (IN-CENTER) 1 hour session - Appointy` | `9:00 Amalie Laz`, under the section the bracket names |
+| **A shift** | it is on one of `CONFIG.SCHEDULE.SHIFT_CALENDARS`, by calendar name | the top of the block, as it stands — and beside each hour it covers |
+| **Anything else** | everything left | under the shifts, as it stands |
 
-### What counts as one item
+A shift is a shift because of **which calendar it is on**, not how its title is
+worded — so nobody has to type one a particular way for it to land right. With
+no shift calendar named, nothing is read as a shift, no instructors are listed
+beside the hours, and the report says so rather than leaving you to notice.
 
-The same session on two calendars — one subscribed to the other — is **one
-item**. Two students at the same hour are two. A student in **twice in a day**
-is two, which is why it takes the time *and* the name together to be a repeat.
+### Reading a booking title
 
-The event's **own start time** is what goes in front of the name, so a title
-already written `4:00 Amalie Laz` does not come out with two times on it. An
-**all-day item** has no hour to give and is not given one: it keeps its name,
-is listed first, and the report names it.
+`Amalie Laz - (IN-CENTER) 1 hour session - Appointy : Updated` is a name, a
+bracket saying where they are, and then the booking system talking to itself.
+Only the first two are kept. `CONFIG.SCHEDULE.SECTIONS` says what a bracket has
+to contain for each section — `@HOME` or `VIRTUAL` for the first, `IN-CENTER`
+for the second.
 
-### It never writes over anything
+**A bracket nobody has taught it about is not filed by guess.** The item is
+pasted as it stands with the rest, and the report names it, so nothing is lost
+and nothing is put in a section it may not belong to.
 
-If any cell it would use already has something in it, **nothing is pasted** —
-the row and what is in it are named so you can go and look. A paste that
-quietly takes out a morning's work is worse than one that refuses.
+### The instructors beside each hour
 
-Everything lands in a single write, so one Ctrl+Z puts the sheet back.
+At the row an hour opens on, the shifts covering that hour are listed down
+column G, one to a row. **A shift that ends on the hour is not working it** —
+nine to eleven covers the nine and the ten, and the eleven belongs to whoever
+comes next.
+
+### Times, written the way a calendar writes them
+
+Because these lines go in as they stand and are read by somebody used to seeing
+them that way: whole hours drop their minutes, and a range inside one half of
+the day says `am` or `pm` once at the end.
+
+```
+8:45 → 13:15    8:45am - 1:15pm
+9:00 → 13:00    9am - 1pm
+9:00 → 11:00    9 - 11am
+18:00 → 19:00   6 - 7pm
+```
+
+### The rest of it
+
+**Which day** comes from the dated row above the cursor, and the report says
+which it used. The same booking reached through two calendars is one item; a
+student in **twice in a day** is two. **Nothing is ever written over** — one
+occupied cell stops the whole paste and is named along with what is in it.
 
 ## Start of day: organising the rows
 

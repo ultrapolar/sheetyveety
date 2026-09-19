@@ -1,56 +1,121 @@
 /**
- * Pasting the day's calendar into a column.
+ * Pasting the day's calendar in, laid out the way the sheet wants it.
  *
- * Put the cursor where you want the list to start, run it, and every item on
- * every calendar this account can see lands down that column, one to a row,
- * written the way the Daily WOP writes a session: "4:00 Amalie Laz".
+ * A day's block is built from the top down:
  *
- * Two things it works out for itself rather than asking:
+ *     8:45am - 1:15pm IC (Amanda)  AL      the shifts, as they stand
+ *     9am - 1pm IC (Bo)  BK
+ *     10 - 11am Staff meeting              anything else, as it stands
+ *     @HOME                                the section header
+ *     9:00 Student One                     ...its students
+ *     In-Center | Issue | ... | IAAT       the section header
+ *     9:00 Student Two                     ...its students, with the
+ *     9:00 Student Three                   instructors covering each hour
  *
- *   - **Which day.** The dated row above the cursor, if the sheet keeps one --
- *     so selecting a cell under "9/19/2026 Friday" imports that Friday. On a
- *     sheet with no dated rows it is today.
- *   - **Which calendars.** All of them, subscribed ones included. "Every one
- *     of the calendars" is the request, so nothing is filtered out and the
- *     report says how many came from where.
+ * Three kinds of calendar item, and each goes somewhere different:
  *
- * It will not write over anything. A column with something already in it is
- * named and left alone, because the alternative is a paste that silently
- * takes out a morning's work.
+ *   - **A session.** "Amalie Laz - (IN-CENTER) 1 hour session - Appointy" is
+ *     written "9:00 Amalie Laz" and filed under the section its bracket names.
+ *   - **A shift**, which is anything on one of CONFIG.SCHEDULE.SHIFT_CALENDARS.
+ *     Pasted as it stands at the top, and listed again beside each hour it
+ *     covers.
+ *   - **Anything else**, pasted as it stands under the shifts.
+ *
+ * Only the columns it fills are written, so the formulas in the columns beside
+ * them are left where they are.
  */
 
 /**
- * The day a target row belongs to.
- *
- * The nearest dated row above it wins, so the list goes under the day it was
- * meant for. A sheet that keeps no dated rows has nothing to say about it, and
- * today is the only honest answer.
+ * "8:45am", or "9" when the meridiem is coming from the other end of a range.
  */
-function scheduleDayFor_(sheet, row) {
-  const headers = dayHeaderRows_(sheet).filter(function (header) {
-    return header.row < row;
+function timeOfDayLabel_(date, withMeridiem) {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const hour = hours % 12 === 0 ? 12 : hours % 12;
+  return hour + (minutes ? ':' + (minutes < 10 ? '0' : '') + minutes : '') +
+    (withMeridiem ? (hours < 12 ? 'am' : 'pm') : '');
+}
+
+/**
+ * "8:45am - 1:15pm", or "9 - 11am" when both ends are the same half of the day.
+ *
+ * Written the way a calendar writes it, because these lines go in as they
+ * stand and are read by a person who is used to seeing them that way.
+ */
+function timeRangeLabel_(start, end) {
+  if (!start) return '';
+  if (!end) return timeOfDayLabel_(start, true);
+  const sameHalf = (start.getHours() < 12) === (end.getHours() < 12);
+  return timeOfDayLabel_(start, !sameHalf) + CONFIG.SCHEDULE.RANGE_SEPARATOR +
+    timeOfDayLabel_(end, true);
+}
+
+/**
+ * The student and the kind of session out of a booking title.
+ *
+ * "Amalie Laz - (IN-CENTER) 1 hour session - Appointy : Updated" is a name, a
+ * bracket saying where they are, and then the booking system talking to
+ * itself. Only the first two are wanted.
+ */
+function parseSessionTitle_(title) {
+  const parts = String(title == null ? '' : title).trim()
+    .match(/^(.+?)\s*[-–—]\s*\(([^)]*)\)/);
+  if (!parts) return null;
+  const name = parts[1].trim();
+  return name ? { name: name, tag: parts[2].trim() } : null;
+}
+
+/** Which section a session's bracket puts it in, or -1 for one nobody named. */
+function sectionForTag_(tag) {
+  const upper = String(tag || '').toUpperCase();
+  const sections = CONFIG.SCHEDULE.SECTIONS || [];
+  for (let i = 0; i < sections.length; i++) {
+    const marks = sections[i].match || [];
+    for (let m = 0; m < marks.length; m++) {
+      if (upper.indexOf(String(marks[m]).toUpperCase()) !== -1) return i;
+    }
+  }
+  return -1;
+}
+
+/** True for a calendar whose items are shifts rather than sessions. */
+function isShiftCalendar_(name) {
+  return (CONFIG.SCHEDULE.SHIFT_CALENDARS || []).some(function (wanted) {
+    return String(wanted).trim().toLowerCase() ===
+      String(name || '').trim().toLowerCase();
   });
-  if (!headers.length) return { date: new Date(), from: 'today' };
-  const nearest = headers[headers.length - 1];
-  return { date: nearest.date, from: 'row ' + nearest.row };
-}
-
-/** One calendar item as the sheet writes a session. */
-function scheduleRowText_(item) {
-  // An all-day item has no hour to give, and inventing one would put it in the
-  // middle of the afternoon.
-  return item.time ? item.time + ' ' + item.name : item.name;
 }
 
 /**
- * Everything on every calendar for one day, in the order it happens.
+ * Whether a shift covers an hour.
  *
- * The same item subscribed through two calendars is one item. Two students at
- * the same time are not, so it takes both the time and the name to be a
+ * A shift that ends on the hour is not working it: nine to eleven covers the
+ * nine and the ten, and the eleven belongs to whoever comes next.
+ */
+function shiftCoversHour_(shift, hourStart) {
+  if (!shift.start || !shift.end) return false;
+  return shift.start.getTime() <= hourStart.getTime() &&
+    shift.end.getTime() > hourStart.getTime();
+}
+
+/** The top of the hour a time falls in. */
+function hourStartOf_(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(),
+    date.getHours(), 0, 0, 0);
+}
+
+/**
+ * Everything on every calendar for one day, sorted into the three kinds.
+ *
+ * The same item reached through two calendars is one item, but a student in
+ * twice in a day is two -- so it takes the time and the name together to be a
  * repeat.
  */
-function calendarItemsFor_(calendars, date) {
-  const items = [];
+function scheduleItemsFor_(calendars, date) {
+  const shifts = [];
+  const other = [];
+  const sessions = [];
+  const unplaced = [];
   const seen = {};
 
   calendars.forEach(function (calendar) {
@@ -58,47 +123,135 @@ function calendarItemsFor_(calendars, date) {
     try {
       events = calendar.getEventsForDay(date) || [];
     } catch (err) {
-      return;   // a calendar that will not answer is counted, not fatal
+      return;   // a calendar that will not answer is skipped, not fatal
     }
+    const fromShifts = isShiftCalendar_(calendar.getName());
 
     events.forEach(function (event) {
-      // The title may already carry a time, written by whoever made it. The
-      // event's own start is the one to trust.
-      const name = extractName_(event.getTitle());
-      if (!name) return;
-
+      const title = cellText_(event.getTitle());
+      if (!title) return;
+      const start = asDate_(event.getStartTime());
+      const end = asDate_(event.getEndTime());
       const allDay = event.isAllDayEvent && event.isAllDayEvent();
-      const time = allDay ? '' : hourLabel_(event.getStartTime());
-      const key = time + '|' + normalizeStudentName_(name);
+
+      const asIs = allDay || !start ? title
+        : (timeRangeLabel_(start, end) + ' ' + title);
+      const item = { title: title, start: start, end: end, allDay: !!allDay,
+        asIs: asIs, calendar: calendar.getName() };
+
+      if (fromShifts) {
+        if (seen['shift|' + asIs]) return;
+        seen['shift|' + asIs] = true;
+        shifts.push(item);
+        return;
+      }
+
+      const session = parseSessionTitle_(title);
+      if (!session || allDay || !start) {
+        if (seen['other|' + asIs]) return;
+        seen['other|' + asIs] = true;
+        other.push(item);
+        return;
+      }
+
+      const key = 'session|' + hourLabel_(start) + '|' +
+        normalizeStudentName_(session.name);
       if (seen[key]) return;
       seen[key] = true;
 
-      items.push({ time: time, name: name, allDay: !!allDay,
-        start: event.getStartTime(), calendar: calendar.getName() });
+      const section = sectionForTag_(session.tag);
+      if (section === -1) {
+        // A bracket nobody has taught it about. Kept, pasted as it stands so
+        // nothing is lost, and named in the report -- putting the student in
+        // whichever section came first would be a guess about where they sat.
+        unplaced.push(item);
+        other.push(item);
+        return;
+      }
+
+      sessions.push({ section: section, name: session.name, start: start,
+        text: hourLabel_(start) + ' ' + session.name,
+        calendar: calendar.getName() });
     });
   });
 
-  items.sort(function (a, b) {
-    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+  const byTime = function (a, b) { return a.start - b.start; };
+  shifts.sort(byTime);
+  other.sort(function (a, b) {
+    if (!a.start || !b.start) return a.start ? 1 : -1;
     return a.start - b.start;
   });
-  return items;
+  sessions.sort(byTime);
+
+  return { shifts: shifts, other: other, sessions: sessions, unplaced: unplaced };
 }
 
 /**
- * Menu entry: paste the day's calendar down the column from the cursor.
+ * The day's block, as rows of { column: text }.
+ *
+ * Built whole before anything is written, so the run either lays the day out
+ * or leaves the sheet as it found it.
+ */
+function scheduleBlock_(items) {
+  const rows = [];
+  const push = function (values) { rows.push(values); return rows.length - 1; };
+
+  items.shifts.forEach(function (shift) { push({ 1: shift.asIs }); });
+  items.other.forEach(function (item) { push({ 1: item.asIs }); });
+
+  (CONFIG.SCHEDULE.SECTIONS || []).forEach(function (section, index) {
+    const header = {};
+    (section.header || []).forEach(function (cell) {
+      header[cell.column] = cell.text;
+    });
+    push(header);
+
+    const mine = items.sessions.filter(function (s) { return s.section === index; });
+
+    // The instructors covering each hour, listed from the row that hour opens
+    // on. A shift that has run out is not on the list for the hour after it.
+    const instructorColumn = section.instructorColumn || 0;
+    let hour = '';
+    let covering = [];
+    let offset = 0;
+
+    mine.forEach(function (session) {
+      const label = hourLabel_(session.start);
+      if (label !== hour) {
+        hour = label;
+        offset = 0;
+        const hourStart = hourStartOf_(session.start);
+        covering = instructorColumn
+          ? items.shifts.filter(function (shift) {
+              return shiftCoversHour_(shift, hourStart);
+            })
+          : [];
+      }
+      const values = { 1: session.text };
+      if (instructorColumn && offset < covering.length) {
+        values[instructorColumn] = covering[offset].asIs;
+      }
+      offset++;
+      push(values);
+    });
+  });
+
+  return rows;
+}
+
+/**
+ * Menu entry: lay the day out from the cursor down.
  */
 function importCalendarSchedule() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const range = sheet.getActiveRange();
   if (!range) {
-    showError_('Click the cell you want the list to start in, then run this.');
+    showError_('Click the cell the day should start in, then run this.');
     return;
   }
 
   const startRow = range.getRow();
-  const column = range.getColumn();
   const day = scheduleDayFor_(sheet, startRow);
 
   const found = allCalendars_();
@@ -121,66 +274,109 @@ function importCalendarSchedule() {
   }
 
   try {
-    const items = calendarItemsFor_(found.calendars, day.date);
-    if (!items.length) {
+    const items = scheduleItemsFor_(found.calendars, day.date);
+    const rows = scheduleBlock_(items);
+    const bodyRows = items.shifts.length + items.other.length +
+      items.sessions.length;
+    if (!bodyRows) {
       showError_('Nothing on any calendar for ' + dayHeaderText_(day.date) +
         ' (taken from ' + day.from + '), so nothing was pasted.');
       return;
     }
 
-    // Never over the top of anything. A paste that quietly takes out a
-    // morning's work is worse than one that refuses and says where to look.
-    const height = sheet.getMaxRows() - startRow + 1;
-    if (height > 0) {
-      const existing = sheet.getRange(startRow, column,
-        Math.min(height, items.length), 1).getValues();
-      for (let i = 0; i < existing.length; i++) {
-        if (String(existing[i][0]).trim() !== '') {
-          showError_('Row ' + (startRow + i) + ' of column ' +
-            columnLetter_(column) + ' already has "' +
-            String(existing[i][0]).trim() + '" in it, and ' + items.length +
-            ' items need ' + items.length + ' clear rows. Nothing was pasted.' +
-            '\n\nClear them, or start somewhere further down.');
-          return;
+    if (rows.length + startRow - 1 > sheet.getMaxRows()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(),
+        rows.length + startRow - 1 - sheet.getMaxRows());
+    }
+
+    // Only the columns the block actually fills are touched, so the formulas
+    // in the columns beside them stay where they are.
+    const columns = {};
+    rows.forEach(function (values, i) {
+      Object.keys(values).forEach(function (column) {
+        if (!columns[column]) columns[column] = {};
+        columns[column][i] = values[column];
+      });
+    });
+
+    // Nothing is written over. A day laid on top of another day is not
+    // something anybody can unpick afterwards.
+    const occupied = [];
+    Object.keys(columns).forEach(function (column) {
+      const existing = sheet.getRange(startRow, Number(column), rows.length, 1)
+        .getValues();
+      Object.keys(columns[column]).forEach(function (i) {
+        const was = cellText_(existing[Number(i)][0]);
+        if (was) {
+          occupied.push(columnLetter_(Number(column)) + (startRow + Number(i)) +
+            ' ("' + shorten_(was, 40) + '")');
         }
+      });
+    });
+    if (occupied.length) {
+      showError_('Nothing was pasted: the day needs ' + rows.length +
+        ' rows from row ' + startRow + ', and there is already something in ' +
+        occupied.slice(0, 5).join(', ') +
+        (occupied.length > 5 ? ' and ' + (occupied.length - 5) + ' more' : '') +
+        '.\n\nClear them, or start somewhere further down.');
+      return;
+    }
+
+    Object.keys(columns).forEach(function (column) {
+      const block = [];
+      for (let i = 0; i < rows.length; i++) {
+        block.push([columns[column][i] === undefined ? '' : columns[column][i]]);
       }
-    }
-
-    const needed = startRow + items.length - 1;
-    if (needed > sheet.getMaxRows()) {
-      sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
-    }
-
-    // One write, so one Ctrl+Z puts it back.
-    sheet.getRange(startRow, column, items.length, 1)
-      .setValues(items.map(function (item) { return [scheduleRowText_(item)]; }));
+      sheet.getRange(startRow, Number(column), rows.length, 1).setValues(block);
+    });
 
     const log = ActionLog_();
-    const noTime = items.filter(function (item) { return item.allDay; });
-    noTime.forEach(function (item) {
-      log.warn(item.name, 'is an all-day item, so it has no time in front of ' +
-        'it and is listed first.');
+    items.unplaced.forEach(function (item) {
+      log.warn(item.title, 'is a session, but nothing in CONFIG.SCHEDULE' +
+        '.SECTIONS matches what is in its brackets, so there is no telling ' +
+        'which section it belongs in. Pasted as it stands with the rest.');
     });
+    (CONFIG.SCHEDULE.SECTIONS || []).forEach(function (section, index) {
+      log.ok(section.header[0].text, items.sessions.filter(function (s) {
+        return s.section === index;
+      }).length + ' student(s).');
+    });
+    if (items.shifts.length) log.ok('Shifts', items.shifts.length + ' listed.');
+    if (!CONFIG.SCHEDULE.SHIFT_CALENDARS.length) {
+      log.warn('Shifts', 'CONFIG.SCHEDULE.SHIFT_CALENDARS names no calendar, ' +
+        'so nothing was read as a shift and no instructors are listed beside ' +
+        'the hours.');
+    }
 
-    const perCalendar = {};
-    items.forEach(function (item) {
-      perCalendar[item.calendar] = (perCalendar[item.calendar] || 0) + 1;
-    });
-    Object.keys(perCalendar).forEach(function (name) {
-      log.ok(name, perCalendar[name] + ' item(s).');
-    });
-
-    showReport_('Calendar', 'Pasted ' + dayHeaderText_(day.date), [
-      { label: 'Items pasted', value: items.length },
-      { label: 'Into', value: columnLetter_(column) + startRow + ':' +
-        columnLetter_(column) + (startRow + items.length - 1) },
+    showReport_('Calendar', dayHeaderText_(day.date), [
+      { label: 'Rows written', value: rows.length },
+      { label: 'From', value: 'A' + startRow },
       { label: 'Day taken from', value: day.from },
-      { label: 'Calendars read', value: found.calendars.length },
-      { label: 'Without a time', value: noTime.length, alert: noTime.length > 0 }
+      { label: 'Students', value: items.sessions.length },
+      { label: 'Shifts', value: items.shifts.length },
+      { label: 'Pasted as they stand', value: items.other.length },
+      { label: 'Section not recognised', value: items.unplaced.length,
+        alert: items.unplaced.length > 0 }
     ], log);
   } catch (err) {
     showError_(err.message);
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * The day a target row belongs to.
+ *
+ * The nearest dated row above it wins, so the day goes under the row it was
+ * meant for. A sheet that keeps no dated rows has nothing to say about it, and
+ * today is the only honest answer.
+ */
+function scheduleDayFor_(sheet, row) {
+  const headers = dayHeaderRows_(sheet).filter(function (header) {
+    return header.row < row;
+  });
+  if (!headers.length) return { date: new Date(), from: 'today' };
+  const nearest = headers[headers.length - 1];
+  return { date: nearest.date, from: 'row ' + nearest.row };
 }

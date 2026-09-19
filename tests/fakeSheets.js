@@ -319,6 +319,7 @@ function install(globalObj, sheets, activeSheetName) {
   const makeEvent = e => ({
     getTitle: () => e.title,
     getStartTime: () => e.start,
+    getEndTime: () => e.end || e.start,
     isAllDayEvent: () => !!e.allDay,
     getGuestList: () => {
       if (e.guestsThrow) throw new Error('No access to the guest list.');

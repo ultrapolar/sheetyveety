@@ -47,6 +47,37 @@ const CONFIG = {
     ROWS_TO_ADD: 200
   },
 
+  // Laying the day out from the calendar.
+  SCHEDULE: {
+    // Calendars whose items are instructor shifts rather than student
+    // sessions, by name. Everything on them is pasted at the top as it stands
+    // and listed again beside each hour it covers. Everything not on them is
+    // read for sessions, and whatever is not a session is pasted as it stands
+    // underneath.
+    SHIFT_CALENDARS: ['Staff Schedule'],
+
+    // Between the two ends of a time range: "8:45am - 1:15pm".
+    RANGE_SEPARATOR: ' - ',
+
+    // The sections of a day, in the order they appear down the sheet. `match`
+    // is what the bracket in a booking title has to contain -- "Bubba Blue -
+    // (VIRTUAL | @HOME) 1 hour session" belongs to the first of these.
+    // `header` is the row that opens the section; `instructorColumn` is where
+    // the instructors covering each hour are listed, if anywhere.
+    SECTIONS: [
+      {
+        match: ['@HOME', 'VIRTUAL'],
+        header: [{ column: 1, text: '@HOME' }]
+      },
+      {
+        match: ['IN-CENTER', 'IN CENTER', 'INCENTER'],
+        header: [{ column: 1, text: 'In-Center' }, { column: 2, text: 'Issue' },
+                 { column: 12, text: 'IAAT' }, { column: 13, text: 'Hist' }],
+        instructorColumn: 7   // G
+      }
+    ]
+  },
+
   PINK_VALUE: 'pink',
   ARCHIVE_SEPARATOR: ' | ',
 
