@@ -195,7 +195,7 @@ const CONFIG = {
     // A day with no tab named is a day the centre does not open, and the
     // import says so rather than reading somebody else's chart.
     DAY_SHEETS: ['', 'weekdays', 'weekdays', 'weekdays', 'weekdays', 'weekdays',
-      'saturday'],
+      'Saturdays'],
 
     // The heading on the little hour tables beside the chart, where whoever
     // covered a whole hour is written. Found by this heading rather than by

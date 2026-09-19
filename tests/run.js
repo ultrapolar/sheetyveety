@@ -1317,7 +1317,7 @@ const DECK_FILLER_ROWS = [
   check('which chart: a Wednesday', on('2026-08-19'), 'weekdays');
   check('which chart: a Monday', on('2026-08-17'), 'weekdays');
   check('which chart: a Friday', on('2026-08-21'), 'weekdays');
-  check('which chart: a Saturday', on('2026-08-22'), 'saturday');
+  check('which chart: a Saturday', on('2026-08-22'), 'Saturdays');
 
   // Sunday names no chart, and that is an answer rather than a gap -- reading
   // Saturday's on a Sunday would seat everybody where they sat yesterday.
@@ -1341,7 +1341,7 @@ const DECK_FILLER_ROWS = [
 
   // Setting it: what it says back is what it can actually see.
   h.addBook('BOOKOK_00000000000000000000',
-    [new FakeSheet('weekdays', [['']]), new FakeSheet('saturday', [['']])],
+    [new FakeSheet('weekdays', [['']]), new FakeSheet('Saturdays', [['']])],
     'Centre charts');
   h.promptAnswer.next = 'https://docs.google.com/spreadsheets/d/BOOKOK_00000000000000000000/edit';
   api.setSeatingSource();
@@ -1357,7 +1357,7 @@ const DECK_FILLER_ROWS = [
   check('link: a half-right document is still stored',
     api.seatingSpreadsheetId_(), 'BOOKHALF_0000000000000000000');
   checkTruthy('link: with the missing tab named',
-    h.alerts.join(' ').includes('No tab named saturday'));
+    h.alerts.join(' ').includes('No tab named Saturdays'));
 
   // Rubbish is refused and changes nothing.
   h.promptAnswer.next = 'thats the one on my desktop';
@@ -2327,7 +2327,7 @@ const DECK_FILLER_ROWS = [
       makeGrid(names.length, 26, '#ffffff'));
     wop.setSelection(1, names.length);
     // Pinned to a Saturday, so this block reads the Saturday tab throughout.
-    const seating = new FakeSheet('saturday', chart,
+    const seating = new FakeSheet('Saturdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-22'), String, Number, Object, Array, RegExp,

@@ -515,8 +515,10 @@ and blank means "a tab in this same spreadsheet".
 
 ### Which tab: weekdays or saturday
 
-`CONFIG.SEATING.DAY_SHEETS` maps the day of the week to a tab, and the two
-charts are the same layout with different hours. **Sunday names no tab**, and
+`CONFIG.SEATING.DAY_SHEETS` maps the day of the week to a tab — `weekdays`
+Monday to Friday, `Saturdays` on Saturday — and the two charts are the same
+layout with different hours. The names must match the tabs exactly, capitals
+included. **Sunday names no tab**, and
 that is an answer rather than a gap: reading Saturday's chart on a Sunday would
 seat everybody where they sat yesterday.
 
