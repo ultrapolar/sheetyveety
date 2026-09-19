@@ -26,10 +26,12 @@ JOB_LABELS = {
 class PrinterRow(ttk.Frame):
     """One printer's protocol: its name, duplex, and pacing."""
 
-    def __init__(self, parent, on_change, name="", duplex=False, paced=False,
+    def __init__(self, parent, on_change, on_rename, name="", duplex=False, paced=False,
                  gap=30, batch=4, batch_pause=60):
         super().__init__(parent)
         self.on_change = on_change
+        self.on_rename = on_rename
+        self._prev_name = name.strip()
 
         self.name_var = tk.StringVar(value=name)
         self.duplex_var = tk.BooleanVar(value=duplex)
@@ -59,7 +61,7 @@ class PrinterRow(ttk.Frame):
         self.remove_btn = ttk.Button(self, text="Remove", command=self._remove)
         self.remove_btn.grid(row=0, column=9, padx=(10, 0))
 
-        self.name_var.trace_add("write", lambda *_: self._changed())
+        self.name_var.trace_add("write", lambda *_: self._name_changed())
         self._toggle_pacing()
 
     def _toggle_pacing(self):
@@ -70,6 +72,19 @@ class PrinterRow(ttk.Frame):
 
     def _changed(self):
         self.on_change()
+
+    def _name_changed(self):
+        new = self.name_var.get().strip()
+        old = self._prev_name
+        self._prev_name = new
+        # A rename should carry its routing along -- it's the same physical
+        # printer under a new label, not a delete-and-recreate. Only a real
+        # removal should leave routing pointing at a name that no longer
+        # exists (validate() catches that on Save).
+        if old and new and old != new:
+            self.on_rename(old, new)
+        else:
+            self.on_change()
 
     def _remove(self):
         self.destroy()
@@ -193,7 +208,7 @@ class SettingsApp(ttk.Frame):
         self._refresh_routing_options()
 
     def _add_printer_row(self, name="", duplex=False, paced=False, gap=30, batch=4, batch_pause=60):
-        row = PrinterRow(self.printers_frame, self._refresh_routing_options,
+        row = PrinterRow(self.printers_frame, self._refresh_routing_options, self._printer_renamed,
                           name=name, duplex=duplex, paced=paced,
                           gap=gap, batch=batch, batch_pause=batch_pause)
         row.pack(fill="x", pady=2)
@@ -203,6 +218,17 @@ class SettingsApp(ttk.Frame):
         names = [r.name_var.get().strip() for r in self.printer_rows if r.winfo_exists()]
         return [n for n in names if n]
 
+    def _printer_renamed(self, old, new):
+        """A printer's name changed in place (not removed) -- carry any
+        routing that pointed at the old name over to the new one, so a
+        rename can't silently strand a job kind on a printer that no
+        longer exists."""
+        if hasattr(self, "routing_vars"):
+            for kind, (var, _combo) in self.routing_vars.items():
+                if var.get() == old:
+                    var.set(new)
+        self._refresh_routing_options()
+
     def _refresh_routing_options(self):
         self.printer_rows = [r for r in self.printer_rows if r.winfo_exists()]
         names = self._live_printer_names()
@@ -210,10 +236,9 @@ class SettingsApp(ttk.Frame):
             return
         for kind, (var, combo) in self.routing_vars.items():
             combo["values"] = names
-            if var.get() not in names and names:
-                # Keep an out-of-date selection visible rather than silently
-                # picking one for the user -- validate() will flag it on save.
-                pass
+            # An out-of-date selection (e.g. after removing a printer) is
+            # left visible rather than silently reassigned -- validate()
+            # will flag it clearly on Save.
 
     # ---- Watermarks & Pages ---------------------------------------------
     def _build_jobs_tab(self):

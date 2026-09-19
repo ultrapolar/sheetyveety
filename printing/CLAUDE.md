@@ -47,6 +47,17 @@ have to change shape.
   `test_save_then_load_keeps_a_new_printer`).
 - **`routing`** (job kind -> printer name) IS fixed-shape (the five
   `JOB_KINDS`), so it merges normally.
+- **Changing which printer handles a job** happens in `settings_gui.py`
+  three ways, each with different intent: **add** a printer and route a job
+  kind to it; **remove** one, which deliberately leaves anything still
+  routed to it broken until the user picks a replacement (`validate()`
+  names the orphaned kind and the missing printer); **rename** one in
+  place, which is treated as the same physical printer under a new label,
+  so `PrinterRow`'s name-change trace (`_name_changed` ->
+  `SettingsApp._printer_renamed`) rewrites every routing entry pointing at
+  the old name to the new one automatically. Don't collapse rename into
+  remove-and-add, or every routed job on that printer silently breaks the
+  moment someone corrects a typo in its name.
 - **`settings_gui.py`** is the only supported way to edit `config.json` for a
   non-technical user. It mirrors `config_store.validate()`'s rules at parse
   time in `_collect()` (e.g. an unpaced printer's `batch` field has no
