@@ -92,7 +92,13 @@ const CONFIG = {
         match: ['IN-CENTER', 'IN CENTER', 'INCENTER'],
         header: [{ column: 1, text: 'In-Center' }, { column: 2, text: 'Issue' },
                  { column: 12, text: 'IAAT' }, { column: 13, text: 'Hist' }],
-        instructorColumn: 7   // G
+        instructorColumn: 7,   // G
+
+        // These students also go over to the seating chart, so the chart can
+        // be filled in against the day's list. Columns S and T of whichever
+        // tab the day calls for -- Saturdays on a Saturday, Weekdays
+        // otherwise, the same as the chart is read from.
+        roster: { timeColumn: 19, nameColumn: 20, startRow: 1 }
       }
     ],
 

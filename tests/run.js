@@ -43,7 +43,7 @@ function loadScript(context) {
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
   looksLikeShiftTitle_, sectionTemplateRow_, isExcludedShift_,
-  nextOpenDayAfter_,
+  nextOpenDayAfter_, writeSeatingRoster_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1076,11 +1076,20 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     wop.activeRange = wop.getRange(opts.at || 1, 1, 1, 1);
 
+    // The seating chart, when a test wants one. Its S and T may be seeded, to
+    // show that yesterday's longer day does not survive today's.
+    const charts = (opts.charts || []).map(function (c) {
+      const grid = [];
+      for (let r = 0; r < (c.height || 12); r++) grid.push(new Array(20).fill(''));
+      (c.seed || []).forEach(function (seed) { grid[seed[0] - 1][seed[1] - 1] = seed[2]; });
+      return new FakeSheet(c.name, grid);
+    });
+
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate(opts.today || '2026-09-17'), String, Number, Object,
       Array, RegExp, Error, isNaN, parseInt, parseFloat });
     if (opts.compute) wop.computeFormula = opts.compute;
-    const h = install(ctx, [deck, wop], 'Daily WOP');
+    const h = install(ctx, [deck, wop].concat(charts), 'Daily WOP');
     (opts.calendars || []).forEach(c => h.addCalendar(c.id, c.name, c.events));
     const api = loadScript(ctx);
     if (opts.shiftCalendars) {
@@ -1096,6 +1105,7 @@ const DECK_FILLER_ROWS = [
       api.importCalendarToday();
     }
     return { wop: wop, api: api, harness: h, writes: () => wop.writeCount,
+      chart: name => charts.filter(c => c.getName() === name)[0],
       formula: (row, col) => String((wop.formulas || {})[row + ':' + col] || ''),
       cell: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
       colA: () => wop.values.map(r => String(r[0] || '')),
@@ -1425,6 +1435,87 @@ const DECK_FILLER_ROWS = [
     p.colA().indexOf('9:00 Sunday Child') === -1);
   checkTruthy('tomorrow: and the report names the Monday',
     p.said().includes('9/21/2026 Monday'));
+
+  // --- the In-Center list goes over to the seating chart ------------------
+  const chartDay = {
+    at: 1, shiftCalendars: [],
+    charts: [{ name: 'Weekdays' }, { name: 'Saturdays' }],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '09:00', '10:00'),
+      ev('Student Two - (IN-CENTER) 1 hour session', '10:00', '11:00')] }]
+  };
+
+  p = paste(chartDay);
+  const week = () => p.chart('Weekdays').values;
+  check('chart: the time goes in column S',
+    [week()[0][18], week()[1][18]], ['9:00', '10:00']);
+  check('chart: and the name in column T',
+    [week()[0][19], week()[1][19]], ['Student One', 'Student Two']);
+  check('chart: the student at home is not on the chart',
+    week().map(r => String(r[19])).filter(v => v.indexOf('Bubba') !== -1), []);
+  check('chart: nothing lands below the list', String(week()[2][19]), '');
+  checkTruthy('chart: and the report says how many went over',
+    p.said().includes('Weekdays') && p.said().includes('2 In-Center'));
+  check('chart: the Saturday chart is untouched on a weekday',
+    p.chart('Saturdays').values[0][19], '');
+
+  // Yesterday was a longer day. What is left below today's list would read as
+  // though those students were coming.
+  p = paste(Object.assign({}, chartDay, {
+    charts: [{ name: 'Weekdays', seed: [[1, 19, '9:00'], [1, 20, 'Old One'],
+                                        [5, 19, '3:00'], [5, 20, 'Old Five']] },
+             { name: 'Saturdays' }] }));
+  check('chart: both columns are cleared the whole way down first',
+    [String(week()[4][18]), String(week()[4][19])], ['', '']);
+  check('chart: and today\'s list is what is there',
+    [String(week()[0][18]), String(week()[0][19])], ['9:00', 'Student One']);
+
+  // A Saturday goes on the Saturday chart.
+  p = paste(Object.assign({}, chartDay, { today: '2026-09-19', calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      { title: 'Saturday Child - (IN-CENTER) 1 hour session',
+        start: new Date('2026-09-19T09:00:00'),
+        end: new Date('2026-09-19T10:00:00') }] }] }));
+  check('chart: a Saturday lands on the Saturday chart',
+    [String(p.chart('Saturdays').values[0][18]),
+     String(p.chart('Saturdays').values[0][19])], ['9:00', 'Saturday Child']);
+  check('chart: and not on the weekday one',
+    String(p.chart('Weekdays').values[0][19]), '');
+
+  // Nobody in centre: the columns are cleared and said to be empty, rather
+  // than left showing yesterday.
+  p = paste(Object.assign({}, chartDay, {
+    charts: [{ name: 'Weekdays', seed: [[1, 19, '9:00'], [1, 20, 'Old One']] },
+             { name: 'Saturdays' }],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '09:00', '10:00')] }] }));
+  check('chart: nobody in centre leaves the columns empty',
+    [String(week()[0][18]), String(week()[0][19])], ['', '']);
+  checkTruthy('chart: and says so', p.said().includes('nobody is in'));
+
+  // Thursday and Friday share a chart, so setting tomorrow up takes today's
+  // list off it. Worth a word while the room may still be full.
+  p = paste(Object.assign({}, chartDay, { which: 'tomorrow', calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      { title: 'Friday Child - (IN-CENTER) 1 hour session',
+        start: new Date('2026-09-18T09:00:00'),
+        end: new Date('2026-09-18T10:00:00') }] }] }));
+  check('chart: tomorrow\'s list goes on the chart it shares with today',
+    String(p.chart('Weekdays').values[0][19]), 'Friday Child');
+  checkTruthy('chart: and taking today\'s off is said out loud',
+    p.said().includes('not today') && p.said().includes('9/18/2026 Friday'));
+
+  p = paste(chartDay);
+  checkTruthy('chart: today\'s own list is not complained about',
+    !p.said().includes('not today'));
+
+  // No chart to reach: the day still went in, and the failure is named.
+  p = paste(Object.assign({}, chartDay, { charts: [] }));
+  checkTruthy('chart: the day still goes into the sheet',
+    p.colA().indexOf('9:00 Student One') !== -1);
+  checkTruthy('chart: and not reaching the chart is reported',
+    p.said().includes('could not be opened'));
 
   // --- the section headers keep the look of the day before ---------------
   // Yesterday's @HOME and In-Center rows carry formatting and links. Today's

@@ -284,6 +284,80 @@ function scheduleBlock_(items) {
 }
 
 /**
+ * Sends a section's students over to the seating chart, as a time and a name.
+ *
+ * Only the sections marked `roster` in CONFIG.SCHEDULE.SECTIONS go -- the
+ * chart is the room, and a student at home is not in it.
+ *
+ * Both columns are cleared first and over their whole length, not just as far
+ * as today's list reaches: yesterday was a longer day often enough, and the
+ * names left below would read as though they were coming.
+ *
+ * The day decides the tab, the same way reading the chart does, so a Saturday
+ * list lands on the Saturday chart.
+ */
+function writeSeatingRoster_(items, date, log) {
+  const sections = CONFIG.SCHEDULE.SECTIONS || [];
+  let wrote = 0;
+
+  sections.forEach(function (section, index) {
+    const roster = section.roster;
+    if (!roster) return;
+    const name = ((section.header || [])[0] || {}).text || 'section';
+
+    let sheet;
+    try {
+      sheet = seatingSheet_(date);
+    } catch (err) {
+      log.error('Seating chart', 'the day went into the sheet, but the chart ' +
+        'could not be opened, so nothing was sent over: ' + err.message);
+      return;
+    }
+
+    const rows = sheet.getMaxRows() - roster.startRow + 1;
+    if (rows > 0) {
+      sheet.getRange(roster.startRow, roster.timeColumn, rows, 1).clearContent();
+      sheet.getRange(roster.startRow, roster.nameColumn, rows, 1).clearContent();
+    }
+
+    const mine = items.sessions.filter(function (s) { return s.section === index; });
+    if (!mine.length) {
+      log.warn(sheet.getName(), 'nobody is in for ' + name + ', so columns ' +
+        columnLetter_(roster.timeColumn) + ' and ' +
+        columnLetter_(roster.nameColumn) + ' were cleared and left empty.');
+      return;
+    }
+
+    const needed = roster.startRow + mine.length - 1;
+    if (needed > sheet.getMaxRows()) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), needed - sheet.getMaxRows());
+    }
+
+    sheet.getRange(roster.startRow, roster.timeColumn, mine.length, 1)
+      .setValues(mine.map(function (s) { return [hourLabel_(s.start)]; }));
+    sheet.getRange(roster.startRow, roster.nameColumn, mine.length, 1)
+      .setValues(mine.map(function (s) { return [s.name]; }));
+
+    wrote += mine.length;
+    const forToday = sameDayAs_(date, new Date());
+    log.ok(sheet.getName(), mine.length + ' ' + name + ' student(s) sent over ' +
+      'to columns ' + columnLetter_(roster.timeColumn) + ' and ' +
+      columnLetter_(roster.nameColumn) + '.');
+
+    // Thursday and Friday share a chart. Setting Friday up on Thursday evening
+    // therefore takes Thursday's list off it, which is fine once everyone has
+    // gone home and is not while the room is still full.
+    if (!forToday) {
+      log.warn(sheet.getName(), 'now holds ' + dayHeaderText_(date) +
+        ', not today. If today is not finished with the chart yet, that list ' +
+        'has gone -- run the today button again to put it back.');
+    }
+  });
+
+  return wrote;
+}
+
+/**
  * The last row above `before` that opens this section, or 0.
  *
  * A section header is more than its word: it is bold, it is coloured, it has
@@ -539,6 +613,8 @@ function importCalendarFor_(date, source) {
     writeStudentFormulas_(sheet, startRow, rows);
 
     const log = ActionLog_();
+    const onChart = writeSeatingRoster_(items, day.date, log);
+
     if (day.mismatch) {
       log.warn('The day above', 'this went in as ' + dayHeaderText_(day.date) +
         ', but ' + day.mismatch + '. That is fine when you are setting up ' +
@@ -580,6 +656,7 @@ function importCalendarFor_(date, source) {
       { label: 'Students', value: items.sessions.length },
       { label: 'Shifts', value: items.shifts.length },
       { label: 'Instructors left off', value: items.excluded.length },
+      { label: 'Sent to the seating chart', value: onChart },
       { label: 'Pasted as they stand', value: items.other.length },
       { label: 'Section not recognised', value: items.unplaced.length,
         alert: items.unplaced.length > 0 }

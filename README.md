@@ -416,6 +416,33 @@ it. A copied header needs its **whole row** clear, not just column A, and
 brings its own cells with it, so the columns only it would have needed are
 never written at all.
 
+### The In-Center list goes over to the seating chart
+
+The In-Center students are also written to the **seating chart**, split in two:
+the time into **column S**, the name into **column T**, one to a row. That is
+the list the chart gets filled in against.
+
+**Only In-Center.** The chart is the room, and a student at home is not in it.
+Which sections go is `roster` in `CONFIG.SCHEDULE.SECTIONS`.
+
+**Which tab is the day's**, the same way reading the chart is — `Saturdays` on
+a Saturday, `Weekdays` otherwise.
+
+Both columns are **cleared first, the whole way down**, not just as far as
+today's list reaches. Yesterday was a longer day often enough, and the names
+left below would read as though those students were coming. If nobody is in
+centre, the columns are cleared and left empty, and the report says so rather
+than leaving yesterday showing.
+
+Two things the report tells you:
+
+- **The chart could not be opened.** The day still went into the sheet — that
+  part is done and is not lost — and the failure is named.
+- **The chart now holds a day that is not today.** Thursday and Friday share a
+  chart, so setting Friday up on Thursday evening takes Thursday's list off
+  it. Fine once everyone has gone home, not while the room is still full — so
+  it says which day is on there now, and running the today button puts it back.
+
 ### The columns beside a student
 
 Each student row also gets the sheet's own lookups — **column C** the link,
