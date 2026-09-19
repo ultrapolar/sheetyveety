@@ -1314,9 +1314,9 @@ const DECK_FILLER_ROWS = [
 
   // Monday to Friday is the weekday chart; Saturday has its own.
   const on = iso => api.seatingSheetName_(new Date(iso + 'T12:00:00Z'));
-  check('which chart: a Wednesday', on('2026-08-19'), 'weekdays');
-  check('which chart: a Monday', on('2026-08-17'), 'weekdays');
-  check('which chart: a Friday', on('2026-08-21'), 'weekdays');
+  check('which chart: a Wednesday', on('2026-08-19'), 'Weekdays');
+  check('which chart: a Monday', on('2026-08-17'), 'Weekdays');
+  check('which chart: a Friday', on('2026-08-21'), 'Weekdays');
   check('which chart: a Saturday', on('2026-08-22'), 'Saturdays');
 
   // Sunday names no chart, and that is an answer rather than a gap -- reading
@@ -1341,7 +1341,7 @@ const DECK_FILLER_ROWS = [
 
   // Setting it: what it says back is what it can actually see.
   h.addBook('BOOKOK_00000000000000000000',
-    [new FakeSheet('weekdays', [['']]), new FakeSheet('Saturdays', [['']])],
+    [new FakeSheet('Weekdays', [['']]), new FakeSheet('Saturdays', [['']])],
     'Centre charts');
   h.promptAnswer.next = 'https://docs.google.com/spreadsheets/d/BOOKOK_00000000000000000000/edit';
   api.setSeatingSource();
@@ -1351,7 +1351,7 @@ const DECK_FILLER_ROWS = [
     h.alerts.join(' ').includes('Both charts are there'));
 
   // A document missing one of the tabs is saved, and said so.
-  h.addBook('BOOKHALF_0000000000000000000', [new FakeSheet('weekdays', [['']])], 'Half a chart');
+  h.addBook('BOOKHALF_0000000000000000000', [new FakeSheet('Weekdays', [['']])], 'Half a chart');
   h.promptAnswer.next = 'BOOKHALF_0000000000000000000';
   api.setSeatingSource();
   check('link: a half-right document is still stored',
@@ -1482,7 +1482,7 @@ const DECK_FILLER_ROWS = [
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
     wop.setSelection(1, wopRows.length);
-    const seating = new FakeSheet('weekdays', chart,
+    const seating = new FakeSheet('Weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
 
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
@@ -1573,7 +1573,7 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
-    const seating = new FakeSheet('weekdays', chart,
+    const seating = new FakeSheet('Weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
 
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
@@ -1650,7 +1650,7 @@ const DECK_FILLER_ROWS = [
     const deck = new FakeSheet('Deck List',
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', rows, makeGrid(rows.length, 26, '#ffffff'));
-    const seating = new FakeSheet('weekdays', chart,
+    const seating = new FakeSheet('Weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-19'), String, Number, Object, Array, RegExp,
@@ -1737,7 +1737,7 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(wopRows.length, 26, '#ffffff'));
-    const seating = new FakeSheet('weekdays', chart,
+    const seating = new FakeSheet('Weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-19'), String, Number,
@@ -2025,7 +2025,7 @@ const DECK_FILLER_ROWS = [
   const deck = new FakeSheet('Deck List',
     [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
   const wop = new FakeSheet('Daily WOP', wopRows, makeGrid(1, 26, '#ffffff'));
-  const seating = new FakeSheet('weekdays', chart,
+  const seating = new FakeSheet('Weekdays', chart,
     makeGrid(chart.length, chart[0].length, '#ffffff'));
   const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-19'), String, Number,
@@ -2171,7 +2171,7 @@ const DECK_FILLER_ROWS = [
       [HEADER, ['Jane Doe', 'T1', '', '', '', '', '', '', '', '', '', '', '']]);
     const wop = new FakeSheet('Daily WOP', wopRows,
       makeGrid(names.length, 26, '#ffffff'));
-    const seating = new FakeSheet('weekdays', chart,
+    const seating = new FakeSheet('Weekdays', chart,
       makeGrid(chart.length, chart[0].length, '#ffffff'));
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate('2026-08-19'), String, Number,

@@ -194,7 +194,7 @@ const CONFIG = {
     // in their hours, which is why they are two tabs rather than one.
     // A day with no tab named is a day the centre does not open, and the
     // import says so rather than reading somebody else's chart.
-    DAY_SHEETS: ['', 'weekdays', 'weekdays', 'weekdays', 'weekdays', 'weekdays',
+    DAY_SHEETS: ['', 'Weekdays', 'Weekdays', 'Weekdays', 'Weekdays', 'Weekdays',
       'Saturdays'],
 
     // The heading on the little hour tables beside the chart, where whoever

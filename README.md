@@ -513,9 +513,9 @@ means sharing it with the same Google account you are signed in as.
 `CONFIG.SEATING.SPREADSHEET_ID` is the fallback when nothing has been pasted,
 and blank means "a tab in this same spreadsheet".
 
-### Which tab: weekdays or saturday
+### Which tab: Weekdays or Saturdays
 
-`CONFIG.SEATING.DAY_SHEETS` maps the day of the week to a tab — `weekdays`
+`CONFIG.SEATING.DAY_SHEETS` maps the day of the week to a tab — `Weekdays`
 Monday to Friday, `Saturdays` on Saturday — and the two charts are the same
 layout with different hours. The names must match the tabs exactly, capitals
 included. **Sunday names no tab**, and
