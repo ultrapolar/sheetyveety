@@ -42,7 +42,8 @@ function loadScript(context) {
   parseTypedDate_, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
-  looksLikeShiftTitle_, sectionTemplateRow_,
+  looksLikeShiftTitle_, sectionTemplateRow_, isExcludedShift_,
+  nextOpenDayAfter_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1332,6 +1333,98 @@ const DECK_FILLER_ROWS = [
     { id: 'a@x', name: 'Appointy', events: [] }] });
   check('day: an empty day writes nothing', p.cell(1), '');
   checkTruthy('day: and says which day', p.said().includes('9/17/2026 Thursday'));
+
+  // --- who is left off, and the colour of each hour ----------------------
+  p = paste({ at: 1, shiftCalendars: ['Staff Schedule'], calendars: [
+    { id: 'staff@x', name: 'Staff Schedule', events: [
+      ev('IC (Amanda)  AL', '09:00', '13:00'),
+      ev('IC (Ashley)  AS', '09:00', '13:00'),
+      ev('@H (Trevor)  TM', '10:00', '13:00')] },
+    { id: 'book@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  check('omit: only the instructor who is on the list is listed',
+    p.colA().filter(v => v.indexOf('IC (') !== -1 || v.indexOf('@H (') !== -1),
+    ['9am - 1pm IC (Amanda)  AL']);
+  check('omit: and the hour beside a student is only them',
+    p.cell(4, 7), '9am - 1pm IC (Amanda)  AL');
+  checkTruthy('omit: the report says they were left off on purpose',
+    p.said().includes('Ashley') && p.said().includes('SHIFT_EXCLUDE'));
+  check('omit: they are not quietly moved to the leftovers instead',
+    p.colA().filter(v => v.indexOf('Ashley') !== -1 || v.indexOf('Trevor') !== -1),
+    []);
+
+  const api3 = paste({ calendars: [] }).api;
+  checkTruthy('omit: matched wherever the name sits on the line',
+    api3.isExcludedShift_('IC (Ashley)  AS'));
+  checkTruthy('omit: and however it is cased',
+    api3.isExcludedShift_('ic (ashley) as'));
+  check('omit: somebody else is not caught by it',
+    api3.isExcludedShift_('IC (Amanda)  AL'), false);
+
+  // Each hour of students takes the next shade, so an hour reads as a block.
+  p = paste({ at: 1, shiftCalendars: [], calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Student Two - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Student Three - (IN-CENTER) 1 hour session', '10:00', '11:00'),
+      ev('Student Four - (IN-CENTER) 1 hour session', '11:00', '12:00')] }] });
+  // Row 1 is @HOME, row 2 In-Center, rows 3-6 the students.
+  check('shading: the nine is one colour, the ten the next, the eleven back',
+    [3, 4, 5, 6].map(r => String(p.wop.backgrounds[r - 1][0])),
+    ['#ffffff', '#ffffff', '#d9d9d9', '#ffffff']);
+  // Rows can be empty and still be formatted -- a day log has its banding laid
+  // down ahead of the work. Only the students' own rows are painted; anything
+  // else keeps whatever colour it was given.
+  p = paste({ at: 1, shiftCalendars: [],
+    fills: [[1, 1, '#f4cccc'], [2, 1, '#f4cccc'], [3, 1, '#f4cccc'],
+            [4, 1, '#f4cccc'], [5, 1, '#f4cccc']],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('IC (Amanda)  AL', '09:00', '13:00'),
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Student Two - (IN-CENTER) 1 hour session', '10:00', '11:00')] }] });
+  // 1 the shift, 2 @HOME, 3 In-Center, 4-5 the students.
+  check('shading: a row that is not a student keeps the colour it had',
+    [1, 2, 3].map(r => String(p.wop.backgrounds[r - 1][0])),
+    ['#f4cccc', '#f4cccc', '#f4cccc']);
+  check('shading: and the students take their hour\'s',
+    [4, 5].map(r => String(p.wop.backgrounds[r - 1][0])),
+    ['#ffffff', '#d9d9d9']);
+
+  // Each section starts its own alternation.
+  p = paste({ at: 1, shiftCalendars: [], calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      ev('Home One - (VIRTUAL | @HOME) 1 hour session', '09:00', '10:00'),
+      ev('Home Two - (VIRTUAL | @HOME) 1 hour session', '10:00', '11:00'),
+      ev('Centre One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Centre Two - (IN-CENTER) 1 hour session', '10:00', '11:00')] }] });
+  // 1 @HOME, 2-3 its students, 4 In-Center, 5-6 its students.
+  check('shading: @HOME alternates', 
+    [2, 3].map(r => String(p.wop.backgrounds[r - 1][0])), ['#ffffff', '#d9d9d9']);
+  check('shading: and In-Center starts again at the first',
+    [5, 6].map(r => String(p.wop.backgrounds[r - 1][0])), ['#ffffff', '#d9d9d9']);
+
+  // --- tomorrow, when tomorrow is shut ----------------------------------
+  const api4 = paste({ calendars: [] }).api;
+  const after = iso => {
+    const d = api4.nextOpenDayAfter_(new Date(iso + 'T12:00:00'));
+    return [d.getMonth() + 1, d.getDate()];
+  };
+  check('tomorrow: a weekday is the next day', after('2026-09-17'), [9, 18]);
+  check('tomorrow: a Friday is the Saturday', after('2026-09-18'), [9, 19]);
+  check('tomorrow: a Saturday skips the shut Sunday to Monday',
+    after('2026-09-19'), [9, 21]);
+
+  p = paste({ at: 1, which: 'tomorrow', today: '2026-09-19', shiftCalendars: [],
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      { title: 'Sunday Child - (IN-CENTER) 1 hour session',
+        start: new Date('2026-09-20T09:00:00'), end: new Date('2026-09-20T10:00:00') },
+      { title: 'Monday Child - (IN-CENTER) 1 hour session',
+        start: new Date('2026-09-21T09:00:00'), end: new Date('2026-09-21T10:00:00') }] }] });
+  checkTruthy('tomorrow: run on a Saturday, it pastes the Monday',
+    p.colA().indexOf('9:00 Monday Child') !== -1 &&
+    p.colA().indexOf('9:00 Sunday Child') === -1);
+  checkTruthy('tomorrow: and the report names the Monday',
+    p.said().includes('9/21/2026 Monday'));
 
   // --- the section headers keep the look of the day before ---------------
   // Yesterday's @HOME and In-Center rows carry formatting and links. Today's

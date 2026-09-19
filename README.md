@@ -389,6 +389,18 @@ In-Center | Issue | … | IAAT | Hist     the section header
 11:00 Student Three   8:45am - 1:15pm IC (Amanda)  AL
 ```
 
+### One hour, one shade
+
+Each hour of students takes the next colour from
+`CONFIG.SCHEDULE.HOUR_SHADES`, so an hour reads as a block rather than a run of
+rows. **@HOME and In-Center each start again at the first**, since they are
+read as two lists rather than one.
+
+Only a student's own row is painted. A row can be empty and still be
+formatted — a day log has its banding laid down ahead of the work — so the
+shifts, the leftovers and the section headers keep whatever colour they were
+given.
+
 ### The section headers keep the day before's look
 
 `@HOME` and `In-Center` are more than their words — they are bold, they are
@@ -440,6 +452,13 @@ Two ways of knowing one, because either alone lets somebody slip through:
 
 The marker has to be a word of its own: `ICU open day` is not a shift.
 
+**`CONFIG.SCHEDULE.SHIFT_EXCLUDE` names instructors who are never listed** —
+Ashley and Trevor. They are on the availability calendar for reasons of their
+own and are not who anybody is looking for when they read the hour. They are
+left off the group **and** off the hours beside the students, not quietly moved
+into the leftovers, and the report says they were left off on purpose so it
+does not read as something having gone missing.
+
 Everything that is neither a shift nor a session follows underneath in calendar
 order, still ahead of the two student sections.
 
@@ -476,6 +495,10 @@ the day says `am` or `pm` once at the end.
 ```
 
 ### The rest of it
+
+**Tomorrow means the next day the centre opens.** On a Saturday that is Monday,
+because a Sunday nobody works would paste a page of nothing.
+`CONFIG.SCHEDULE.CLOSED_DAYS` is which days those are.
 
 **Which day is whichever entry you ran** — today, tomorrow, or one you type
 (`9/18/2026`, or `9/18` for this year; a date that does not exist is a typo and

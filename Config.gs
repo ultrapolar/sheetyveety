@@ -62,6 +62,19 @@ const CONFIG = {
     // shifts, so one put on the wrong calendar still lands with the rest.
     SHIFT_MARKERS: ['IC', '@H'],
 
+    // Instructors to leave off the list entirely, by name as it is written on
+    // their line. They are on the availability calendar for reasons of their
+    // own and are not who anybody is looking for when they read the hour.
+    SHIFT_EXCLUDE: ['Ashley', 'Trevor'],
+
+    // Days the centre does not open, 0 being Sunday. "Tomorrow" skips them,
+    // so on a Saturday it means Monday.
+    CLOSED_DAYS: [0],
+
+    // Each hour of students takes the next of these, so one hour reads as one
+    // block. Both sections start again at the first.
+    HOUR_SHADES: ['#ffffff', '#d9d9d9'],
+
     // Between the two ends of a time range: "8:45am - 1:15pm".
     RANGE_SEPARATOR: ' - ',
 

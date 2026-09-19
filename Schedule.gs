@@ -97,6 +97,21 @@ function looksLikeShiftTitle_(title) {
   });
 }
 
+/**
+ * True for a shift belonging to somebody who is never on the list.
+ *
+ * Matched on the line as a whole rather than on the bracket alone, because
+ * the name is written differently by whoever made the event, and the point is
+ * that this person does not appear at all.
+ */
+function isExcludedShift_(title) {
+  const upper = String(title == null ? '' : title).toUpperCase();
+  return (CONFIG.SCHEDULE.SHIFT_EXCLUDE || []).some(function (name) {
+    const wanted = String(name).trim().toUpperCase();
+    return wanted && upper.indexOf(wanted) !== -1;
+  });
+}
+
 /** True for a calendar whose items are shifts rather than sessions. */
 function isShiftCalendar_(name) {
   return (CONFIG.SCHEDULE.SHIFT_CALENDARS || []).some(function (wanted) {
@@ -135,6 +150,7 @@ function scheduleItemsFor_(calendars, date) {
   const other = [];
   const sessions = [];
   const unplaced = [];
+  const excluded = [];
   const seen = {};
 
   calendars.forEach(function (calendar) {
@@ -159,6 +175,7 @@ function scheduleItemsFor_(calendars, date) {
         asIs: asIs, calendar: calendar.getName() };
 
       if (fromShifts || looksLikeShiftTitle_(title)) {
+        if (isExcludedShift_(title)) { excluded.push(item); return; }
         if (seen['shift|' + asIs]) return;
         seen['shift|' + asIs] = true;
         shifts.push(item);
@@ -202,7 +219,8 @@ function scheduleItemsFor_(calendars, date) {
   });
   sessions.sort(byTime);
 
-  return { shifts: shifts, other: other, sessions: sessions, unplaced: unplaced };
+  return { shifts: shifts, other: other, sessions: sessions,
+    unplaced: unplaced, excluded: excluded };
 }
 
 /**
@@ -233,15 +251,18 @@ function scheduleBlock_(items) {
     // The instructors covering each hour, listed from the row that hour opens
     // on. A shift that has run out is not on the list for the hour after it.
     const instructorColumn = section.instructorColumn || 0;
+    const shades = CONFIG.SCHEDULE.HOUR_SHADES || [];
     let hour = '';
     let covering = [];
     let offset = 0;
+    let hourIndex = -1;
 
     mine.forEach(function (session) {
       const label = hourLabel_(session.start);
       if (label !== hour) {
         hour = label;
         offset = 0;
+        hourIndex++;
         const hourStart = hourStartOf_(session.start);
         covering = instructorColumn
           ? items.shifts.filter(function (shift) {
@@ -254,7 +275,8 @@ function scheduleBlock_(items) {
         values[instructorColumn] = covering[offset].asIs;
       }
       offset++;
-      push(values, true);
+      const at = push(values, true);
+      if (shades.length) rows[at].shade = shades[hourIndex % shades.length];
     });
   });
 
@@ -289,9 +311,23 @@ function importCalendarToday() {
 
 /** Menu entry: the same, for tomorrow -- for setting up before you leave. */
 function importCalendarTomorrow() {
-  const today = new Date();
-  importCalendarFor_(new Date(today.getFullYear(), today.getMonth(),
-    today.getDate() + 1), 'tomorrow');
+  importCalendarFor_(nextOpenDayAfter_(new Date()), 'tomorrow');
+}
+
+/**
+ * The next day the centre opens after the one given.
+ *
+ * On a Saturday that is Monday, because "tomorrow" means the next day there is
+ * anybody in -- setting up a Sunday nobody works would be a page of nothing.
+ */
+function nextOpenDayAfter_(from) {
+  const closed = CONFIG.SCHEDULE.CLOSED_DAYS || [];
+  const date = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  for (let step = 0; step < 8; step++) {
+    date.setDate(date.getDate() + 1);
+    if (closed.indexOf(date.getDay()) === -1) return date;
+  }
+  return date;   // every day is closed, which is somebody's mistake, not mine
 }
 
 /** Menu entry: the same, for a day you type in. */
@@ -481,6 +517,15 @@ function importCalendarFor_(date, source) {
       sheet.getRange(startRow, Number(column), rows.length, 1).setValues(block);
     });
 
+    // One hour, one shade, so the eye can see where an hour begins and ends.
+    // Written before the headers are copied, so a header keeps its own colour.
+    if (rows.some(function (row) { return row.shade; })) {
+      sheet.getRange(startRow, CONFIG.WOP_COL.NAME, rows.length, 1)
+        .setBackgrounds(rows.map(function (row) {
+          return [row.shade || null];   // null leaves a row as it is
+        }));
+    }
+
     // The copied headers go down after the columns, so nothing written by the
     // column pass lands on top of one.
     let typedOut = 0;
@@ -505,6 +550,10 @@ function importCalendarFor_(date, source) {
         'copy from, so the word is there but the formatting and any links are ' +
         'not. Style them once and the next day will match.');
     }
+    items.excluded.forEach(function (item) {
+      log.ok(item.title, 'left off the list, as CONFIG.SCHEDULE.SHIFT_EXCLUDE ' +
+        'says to.');
+    });
     items.unplaced.forEach(function (item) {
       log.warn(item.title, 'is a session, but nothing in CONFIG.SCHEDULE' +
         '.SECTIONS matches what is in its brackets, so there is no telling ' +
@@ -530,6 +579,7 @@ function importCalendarFor_(date, source) {
         alert: !!day.mismatch },
       { label: 'Students', value: items.sessions.length },
       { label: 'Shifts', value: items.shifts.length },
+      { label: 'Instructors left off', value: items.excluded.length },
       { label: 'Pasted as they stand', value: items.other.length },
       { label: 'Section not recognised', value: items.unplaced.length,
         alert: items.unplaced.length > 0 }

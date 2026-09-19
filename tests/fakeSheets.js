@@ -46,6 +46,8 @@ class FakeRange {
         throw new Error(`${label}: expected ${this.numCols} cols, got ${block[r].length}`);
       }
       for (let c = 0; c < this.numCols; c++) {
+        // null leaves a cell as it is, the way the real setBackgrounds does.
+        if (block[r][c] === null) continue;
         grid[this.row - 1 + r][this.col - 1 + c] = block[r][c];
         this.sheet.writeCount++;
       }
