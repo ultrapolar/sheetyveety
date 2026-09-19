@@ -17,7 +17,9 @@ function onOpen() {
     .addItem('Jump to today', 'jumpToToday')
     .addItem('Start a new day', 'startNewDay')
     .addSeparator()
-    .addItem('Paste the day from the calendar', 'importCalendarSchedule')
+    .addItem('Paste the calendar — today', 'importCalendarToday')
+    .addItem('Paste the calendar — tomorrow', 'importCalendarTomorrow')
+    .addItem('Paste the calendar — pick a day', 'importCalendarPickDay')
     .addSeparator()
     .addItem('Pinks Printed', 'processSodPinks')
     // Parked at your request. organizeSeatingRows and everything it uses are

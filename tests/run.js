@@ -38,7 +38,8 @@ function loadScript(context) {
   formatSeating_, rowLetterOf_, isTableNumber_, seatingCandidates_,
   organizeSeatingRows, planSeatingOrder_, hourSortKey_, hourLabel_,
   jumpToToday, startNewDay, parseDayHeader_, dayHeaderText_, dayHeaderRows_,
-  importCalendarSchedule, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
+  importCalendarToday, importCalendarTomorrow, importCalendarPickDay,
+  parseTypedDate_, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
@@ -1082,7 +1083,14 @@ const DECK_FILLER_ROWS = [
       vm.runInContext('CONFIG.SCHEDULE.SHIFT_CALENDARS = ' +
         JSON.stringify(opts.shiftCalendars) + ';', ctx);
     }
-    api.importCalendarSchedule();
+    if (opts.pick !== undefined) {
+      h.promptAnswer.next = opts.pick;
+      api.importCalendarPickDay();
+    } else if (opts.which === 'tomorrow') {
+      api.importCalendarTomorrow();
+    } else {
+      api.importCalendarToday();
+    }
     return { wop: wop, api: api, harness: h,
       formula: (row, col) => String((wop.formulas || {})[row + ':' + col] || ''),
       cell: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
@@ -1229,17 +1237,71 @@ const DECK_FILLER_ROWS = [
   check('day: in twice is two, and the same booking twice is one',
     listed, ['9:00 Amalie Laz', '11:00 Amalie Laz']);
 
-  // The day comes from the dated row above the cursor.
-  p = paste({ at: 4, shiftCalendars: [],
-    rows: ['9/15/2026 Tuesday', '7:00 Someone', '9/16/2026 Wednesday'],
-    calendars: [{ id: 'a@x', name: 'Appointy', events: [
-      { title: 'Wednesday Child - (IN-CENTER) 1 hour session',
-        start: new Date('2026-09-16T09:00:00'), end: new Date('2026-09-16T10:00:00') },
-      ev('Thursday Child - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
-  checkTruthy('day: the dated row above the cursor decides which day',
-    p.colA().indexOf('9:00 Wednesday Child') !== -1 &&
+  // --- which day, and saying when it looks wrong ------------------------
+  const tomorrowEv = (title, from, to) => ({ title: title,
+    start: new Date('2026-09-18T' + from + ':00'),
+    end: new Date('2026-09-18T' + to + ':00') });
+
+  const bothDays = [{ id: 'a@x', name: 'Appointy', events: [
+    ev('Thursday Child - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+    tomorrowEv('Friday Child - (IN-CENTER) 1 hour session', '09:00', '10:00')] }];
+
+  p = paste({ at: 1, shiftCalendars: [], calendars: bothDays });
+  checkTruthy('which day: today takes today',
+    p.colA().indexOf('9:00 Thursday Child') !== -1 &&
+    p.colA().indexOf('9:00 Friday Child') === -1);
+
+  p = paste({ at: 1, which: 'tomorrow', shiftCalendars: [], calendars: bothDays });
+  checkTruthy('which day: tomorrow takes tomorrow',
+    p.colA().indexOf('9:00 Friday Child') !== -1 &&
     p.colA().indexOf('9:00 Thursday Child') === -1);
-  checkTruthy('day: and the report says where it got it', p.said().includes('row 3'));
+  checkTruthy('which day: and the report names the day it did',
+    p.said().includes('9/18/2026 Friday'));
+
+  p = paste({ at: 1, pick: '9/18/2026', shiftCalendars: [], calendars: bothDays });
+  checkTruthy('which day: a day typed in is the day used',
+    p.colA().indexOf('9:00 Friday Child') !== -1);
+
+  p = paste({ at: 1, pick: '9/18', shiftCalendars: [], calendars: bothDays });
+  checkTruthy('which day: the year may be left off',
+    p.colA().indexOf('9:00 Friday Child') !== -1);
+
+  p = paste({ at: 1, pick: 'next friday', shiftCalendars: [], calendars: bothDays });
+  check('which day: prose is refused and nothing pasted', p.cell(1), '');
+  checkTruthy('which day: and it says how to type one',
+    p.said().includes('9/18/2026'));
+
+  p = paste({ at: 1, pick: '', shiftCalendars: [], calendars: bothDays });
+  check('which day: an empty box pastes nothing', p.cell(1), '');
+
+  // Setting tomorrow up under today's heading is the ordinary evening job and
+  // is only mentioned; today under last week's heading is worth a word.
+  p = paste({ at: 2, rows: ['9/15/2026 Tuesday'], shiftCalendars: [],
+    calendars: bothDays });
+  checkTruthy('which day: a heading from another day is said out loud',
+    p.said().includes('9/15/2026 Tuesday') && p.said().includes('Ctrl+Z'));
+  checkTruthy('which day: but the paste still happens',
+    p.colA().indexOf('9:00 Thursday Child') !== -1);
+
+  p = paste({ at: 2, rows: ['9/17/2026 Thursday'], shiftCalendars: [],
+    calendars: bothDays });
+  checkTruthy('which day: a heading that agrees is not complained about',
+    !p.said().includes('Ctrl+Z'));
+
+  // A day that does not exist is a typo, not a day.
+  const api1 = paste({ calendars: [] }).api;
+  // A date that will not parse comes back null, so these read it safely: a
+  // rule that broke should fail here, not take the run down with it.
+  const typed = t => {
+    const d = api1.parseTypedDate_(t);
+    return d ? [d.getFullYear(), d.getMonth() + 1, d.getDate()] : null;
+  };
+  check('typed day: a full date', typed('9/18/2026'), [2026, 9, 18]);
+  check('typed day: a two-digit year', typed('9/18/26'), [2026, 9, 18]);
+  check('typed day: no year means this one', typed('9/18'), [2026, 9, 18]);
+  check('typed day: a date that does not exist', typed('2/31/2026'), null);
+  check('typed day: prose', typed('next friday'), null);
+  check('typed day: nothing', typed(''), null);
 
   // Nothing is written over.
   p = paste({ at: 2, rows: ['9/17/2026 Thursday', '', '', 'do not lose me'],

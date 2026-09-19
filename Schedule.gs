@@ -242,10 +242,72 @@ function scheduleBlock_(items) {
   return rows;
 }
 
+/** Menu entry: lay today out from the cursor down. */
+function importCalendarToday() {
+  importCalendarFor_(new Date(), 'today');
+}
+
+/** Menu entry: the same, for tomorrow -- for setting up before you leave. */
+function importCalendarTomorrow() {
+  const today = new Date();
+  importCalendarFor_(new Date(today.getFullYear(), today.getMonth(),
+    today.getDate() + 1), 'tomorrow');
+}
+
+/** Menu entry: the same, for a day you type in. */
+function importCalendarPickDay() {
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.prompt('Paste the calendar: pick a day',
+    'Which day? Type it as 9/18/2026, or 9/18 for this year.',
+    ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  const typed = String(response.getResponseText()).trim();
+  if (!typed) {
+    showError_('No day typed, so nothing was pasted.');
+    return;
+  }
+
+  const date = parseTypedDate_(typed);
+  if (!date) {
+    showError_('"' + typed + '" is not a day I can read. Type it as ' +
+      '9/18/2026, or 9/18 for this year.');
+    return;
+  }
+  importCalendarFor_(date, 'the day you picked');
+}
+
 /**
- * Menu entry: lay the day out from the cursor down.
+ * A day somebody typed, or null.
+ *
+ * The year may be left off, which means this one. A date that does not exist
+ * is a typo and comes back null -- taking 2/31 for the first of March would
+ * paste a day nobody asked for and say nothing about it.
  */
-function importCalendarSchedule() {
+function parseTypedDate_(text) {
+  const parts = String(text == null ? '' : text).trim()
+    .match(/^(\d{1,2})\s*\/\s*(\d{1,2})(?:\s*\/\s*(\d{2,4}))?$/);
+  if (!parts) return null;
+
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  let year = parts[3] === undefined ? new Date().getFullYear() : Number(parts[3]);
+  if (year < 100) year += 2000;
+
+  const date = new Date(year, month - 1, day);
+  if (date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+/**
+ * Lays a day out from the cursor down.
+ *
+ * The day is whichever the entry said, not whatever the sheet suggests. The
+ * dated row above the cursor is still read, but only to say so when the two
+ * disagree: pasting tomorrow under today's heading is a reasonable thing to be
+ * doing the evening before, and pasting today under last Tuesday's is not.
+ */
+function importCalendarFor_(date, source) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getActiveSheet();
   const range = sheet.getActiveRange();
@@ -255,7 +317,10 @@ function importCalendarSchedule() {
   }
 
   const startRow = range.getRow();
-  const day = scheduleDayFor_(sheet, startRow);
+  const above = scheduleDayFor_(sheet, startRow);
+  const day = { date: date, from: source,
+    mismatch: above.from !== 'today' && !sameDayAs_(above.date, date)
+      ? above.from + ' is ' + dayHeaderText_(above.date) : '' };
 
   const found = allCalendars_();
   if (found.problem) {
@@ -357,6 +422,12 @@ function importCalendarSchedule() {
     writeStudentFormulas_(sheet, startRow, rows);
 
     const log = ActionLog_();
+    if (day.mismatch) {
+      log.warn('The day above', 'this went in as ' + dayHeaderText_(day.date) +
+        ', but ' + day.mismatch + '. That is fine when you are setting up ' +
+        'ahead; it is not when you meant to paste under the heading you are ' +
+        'sitting in. Ctrl+Z puts it back.');
+    }
     items.unplaced.forEach(function (item) {
       log.warn(item.title, 'is a session, but nothing in CONFIG.SCHEDULE' +
         '.SECTIONS matches what is in its brackets, so there is no telling ' +
@@ -377,7 +448,9 @@ function importCalendarSchedule() {
     showReport_('Calendar', dayHeaderText_(day.date), [
       { label: 'Rows written', value: rows.length },
       { label: 'From', value: 'A' + startRow },
-      { label: 'Day taken from', value: day.from },
+      { label: 'Day', value: day.from },
+      { label: 'Heading above says', value: day.mismatch || 'the same day',
+        alert: !!day.mismatch },
       { label: 'Students', value: items.sessions.length },
       { label: 'Shifts', value: items.shifts.length },
       { label: 'Pasted as they stand', value: items.other.length },

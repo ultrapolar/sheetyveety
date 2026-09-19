@@ -41,7 +41,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 
 | Menu | Entries |
 | --- | --- |
-| **SOD** | Jump to today · Start a new day · Paste the day from the calendar · Pinks Printed |
+| **SOD** | Jump to today · Start a new day · Paste the calendar (today / tomorrow / pick a day) · Pinks Printed |
 | **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
@@ -373,8 +373,9 @@ is written plain and says so.
 
 ## Laying the day out from the calendar
 
-**SOD → Paste the day from the calendar.** Click the cell the day should start
-in, run it, and the whole block is built from the top down:
+**SOD → Paste the calendar — today / tomorrow / pick a day.** Click the cell
+the day should start in, run one of them, and the whole block is built from the
+top down:
 
 ```
 8:45am - 1:15pm IC (Amanda)  AL         the shifts, as they stand
@@ -452,8 +453,14 @@ the day says `am` or `pm` once at the end.
 
 ### The rest of it
 
-**Which day** comes from the dated row above the cursor, and the report says
-which it used. The same booking reached through two calendars is one item; a
+**Which day is whichever entry you ran** — today, tomorrow, or one you type
+(`9/18/2026`, or `9/18` for this year; a date that does not exist is a typo and
+is refused). The report names the day it used.
+
+The dated row above the cursor is still read, but only to **say so when the two
+disagree**. Setting tomorrow up under today's heading is the ordinary thing to
+be doing the evening before; pasting today under last Tuesday's is not, and it
+gets a word in the report rather than a refusal — it is one Ctrl+Z either way. The same booking reached through two calendars is one item; a
 student in **twice in a day** is two. **Nothing is ever written over** — one
 occupied cell stops the whole paste and is named along with what is in it.
 
