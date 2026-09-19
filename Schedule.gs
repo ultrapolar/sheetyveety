@@ -194,7 +194,10 @@ function scheduleItemsFor_(calendars, date) {
  */
 function scheduleBlock_(items) {
   const rows = [];
-  const push = function (values) { rows.push(values); return rows.length - 1; };
+  const push = function (cells, student) {
+    rows.push({ cells: cells, student: !!student });
+    return rows.length - 1;
+  };
 
   items.shifts.forEach(function (shift) { push({ 1: shift.asIs }); });
   items.other.forEach(function (item) { push({ 1: item.asIs }); });
@@ -232,7 +235,7 @@ function scheduleBlock_(items) {
         values[instructorColumn] = covering[offset].asIs;
       }
       offset++;
-      push(values);
+      push(values, true);
     });
   });
 
@@ -292,10 +295,30 @@ function importCalendarSchedule() {
     // Only the columns the block actually fills are touched, so the formulas
     // in the columns beside them stay where they are.
     const columns = {};
-    rows.forEach(function (values, i) {
-      Object.keys(values).forEach(function (column) {
+    rows.forEach(function (row, i) {
+      Object.keys(row.cells).forEach(function (column) {
         if (!columns[column]) columns[column] = {};
-        columns[column][i] = values[column];
+        columns[column][i] = row.cells[column];
+      });
+    });
+
+    // The columns that go beside a student: the formulas, and the column the
+    // result is copied into afterwards. Nothing is written into them here --
+    // they are listed so the guard below looks at them too, because a formula
+    // laid over somebody's note is as lost as anything else.
+    const besideStudents = [];
+    (CONFIG.SCHEDULE.FORMULAS || []).forEach(function (entry) {
+      besideStudents.push(entry.column);
+    });
+    (CONFIG.SCHEDULE.VALUE_COPIES || []).forEach(function (entry) {
+      if (besideStudents.indexOf(entry.to) === -1) besideStudents.push(entry.to);
+    });
+    besideStudents.forEach(function (column) {
+      if (!columns[column]) columns[column] = {};
+      rows.forEach(function (row, i) {
+        if (row.student && columns[column][i] === undefined) {
+          columns[column][i] = '';
+        }
       });
     });
 
@@ -323,12 +346,15 @@ function importCalendarSchedule() {
     }
 
     Object.keys(columns).forEach(function (column) {
+      if (besideStudents.indexOf(Number(column)) !== -1) return;
       const block = [];
       for (let i = 0; i < rows.length; i++) {
         block.push([columns[column][i] === undefined ? '' : columns[column][i]]);
       }
       sheet.getRange(startRow, Number(column), rows.length, 1).setValues(block);
     });
+
+    writeStudentFormulas_(sheet, startRow, rows);
 
     const log = ActionLog_();
     items.unplaced.forEach(function (item) {
@@ -379,4 +405,50 @@ function scheduleDayFor_(sheet, row) {
   if (!headers.length) return { date: new Date(), from: 'today' };
   const nearest = headers[headers.length - 1];
   return { date: nearest.date, from: 'row ' + nearest.row };
+}
+
+/**
+ * The formulas that go beside each student, and the text copied from them.
+ *
+ * The formulas find the student on the Deck List, so they belong to the row
+ * and are written per row. What they work out is then copied across as **text**
+ * -- column I is a record of what the lookup said on the day, and a second
+ * copy of the formula would quietly change every time the Deck List did.
+ *
+ * The copy has to wait for the formulas to settle, which is what the flush is
+ * for: read straight after writing and a spreadsheet hands back the old value,
+ * or nothing at all.
+ */
+function writeStudentFormulas_(sheet, startRow, rows) {
+  const formulas = CONFIG.SCHEDULE.FORMULAS || [];
+  const copies = CONFIG.SCHEDULE.VALUE_COPIES || [];
+  if (!formulas.length && !copies.length) return;
+
+  const isStudent = rows.map(function (row) { return row.student; });
+  if (isStudent.indexOf(true) === -1) return;
+
+  formulas.forEach(function (entry) {
+    const block = isStudent.map(function (student, i) {
+      return [student
+        ? String(entry.formula).replace(/\{\{row\}\}/g, String(startRow + i))
+        : ''];
+    });
+    sheet.getRange(startRow, entry.column, rows.length, 1).setFormulas(block);
+  });
+
+  if (!copies.length) return;
+  SpreadsheetApp.flush();
+
+  copies.forEach(function (entry) {
+    const shown = sheet.getRange(startRow, entry.from, rows.length, 1)
+      .getDisplayValues();
+    const block = isStudent.map(function (student, i) {
+      if (!student) return [''];
+      const text = String(shown[i][0] == null ? '' : shown[i][0]);
+      // A leading "=" would be read as a formula, and this column is meant to
+      // hold what the other one said, not to say it again.
+      return [/^[=+]/.test(text) ? "'" + text : text];
+    });
+    sheet.getRange(startRow, entry.to, rows.length, 1).setValues(block);
+  });
 }

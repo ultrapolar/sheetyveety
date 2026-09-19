@@ -40,7 +40,7 @@ function loadScript(context) {
   jumpToToday, startNewDay, parseDayHeader_, dayHeaderText_, dayHeaderRows_,
   importCalendarSchedule, scheduleDayFor_, scheduleItemsFor_, scheduleBlock_,
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
-  shiftCoversHour_, isShiftCalendar_, hourStartOf_,
+  shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1074,6 +1074,7 @@ const DECK_FILLER_ROWS = [
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
       Date: fixedDate(opts.today || '2026-09-17'), String, Number, Object,
       Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    if (opts.compute) wop.computeFormula = opts.compute;
     const h = install(ctx, [deck, wop], 'Daily WOP');
     (opts.calendars || []).forEach(c => h.addCalendar(c.id, c.name, c.events));
     const api = loadScript(ctx);
@@ -1082,7 +1083,8 @@ const DECK_FILLER_ROWS = [
         JSON.stringify(opts.shiftCalendars) + ';', ctx);
     }
     api.importCalendarSchedule();
-    return { wop: wop, api: api,
+    return { wop: wop, api: api, harness: h,
+      formula: (row, col) => String((wop.formulas || {})[row + ':' + col] || ''),
       cell: (row, col) => String((wop.values[row - 1] || [])[(col || 1) - 1] || ''),
       colA: () => wop.values.map(r => String(r[0] || '')),
       said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
@@ -1254,6 +1256,66 @@ const DECK_FILLER_ROWS = [
     { id: 'a@x', name: 'Appointy', events: [] }] });
   check('day: an empty day writes nothing', p.cell(1), '');
   checkTruthy('day: and says which day', p.said().includes('9/17/2026 Thursday'));
+
+  // --- the formulas beside a student, and the text taken off them --------
+  // The fake stands in for the lookup: column C works out a link, column D a
+  // deck summary, so the test can say what the sheet found without a VLOOKUP.
+  const compute = (formula, row, col) =>
+    col === 3 ? 'link-for-' + row : 'T' + row + '/pink/2';
+
+  p = paste({ at: 2, rows: ['9/17/2026 Thursday'], shiftCalendars: [],
+    compute: compute, calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00'),
+      ev('Bubba Blue - (VIRTUAL | @HOME) 1 hour session', '10:00', '11:00')] }] });
+
+  // Row 2 is @HOME, 3 its student, 4 In-Center, 5 its student.
+  check('formulas: the block is where it was', [p.cell(2), p.cell(4)],
+    ['@HOME', 'In-Center']);
+  checkTruthy('formulas: column C gets one, pointing at its own row',
+    p.formula(3, 3).indexOf('A3') !== -1 &&
+    p.formula(3, 3).indexOf('cfung.net') !== -1);
+  checkTruthy('formulas: column D gets one, pointing at its own row',
+    p.formula(3, 4).indexOf('A3') !== -1 &&
+    p.formula(3, 4).indexOf("'Deck List'") !== -1);
+  checkTruthy('formulas: and the In-Center student gets its own row number',
+    p.formula(5, 3).indexOf('A5') !== -1 &&
+    p.formula(5, 4).indexOf('A5') !== -1);
+
+  // Column I takes what column D worked out, as text.
+  check('formulas: column I is the text column D came to',
+    [p.cell(3, 9), p.cell(5, 9)], ['T3/pink/2', 'T5/pink/2']);
+  check('formulas: and it is text, not another copy of the formula',
+    [p.formula(3, 9), p.formula(5, 9)], ['', '']);
+
+  // The formulas have to have settled before their result is read.
+  checkTruthy('formulas: the sheet is made to catch up first',
+    p.harness.flushes.length > 0);
+
+  // A section header is not a student, and gets none of it.
+  check('formulas: a section header row is left alone',
+    [p.formula(2, 3), p.formula(2, 4), p.cell(2, 9)], ['', '', '']);
+  check('formulas: and so is a shift row', p.formula(1, 4), '');
+
+  // A result that starts with "=" is text, not a formula in disguise.
+  p = paste({ at: 1, shiftCalendars: [],
+    compute: (f, row, col) => col === 4 ? '=1+1' : 'x',
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  // Rows 1 and 2 are the two section headers; row 3 is the student.
+  check('formulas: a result that looks like a formula is kept as text',
+    p.cell(3, 9), "'=1+1");
+
+  // The columns beside a student are guarded too: a note in one of them stops
+  // the paste, the same as a note in column A would.
+  // Row 2 is @HOME, row 3 In-Center, row 4 the student -- so the note sits in
+  // the formula column of the row a student would land on.
+  p = paste({ at: 2, rows: ['9/17/2026 Thursday', '', '', { 4: 'my note' }],
+    shiftCalendars: [], compute: compute,
+    calendars: [{ id: 'a@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  check('formulas: a note in a formula column stops the paste',
+    [p.cell(2), p.cell(4, 4)], ['', 'my note']);
+  checkTruthy('formulas: and is named', p.said().includes('D4'));
 
   // No calendars at all is its own answer.
   p = paste({ at: 1, calendars: [] });

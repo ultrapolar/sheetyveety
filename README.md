@@ -388,15 +388,29 @@ In-Center | Issue | … | IAAT | Hist     the section header
 11:00 Student Three   8:45am - 1:15pm IC (Amanda)  AL
 ```
 
-**Only the columns it fills are written**, so the formulas sitting in the
-columns beside them are left alone.
+### The columns beside a student
+
+Each student row also gets the sheet's own lookups — **column C** the link,
+**column D** the Deck List summary — written as formulas pointing at that row.
+They live in `CONFIG.SCHEDULE.FORMULAS`, with `{{row}}` standing in for the row
+they land on, so changing one is an edit in a known place rather than a hunt.
+
+Then, **once those have settled**, what column D worked out is copied into
+**column I as plain text**. The text, not the formula: column I is a record of
+what the lookup said on the day, and a second copy of the formula would quietly
+change every time the Deck List did. The copy waits on a flush, because reading
+straight after writing gets you the old value or nothing at all.
+
+Only **student rows** get any of this — a section header or a shift line is not
+a student. And a result that happens to start with `=` is written as text
+rather than becoming a formula of its own.
 
 ### Three kinds of calendar item
 
 | Kind | How it is told apart | Where it goes |
 | --- | --- | --- |
 | **A session** | its title has a bracket: `Amalie Laz - (IN-CENTER) 1 hour session - Appointy` | `9:00 Amalie Laz`, under the section the bracket names |
-| **A shift** | it is on one of `CONFIG.SCHEDULE.SHIFT_CALENDARS`, by calendar name | the top of the block, as it stands — and beside each hour it covers |
+| **A shift** | it is on the **Instructor Availability** calendar (`CONFIG.SCHEDULE.SHIFT_CALENDARS`), by name | the top of the block, as it stands — and beside each hour it covers |
 | **Anything else** | everything left | under the shifts, as it stands |
 
 A shift is a shift because of **which calendar it is on**, not how its title is

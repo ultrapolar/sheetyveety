@@ -54,7 +54,7 @@ const CONFIG = {
     // and listed again beside each hour it covers. Everything not on them is
     // read for sessions, and whatever is not a session is pasted as it stands
     // underneath.
-    SHIFT_CALENDARS: ['Staff Schedule'],
+    SHIFT_CALENDARS: ['Instructor Availability'],
 
     // Between the two ends of a time range: "8:45am - 1:15pm".
     RANGE_SEPARATOR: ' - ',
@@ -75,7 +75,23 @@ const CONFIG = {
                  { column: 12, text: 'IAAT' }, { column: 13, text: 'Hist' }],
         instructorColumn: 7   // G
       }
-    ]
+    ],
+
+    // What goes beside a student, with {{row}} standing in for the row they
+    // land on. These are the sheet's own formulas, kept here so that changing
+    // one is an edit in a known place rather than a hunt.
+    FORMULAS: [
+      { column: 3, formula:
+        '=concat("https://www.cfung.net/@HOME/gcf.cgi?name=",SUBSTITUTE(REGEXEXTRACT(A{{row}}, "[A-Za-z][a-z][A-Za-z\\s]*[A-Za-z]")," ","%20"))' },
+      { column: 4, formula:
+        '=iferror(CONCATENATE(VLOOKUP(REGEXEXTRACT(A{{row}}, "[A-Za-z][a-z][A-Za-z\\-\\s]*[A-Za-z]"),\'Deck List\'!A:C, 2, false)&"/",VLOOKUP(REGEXEXTRACT(A{{row}}, "[A-Za-z][a-z][A-Za-z\\-\\s]*[A-Za-z]"),\'Deck List\'!A:C, 3, false),VLOOKUP(REGEXEXTRACT(A{{row}}, "[A-Za-z][a-z][A-Za-z\\-\\s]*[A-Za-z]"),\'Deck List\'!A:D, 4, false)),"#N/A")' }
+    ],
+
+    // Once those have settled, what they worked out is copied across as plain
+    // text: column D's result into column I. The text, not the formula --
+    // column I is a record of what the lookup said at the time, and a second
+    // copy of the formula would quietly change with the Deck List.
+    VALUE_COPIES: [{ from: 4, to: 9 }]
   },
 
   PINK_VALUE: 'pink',

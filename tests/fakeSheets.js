@@ -71,6 +71,29 @@ class FakeRange {
     return out;
   }
   getValue() { return this.sheet.values[this.row - 1][this.col - 1]; }
+  /**
+   * Writing a formula stores it and puts whatever it works out in the cell.
+   * A sheet computes; the fake asks `computeFormula` what the answer was, so
+   * a test can say what the lookup found without reimplementing VLOOKUP.
+   */
+  setFormulas(block) {
+    if (!this.sheet.formulas) this.sheet.formulas = {};
+    for (let r = 0; r < this.numRows; r++) {
+      for (let c = 0; c < this.numCols; c++) {
+        const formula = String((block[r] || [])[c] == null ? '' : block[r][c]);
+        const row = this.row + r;
+        const col = this.col + c;
+        this.sheet.formulas[row + ':' + col] = formula;
+        this.sheet.values[row - 1][col - 1] = formula
+          ? this.sheet.computeFormula(formula, row, col) : '';
+      }
+    }
+    this.sheet.writeCount++;
+    return this;
+  }
+  getDisplayValues() {
+    return this.getValues().map(row => row.map(v => String(v == null ? '' : v)));
+  }
   setValue(v) { this.sheet.values[this.row - 1][this.col - 1] = v; this.sheet.writeCount++; return this; }
   setBackground(c) { this.sheet.backgrounds[this.row - 1][this.col - 1] = c; return this; }
   activate() {
@@ -115,6 +138,9 @@ class FakeSheet {
     this.fontColors = makeGrid(values.length, values[0].length, '#000000');
     this.activeRange = null;
     this.writeCount = 0;
+    // What a formula works out to. A test overrides it to stand in for the
+    // lookup; by default a formula shows as itself.
+    this.computeFormula = formula => formula;
   }
   getName() { return this.name; }
   getRange(row, col, numRows, numCols) {
@@ -172,6 +198,7 @@ function install(globalObj, sheets, activeSheetName) {
   const promptAnswer = { next: '', button: 'OK' };
   const prompts = [];
   let lockHeld = false;
+  const flushes = [];
 
   const spreadsheet = {
     getSheetByName: n => byName[n] || null,
@@ -186,6 +213,7 @@ function install(globalObj, sheets, activeSheetName) {
   const activatedSheets = [];
   globalObj.SpreadsheetApp = {
     getActiveSpreadsheet: () => spreadsheet,
+    flush: () => { flushes.push(true); },
     setActiveSheet: sheet => { activatedSheets.push(sheet.getName()); return sheet; },
     openById: id => {
       if (!booksById[id]) {
@@ -380,7 +408,7 @@ function install(globalObj, sheets, activeSheetName) {
   };
 
   return { dialogs, alerts, uiAnswer, promptAnswer, prompts, fetchLog,
-    fetchHandler, scriptProps, addBook, addCalendar, activatedSheets,
+    fetchHandler, scriptProps, addBook, addCalendar, activatedSheets, flushes,
     sheets: byName };
 }
 
