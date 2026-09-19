@@ -358,9 +358,10 @@ function resolveSeatingAlias_(name) {
 
 /** "12:00" from a cell holding either that text or a real time value. */
 function hourLabel_(value) {
-  if (value instanceof Date) {
-    const hours = value.getHours();
-    const minutes = value.getMinutes();
+  const date = asDate_(value);
+  if (date) {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
     return (hours % 12 === 0 ? 12 : hours % 12) + ':' +
       (minutes < 10 ? '0' : '') + minutes;
   }

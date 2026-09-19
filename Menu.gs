@@ -17,6 +17,8 @@ function onOpen() {
     .addItem('Jump to today', 'jumpToToday')
     .addItem('Start a new day', 'startNewDay')
     .addSeparator()
+    .addItem('Paste the day from the calendar', 'importCalendarSchedule')
+    .addSeparator()
     .addItem('Pinks Printed', 'processSodPinks')
     // Parked at your request. organizeSeatingRows and everything it uses are
     // still there and still tested; putting this line back turns it on.

@@ -41,7 +41,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 
 | Menu | Entries |
 | --- | --- |
-| **SOD** | Jump to today · Start a new day · Pinks Printed |
+| **SOD** | Jump to today · Start a new day · Paste the day from the calendar · Pinks Printed |
 | **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
@@ -370,6 +370,47 @@ order or opened twice is quietly wrong:
 The new row takes the **formatting of the day before**, so it is not the one
 row on the sheet that is a different colour. On a sheet with no earlier day it
 is written plain and says so.
+
+## Pasting the day from the calendar
+
+**SOD → Paste the day from the calendar.** Click the cell you want the list to
+start in, run it, and every item on every calendar this account can see lands
+down that column, one to a row, written the way the sheet writes a session:
+
+```
+4:00 Amalie Laz
+5:00 Neil D
+7:00 Sharon Yoo
+```
+
+**Every calendar**, subscribed ones included — that was the request, so nothing
+is filtered out and the report says how many items came from each.
+
+### Which day it imports
+
+The **dated row above the cursor**, if the sheet keeps them — so click into
+today's block and you get today. Above every dated row, or on a sheet with
+none, it is today. The report says which it used, so a surprising result
+explains itself.
+
+### What counts as one item
+
+The same session on two calendars — one subscribed to the other — is **one
+item**. Two students at the same hour are two. A student in **twice in a day**
+is two, which is why it takes the time *and* the name together to be a repeat.
+
+The event's **own start time** is what goes in front of the name, so a title
+already written `4:00 Amalie Laz` does not come out with two times on it. An
+**all-day item** has no hour to give and is not given one: it keeps its name,
+is listed first, and the report names it.
+
+### It never writes over anything
+
+If any cell it would use already has something in it, **nothing is pasted** —
+the row and what is in it are named so you can go and look. A paste that
+quietly takes out a morning's work is worse than one that refuses.
+
+Everything lands in a single write, so one Ctrl+Z puts the sheet back.
 
 ## Start of day: organising the rows
 

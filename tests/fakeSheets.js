@@ -23,6 +23,7 @@ class FakeRange {
     this.numCols = numCols;
   }
   getRow() { return this.row; }
+  getColumn() { return this.col; }
   getNumRows() { return this.numRows; }
   getNumColumns() { return this.numCols; }
   _slice(grid) {
@@ -315,9 +316,27 @@ function install(globalObj, sheets, activeSheetName) {
   const calendars = {};
   let defaultCalendar = null;
 
+  const makeEvent = e => ({
+    getTitle: () => e.title,
+    getStartTime: () => e.start,
+    isAllDayEvent: () => !!e.allDay,
+    getGuestList: () => {
+      if (e.guestsThrow) throw new Error('No access to the guest list.');
+      return (e.guests || []).map(g => ({
+        getName: () => g.name || '',
+        getEmail: () => g.email || ''
+      }));
+    }
+  });
+
   const makeCalendar = (id, name, events) => ({
     getId: () => id,
     getName: () => name,
+    getEventsForDay: day => (events || [])
+      .filter(e => e.start.getFullYear() === day.getFullYear() &&
+                   e.start.getMonth() === day.getMonth() &&
+                   e.start.getDate() === day.getDate())
+      .map(e => makeEvent(e)),
     getEvents: (from, to) => (events || [])
       .filter(e => e.start >= from && e.start < to)
       .map(e => ({

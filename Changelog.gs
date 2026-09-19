@@ -188,7 +188,8 @@ function monthDay_(date) {
  * nothing here uses it for that.
  */
 function monthDayValue_(raw) {
-  if (raw instanceof Date) return raw.getMonth() * 100 + raw.getDate();
+  const date = asDate_(raw);
+  if (date) return date.getMonth() * 100 + date.getDate();
   const parts = String(raw == null ? '' : raw).trim()
     .match(/^(\d{1,2})\s*\/\s*(\d{1,2})$/);
   if (!parts) return null;

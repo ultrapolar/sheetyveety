@@ -253,6 +253,23 @@ function extractName_(raw) {
  * needs it to name columns, and the import must not depend on a maintenance
  * file that a project might reasonably not have.
  */
+/**
+ * A value as a Date, or null.
+ *
+ * Duck-typed rather than `instanceof Date`, because a date handed back by one
+ * of the Google services is not always the same Date the script was compiled
+ * against, and `instanceof` then quietly says no -- leaving a real timestamp
+ * to be read as the text it prints as.
+ */
+function asDate_(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (typeof value.getTime !== 'function' ||
+      typeof value.getHours !== 'function') {
+    return null;
+  }
+  return isNaN(value.getTime()) ? null : value;
+}
+
 function columnLetter_(index) {
   let letter = '';
   let n = index;
