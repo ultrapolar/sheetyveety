@@ -1144,8 +1144,8 @@ const DECK_FILLER_ROWS = [
   check('live chart: the hour\'s own instructor reaches every student',
     seats.map(e => (e.hourInstructors || []).join(' ')),
     ['AL', 'AL', 'AL', 'AL', 'AL']);
-  check('live chart: and lands after the ones who were at the table',
-    api.formatSeating_([seats[0]]), '4C | AZ HR AL');
+  check('live chart: and gets a slot of its own, after the table\'s',
+    api.formatSeating_([seats[0]]), '4C | AZ HR | AL');
 
   // An hour nobody is seated at costs nothing, and an hour table that does not
   // mention an hour leaves that hour's students with their pod alone.
@@ -1162,8 +1162,10 @@ const DECK_FILLER_ROWS = [
   const both = live();
   both[10][27] = 'HR';   // the 7:00 row names an instructor already in the pod
   const shared = api.parseSeatingChart_(both);
-  check('live chart: somebody on both is named once',
-    api.formatSeating_([shared[0]]), '4C | AZ HR');
+  // Both slots, because both are true: HR sat at the table and covered the
+  // hour. Dropping either would drop something that happened.
+  check('live chart: somebody on both is written in both',
+    api.formatSeating_([shared[0]]), '4C | AZ HR | HR');
 
   check('live chart: the hour comes off the left of the block',
     seats.map(e => e.hour), ['7:00', '7:00', '7:00', '7:00', '7:00']);
@@ -1422,6 +1424,42 @@ const DECK_FILLER_ROWS = [
                         { seat: '2A', instructors: ['IN1'] }]), '1C, 2A | IN3 IN1');
   check('format: a seat with no instructor beside it',
     api.formatSeating_([{ seat: '1C', instructors: [] }]), '1C');
+
+  // Who was at the table and who had the hour answer different questions, so
+  // they get a slot each -- a floater run together with the people who were
+  // there the whole time is indistinguishable from them.
+  check('format: the hour\'s own instructor is its own slot',
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3', 'IN2'],
+      hourInstructors: ['AL'] }]), '1C | IN3 IN2 | AL');
+  check('format: two covering the hour',
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3'],
+      hourInstructors: ['AL', 'BK'] }]), '1C | IN3 | AL BK');
+
+  // Nobody at the table but somebody on the hour keeps the empty slot, or the
+  // one name left would read as having sat there.
+  check('format: nobody at the table keeps the slot',
+    api.formatSeating_([{ seat: '1C', instructors: [],
+      hourInstructors: ['AL'] }]), '1C | - | AL');
+
+  // No hour instructor, no third slot -- and no trailing separator.
+  check('format: no hour instructor leaves two slots',
+    api.formatSeating_([{ seat: '1C', instructors: ['IN3'],
+      hourInstructors: [] }]), '1C | IN3');
+  check('format: neither leaves one',
+    api.formatSeating_([{ seat: '1C', instructors: [], hourInstructors: [] }]),
+    '1C');
+
+  // A student who moved between pods carries both pods and both hours.
+  check('format: moved, with both hours covered',
+    api.formatSeating_([
+      { seat: '1C', instructors: ['IN3'], hourInstructors: ['AL'] },
+      { seat: '3A', instructors: ['IN1'], hourInstructors: ['BK'] }]),
+    '1C, 3A | IN3 IN1 | AL BK');
+  check('format: and the same person covering both hours is named once',
+    api.formatSeating_([
+      { seat: '1C', instructors: ['IN3'], hourInstructors: ['AL'] },
+      { seat: '3A', instructors: ['IN1'], hourInstructors: ['AL'] }]),
+    '1C, 3A | IN3 IN1 | AL');
   check('format: nothing found is nothing written', api.formatSeating_([]), '');
 }
 

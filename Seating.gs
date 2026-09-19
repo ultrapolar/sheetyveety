@@ -431,27 +431,47 @@ function seatingCandidates_(chartName, names) {
   return names.filter(function (n) { return seatingMatchRank_(chartName, n) === 1; });
 }
 
-/** "1C | IN3 IN2", or "1C, 2A | IN3 IN1" for a student who moved. */
+/**
+ * "1C | IN3 IN2 | AL", seat then who was at the table then who had the hour.
+ *
+ * The two sets of instructors answer different questions -- who sat with this
+ * student, and who was covering the whole hour around them -- so they get a
+ * slot each rather than running together into one list where a floater is
+ * indistinguishable from somebody who was there the whole time.
+ *
+ * Somebody who is in both is written in both. They were at the table and they
+ * covered the hour, and dropping either would be dropping something true.
+ */
 function formatSeating_(matches) {
   const config = CONFIG.SEATING;
   const seats = [];
-  const instructors = [];
+  const atTable = [];
+  const forHour = [];
+
+  const add = function (list, name) {
+    if (name && list.indexOf(name) === -1) list.push(name);
+  };
 
   matches.forEach(function (match) {
     if (match.seat && seats.indexOf(match.seat) === -1) seats.push(match.seat);
-    // A student who sat in two pods across the day has two sets of
-    // instructors, and somebody who worked both is named once. Whoever covered
-    // the whole hour comes after the ones who were at the table.
-    (match.instructors || []).concat(match.hourInstructors || [])
-      .forEach(function (name) {
-        if (name && instructors.indexOf(name) === -1) instructors.push(name);
-      });
+    // A student who sat in two pods across the day has two sets of each.
+    (match.instructors || []).forEach(function (name) { add(atTable, name); });
+    (match.hourInstructors || []).forEach(function (name) { add(forHour, name); });
   });
 
-  const left = seats.join(config.SEAT_JOIN);
-  const right = instructors.join(config.INSTRUCTOR_JOIN);
-  if (!left) return '';
-  return right ? left + config.SEPARATOR + right : left;
+  if (!seats.length) return '';
+
+  const parts = [seats.join(config.SEAT_JOIN)];
+  if (forHour.length) {
+    // The middle slot is kept even when nobody was at the table, or the one
+    // name left would read as having been sitting there.
+    parts.push(atTable.length ? atTable.join(config.INSTRUCTOR_JOIN)
+                              : config.NO_INSTRUCTOR);
+    parts.push(forHour.join(config.INSTRUCTOR_JOIN));
+  } else if (atTable.length) {
+    parts.push(atTable.join(config.INSTRUCTOR_JOIN));
+  }
+  return parts.join(config.SEPARATOR);
 }
 
 /**

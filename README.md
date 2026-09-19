@@ -477,9 +477,23 @@ rather than guessed between. The same list is used by the EOD seating import.
 student sat, and who sat with them, in **column N**:
 
 ```
-1C | IN3                 sat at table 1 seat C, with IN3
-1C, 2A | IN3 IN1         moved between hours
+SEAT | who was at the table | who covered the hour
+
+1C | IN3 IN2 | AL        IN3 and IN2 at the table, AL over the whole hour
+1C | IN3 IN2             nobody covering that hour
+1C | - | AL              nobody at the table, AL covering the hour
+1C                       neither
+1C, 3A | IN3 IN1 | AL    moved between hours
 ```
+
+The two sets of instructors answer different questions — who sat with this
+student, and who was covering the hour around them — so they get **a slot
+each**. Run together into one list, somebody floating is indistinguishable from
+somebody who was there the whole time.
+
+The middle slot is kept as `-` when nobody was at the table, or the one name
+left would read as having sat there. `CONFIG.SEATING.NO_INSTRUCTOR` is that
+dash.
 
 The chart is a grid of tables drawn one block per hour: a row of table numbers,
 then the seat rows, with an instructor column between each pair of tables. The
@@ -572,14 +586,15 @@ H:00 | CAT        H:00 | CAT
 ```
 
 Whoever is written beside an hour there worked that **whole hour, across every
-pod**, so their initials go to every student in it — on top of the pod's own:
+pod**, so their initials go to every student in it, in the third slot:
 
 ```
-4C | AZ HR AL     Neil D: AZ and HR at his table, AL over the hour
+4C | AZ HR | AL     Neil D: AZ and HR at his table, AL over the hour
 ```
 
-They come **after** the ones who were at the table, and somebody who is both is
-named once.
+**Somebody in both is written in both** — `4C | AZ HR | HR` means HR sat at the
+table *and* covered the hour, and dropping either would drop something that
+happened.
 
 **Found by the `H:00` heading, not by where the table sits.** It is a loose
 table somebody may move, and a fixed cell reference would go on reading
