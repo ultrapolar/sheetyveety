@@ -1,0 +1,93 @@
+BATCH PRINT  -  setup guide
+===========================
+
+What it does
+------------
+Reads the print list from the Google Sheet, shows a preview of what will print
+(and sets aside anything that needs a human), then prints each student's deck or
+assessment to the right printer with the right watermark - after you confirm.
+
+You set this up ONCE on the computer that is wired to the printers and to
+\\newcloud. Two ways to do it:
+
+
+------------------------------------------------------------
+OPTION A  -  Simple install   (this PC will have Python on it)
+------------------------------------------------------------
+1. Get SumatraPDF (free, no install):
+   https://www.sumatrapdfreader.org/download-free-pdf-viewer
+   Download the 64-bit PORTABLE build, rename the file to  SumatraPDF.exe ,
+   and put it in THIS folder (next to install.bat).
+
+2. Make sure Python 3 is installed: https://www.python.org/downloads/
+   During setup, tick "Add Python to PATH".
+
+3. Double-click  install.bat
+   It copies everything into a private app folder, installs the two Python
+   add-ons it needs, writes launchers, and puts TWO shortcuts on the
+   Desktop: "Batch Print" and "Batch Print Settings".
+
+4. Double-click "Batch Print Settings" and fill in the Sheet URL and your
+   printer names (see "First-run settings" below) - it won't let you save
+   something obviously wrong, and it tells you what to fix if it does.
+
+5. Double-click "Batch Print" whenever you want to print.
+
+Re-running install.bat later just updates the installed copy - safe to
+repeat. It will NOT overwrite settings you've already saved.
+
+
+------------------------------------------------------------
+OPTION B  -  Standalone .exe   (other PCs need NOTHING installed)
+------------------------------------------------------------
+Best if you do not want to put Python on every machine.
+
+On ONE Windows PC that has Python:
+1. Put  SumatraPDF.exe  in this folder (same as Option A, step 1).
+2. Double-click  build_exe.bat
+   It produces  dist\batch_print.exe  and  dist\batch_print_settings.exe  -
+   two single files with Python built in.
+3. To hand it out: make a folder containing both exes, SumatraPDF.exe, and
+   config.json (copy the one from this project as a starting point), and
+   copy that folder to any PC. Make shortcuts to both exes. That's it - no
+   Python, no pip, no setup.
+4. Run "batch_print_settings.exe" once on the new PC to check/fill in its
+   Sheet URL and printer names before the first real print run.
+
+
+------------------------------------------------------------
+First-run settings   (use "Batch Print Settings", not a text editor)
+------------------------------------------------------------
+Open "Batch Print Settings" and fill in, on the "Sheet & Folders" tab:
+  - Sheet CSV URL ....... your Google Sheet, published as CSV
+                          (File > Share > Publish to web > CSV)
+  - Name / Print-items column headers -- the two column headers in your sheet
+
+On the "Printers & Routing" tab:
+  - Add a printer for each physical printer, using its EXACT Windows printer
+    name (Settings > Bluetooth & devices > Printers). For each one, tick
+    Duplex if it should always print double-sided, and Paced if it should
+    pause between jobs (set how long, and how often to take a longer rest)
+    to avoid overheating on long runs.
+  - Under Routing, pick which printer handles decks, lesson plans, TEMP,
+    SUPP, and everything else.
+
+Everything else (the "Watermarks & Pages" and "Advanced" tabs) already has
+sensible defaults matching how this tool has always behaved:
+  - Watermark: Helvetica, 72pt, 15% - SD# decks only
+  - TEMP: newest dated file, first 20 pages
+  - SUPP: WOB watermark, first 15 pages
+
+Click Save. If something's off (an empty field, a job routed to a printer
+you haven't added yet), it tells you exactly what, and doesn't save until
+it's fixed.
+
+(If you build the exes in Option B, run batch_print_settings.exe to write
+config.json BEFORE handing the folder out, or run it once on each new PC.)
+
+
+A note on the security prompt
+-----------------------------
+Windows may show a blue "Windows protected your PC" box the first time you run
+install.bat or an exe, because the file is not code-signed. Click
+"More info" then "Run anyway". This is expected for in-house tools.

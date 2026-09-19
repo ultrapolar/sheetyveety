@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+
+# printing/ (Batch Print) runtime and build output
+printing/print_log.csv
+printing/dist/
+printing/build/
+printing/*.spec
