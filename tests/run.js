@@ -40,7 +40,7 @@ function loadScript(context) {
   jumpToToday, startNewDay, parseDayHeader_, dayHeaderText_, dayHeaderRows_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
-  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_,
+  podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
   changelogColumnPlan_, changelogCreate, changelogGrade,
   changelogLearningPlan, percentValue_, starsFor_, nextSessionFor_,
   sessionCalendars_, calendarNames_, eventNameFields_, setSessionCalendar,
@@ -1140,6 +1140,31 @@ const DECK_FILLER_ROWS = [
     seats.map(e => (e.instructors || []).join(' ')),
     ['AZ HR', 'AZ HR', 'AZ HR', 'AZ HR', 'AZ HR']);
 
+  // The hour tables at W9:AC11 cover the whole hour, every pod.
+  check('live chart: the hour\'s own instructor reaches every student',
+    seats.map(e => (e.hourInstructors || []).join(' ')),
+    ['AL', 'AL', 'AL', 'AL', 'AL']);
+  check('live chart: and lands after the ones who were at the table',
+    api.formatSeating_([seats[0]]), '4C | AZ HR AL');
+
+  // An hour nobody is seated at costs nothing, and an hour table that does not
+  // mention an hour leaves that hour's students with their pod alone.
+  const noTable = live();
+  noTable[9][23] = '';   // the 4:00 row of the left table
+  noTable[10][23] = '';
+  noTable[9][27] = '';   // and the 6:00 and 7:00 rows of the right
+  noTable[10][27] = '';
+  check('live chart: an hour missing from the tables keeps its pod',
+    api.parseSeatingChart_(noTable).map(e => (e.hourInstructors || []).join(' ')),
+    ['', '', '', '', '']);
+
+  // Somebody who is both at the table and on the hour is named once.
+  const both = live();
+  both[10][27] = 'HR';   // the 7:00 row names an instructor already in the pod
+  const shared = api.parseSeatingChart_(both);
+  check('live chart: somebody on both is named once',
+    api.formatSeating_([shared[0]]), '4C | AZ HR');
+
   check('live chart: the hour comes off the left of the block',
     seats.map(e => e.hour), ['7:00', '7:00', '7:00', '7:00', '7:00']);
 
@@ -1189,6 +1214,93 @@ const DECK_FILLER_ROWS = [
     layout.tableOf[3], 7);
   check('layout: the columns come back in order', layout.columns, [1, 3, 5]);
   check('layout: agreeing headers are not a conflict', layout.conflicts, []);
+}
+
+// 45d2b. The hour tables beside the chart: whoever covered a whole hour.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  // Laid out as the sheet has it: two tables side by side at W9:AC11, with a
+  // gap column between them, and the initials in a cell merged across two
+  // columns -- which reads as the value then a blank.
+  function side() {
+    const grid = [];
+    for (let r = 0; r < 12; r++) grid.push(new Array(29).fill(''));
+    const put = (row, col, v) => { grid[row - 1][col - 1] = v; };
+    put(9, 23, 'H:00');  put(9, 24, 'CAT');
+    put(10, 23, '4:00'); put(10, 24, 'AL');
+    put(11, 23, '5:00'); put(11, 24, 'AL');
+    put(9, 27, 'H:00');  put(9, 28, 'CAT');
+    put(10, 27, '6:00'); put(10, 28, 'BK');
+    put(11, 27, '7:00'); put(11, 28, 'CJ');
+    return grid;
+  }
+
+  const key = label => api.hourSortKey_(label);
+  let found = api.hourInstructorTables_(side());
+  check('hour table: the left table is read',
+    [found.hours[key('4:00')], found.hours[key('5:00')]], [['AL'], ['AL']]);
+  check('hour table: and the right one is its own table, not part of it',
+    [found.hours[key('6:00')], found.hours[key('7:00')]], [['BK'], ['CJ']]);
+  check('hour table: nothing else is invented',
+    Object.keys(found.hours).length, 4);
+
+  // The afternoon rule is the chart's, so 4:00 here is the 4:00 the blocks
+  // mean -- not four in the morning, eight hours before the day starts.
+  checkTruthy('hour table: an hour reads the same as it does on the chart',
+    key('4:00') > key('12:00'));
+
+  // A merged cell reads as its value then a blank; the blank must not be read
+  // as an instructor, and the empty column beyond must end the table rather
+  // than letting it run into the next one.
+  let grid = side();
+  grid[9][24] = '';            // X10:Y10 merged -- Y10 is blank
+  found = api.hourInstructorTables_(grid);
+  check('hour table: the blank half of a merged cell is not a name',
+    found.hours[key('4:00')], ['AL']);
+
+  // A second role column beside the first is read too -- what the column is
+  // headed is a label for a person, not what makes it instructors.
+  grid = side();
+  grid[8][25] = 'FLOAT';       // Z9 heading
+  grid[9][25] = 'DM';          // Z10
+  found = api.hourInstructorTables_(grid);
+  check('hour table: a second column of initials is read as well',
+    found.hours[key('4:00')], ['AL', 'DM']);
+
+  // An hour with nobody beside it gets nobody, and does not take the next
+  // hour's name by reaching down the column.
+  grid = side();
+  grid[10][23] = '';           // X11 empty
+  found = api.hourInstructorTables_(grid);
+  check('hour table: an hour with nobody on it stays empty',
+    found.hours[key('5:00')], []);
+  check('hour table: and the hour above keeps its own',
+    found.hours[key('4:00')], ['AL']);
+
+  // A blank row ends the table rather than it running down the sheet.
+  grid = side();
+  grid[10][22] = '';           // W11, the 5:00 label
+  grid[11][22] = '8:00';
+  grid[11][23] = 'ZZ';
+  found = api.hourInstructorTables_(grid);
+  check('hour table: a blank row ends it', found.hours[key('8:00')], undefined);
+
+  // A note sitting out to the right of the last table, under no heading, is
+  // not an instructor.
+  grid = side();
+  grid[9][28] = 'ask about Friday';   // AC10, past the right table's heading
+  found = api.hourInstructorTables_(grid);
+  check('hour table: an unheaded note out to the side is not a name',
+    found.hours[key('6:00')], ['BK']);
+
+  // No heading, no tables -- and nothing falls over.
+  check('hour table: a chart without them reads as none',
+    Object.keys(api.hourInstructorTables_(
+      [['', ''], ['4:00', 'AL']]).hours).length, 0);
 }
 
 // 45d3. Which chart, and which document it is in.

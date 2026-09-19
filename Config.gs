@@ -197,6 +197,11 @@ const CONFIG = {
     DAY_SHEETS: ['', 'weekdays', 'weekdays', 'weekdays', 'weekdays', 'weekdays',
       'saturday'],
 
+    // The heading on the little hour tables beside the chart, where whoever
+    // covered a whole hour is written. Found by this heading rather than by
+    // where the table sits, because it is loose and somebody may move it.
+    HOUR_TABLE_HEADER: 'H:00',
+
     // What the seat rows of a block are called, top to bottom.
     //
     // Only used when the chart itself does not say -- a seat still showing its

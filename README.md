@@ -560,6 +560,50 @@ The format says the same thing — `1C | IN1 IN2 IN3` is a list. A student who
 sat in two pods across the day gets both sets, and somebody who worked both is
 named once.
 
+### Whoever covered a whole hour
+
+Off to the side of the chart sit little tables, two abreast, splitting the
+day's hours:
+
+```
+H:00 | CAT        H:00 | CAT
+4:00 | AL         6:00 | AL
+5:00 | AL         7:00 | AL
+```
+
+Whoever is written beside an hour there worked that **whole hour, across every
+pod**, so their initials go to every student in it — on top of the pod's own:
+
+```
+4C | AZ HR AL     Neil D: AZ and HR at his table, AL over the hour
+```
+
+They come **after** the ones who were at the table, and somebody who is both is
+named once.
+
+**Found by the `H:00` heading, not by where the table sits.** It is a loose
+table somebody may move, and a fixed cell reference would go on reading
+whatever ended up there.
+
+A column belongs to the table when it has a **heading of its own**, and the
+table ends where the next `H:00` begins. Emptiness cannot mark the edge: the
+initials live in a cell merged across two columns, which reads as the value and
+then a blank — so a blank column is as likely to be the right half of a merge
+as the gap between two tables. Going by headings also means a second column of
+initials beside the first is picked up, while a stray note out to the right of
+everything is not.
+
+An hour with nobody beside it gets nobody, rather than reaching down the column
+for the next hour's name. A blank row ends the table. The hour is read with the
+same afternoon rule the chart uses, so `4:00` here is the `4:00` the blocks
+mean.
+
+`CONFIG.SEATING.HOUR_TABLE_HEADER` is the heading it looks for.
+
+**This is column N only.** The start-of-day organiser's column B stays the
+pod's own instructors — an hour-wide name on every pod would say nothing about
+who sat where.
+
 ### A student who came twice
 
 The SOD organiser heads each row with an hour and gives a student who attended

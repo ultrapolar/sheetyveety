@@ -131,6 +131,79 @@ function seatingLayout_(values, headers) {
     walls: wallColumns_(columns, tableOf) };
 }
 
+/**
+ * The little hour tables off to the side of the chart, and who is on them.
+ *
+ * They look like this, two of them side by side, splitting the day's hours:
+ *
+ *     H:00 | CAT        H:00 | CAT
+ *     4:00 | AL         6:00 | AL
+ *     5:00 | AL         7:00 | AL
+ *
+ * Whoever is written beside an hour there worked that whole hour, across every
+ * pod, so their initials belong to every student in it -- not to one table the
+ * way the wall columns do.
+ *
+ * Found by the "H:00" heading rather than by where it is, because it is a
+ * loose table somebody may move, and a fixed cell reference would go on
+ * reading whatever ended up there. The heading beside it ("CAT" here) is a
+ * label for a person: what the column is called is not what makes it
+ * instructors, so any column in the table is read.
+ *
+ * Returns { hours: { <minutes past midnight>: [initials] }, labels: {...} }.
+ */
+function hourInstructorTables_(values) {
+  const heading = String(CONFIG.SEATING.HOUR_TABLE_HEADER || '').toLowerCase();
+  const hours = {};
+  const labels = {};
+  if (!heading) return { hours: hours, labels: labels };
+
+  const isHeading = function (r, c) {
+    return cellText_((values[r] || [])[c]).toLowerCase() === heading;
+  };
+
+  for (let r = 0; r < values.length; r++) {
+    for (let c = 0; c < (values[r] || []).length; c++) {
+      if (!isHeading(r, c)) continue;
+
+      // The rows under the heading, for as long as they carry an hour.
+      const rows = [];
+      for (let down = r + 1; down < values.length; down++) {
+        const label = hourLabel_((values[down] || [])[c]);
+        if (!label) break;
+        rows.push({ row: down, label: label });
+      }
+      if (!rows.length) continue;
+
+      // A column belongs to this table when it has a heading of its own, and
+      // the table ends where the next one begins.
+      //
+      // Emptiness cannot mark the edge: the initials sit in a cell merged
+      // across two columns, which reads as the value and then a blank, so a
+      // blank column is as likely to be the right half of a merge as it is to
+      // be the gap between two tables. A heading tells them apart, and it also
+      // means a second column of initials beside the first is picked up while
+      // a stray note out to the right of everything is not.
+      const band = [];
+      for (let right = c + 1; right < (values[r] || []).length; right++) {
+        if (isHeading(r, right)) break;
+        if (cellText_((values[r] || [])[right]) !== '') band.push(right);
+      }
+
+      rows.forEach(function (entry) {
+        const key = hourSortKey_(entry.label);
+        if (!hours[key]) { hours[key] = []; labels[key] = entry.label; }
+        band.forEach(function (column) {
+          const name = cellText_((values[entry.row] || [])[column]);
+          if (name && hours[key].indexOf(name) === -1) hours[key].push(name);
+        });
+      });
+    }
+  }
+
+  return { hours: hours, labels: labels };
+}
+
 /** Whichever of `columns` sits closest to `column`, or -1 if there are none. */
 function nearestColumn_(columns, column) {
   let best = -1;
@@ -160,8 +233,10 @@ function parseSeatingChart_(values) {
   }
 
   const layout = seatingLayout_(values, headers);
+  const byHour = hourInstructorTables_(values);
   const seats = [];
   seats.conflicts = layout.conflicts;
+  seats.hourInstructors = byHour.hours;
 
   headers.forEach(function (header, n) {
     const stop = n + 1 < headers.length ? headers[n + 1].row : values.length;
@@ -248,6 +323,8 @@ function parseSeatingChart_(values) {
           seat: table + seatRow.letter,
           occupant: occupant,
           instructors: instructorsAt[nearestColumn_(instructorColumns, c)] || [],
+          // Whoever covered the whole hour, from the tables beside the chart.
+          hourInstructors: (byHour.hours[hourSortKey_(hour)] || []).slice(),
           hour: hour,
           block: n,
           table: Number(table),
@@ -363,10 +440,12 @@ function formatSeating_(matches) {
   matches.forEach(function (match) {
     if (match.seat && seats.indexOf(match.seat) === -1) seats.push(match.seat);
     // A student who sat in two pods across the day has two sets of
-    // instructors, and somebody who worked both is named once.
-    (match.instructors || []).forEach(function (name) {
-      if (name && instructors.indexOf(name) === -1) instructors.push(name);
-    });
+    // instructors, and somebody who worked both is named once. Whoever covered
+    // the whole hour comes after the ones who were at the table.
+    (match.instructors || []).concat(match.hourInstructors || [])
+      .forEach(function (name) {
+        if (name && instructors.indexOf(name) === -1) instructors.push(name);
+      });
   });
 
   const left = seats.join(config.SEAT_JOIN);
