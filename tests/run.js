@@ -279,13 +279,27 @@ const DECK_FILLER_ROWS = [
 //      code is not harmful in itself, but it is read as live when the next
 //      change comes along.
 {
-  const menu = fs.readFileSync('Menu.gs', 'utf8');
-  const sources = SOURCES.map(f => fs.readFileSync(f, 'utf8')).join('\n');
+  // Commented-out lines are stripped first: a menu entry somebody has parked
+  // is not a caller, and counting one would hide everything underneath it
+  // going stale.
+  const uncommented = text =>
+    text.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+  const menu = uncommented(fs.readFileSync('Menu.gs', 'utf8'));
+  // Menu.gs is one of the sources, so a parked entry has to be stripped here
+  // too -- left in, the commented-out line counts as two uses of the function
+  // it names and the whole feature under it reads as live.
+  const sources = SOURCES.map(f => uncommented(fs.readFileSync(f, 'utf8'))).join('\n');
+
+  // Deliberately not wired to a menu. Named here so it is a decision on the
+  // record rather than something that quietly rotted, and so that anything
+  // that falls out of use underneath it is still caught.
+  const PARKED = ['organizeSeatingRows'];
 
   const dead = (sources.match(/^function\s+([A-Za-z0-9_$]+)/gm) || [])
     .map(m => m.replace(/^function\s+/, ''))
     .filter(function (name) {
       if (name === 'onOpen') return false;                  // the entry point
+      if (PARKED.indexOf(name) !== -1) return false;        // parked, not dead
       if (menu.indexOf("'" + name + "'") !== -1) return false;  // a menu action
       const uses = sources.match(new RegExp('\\b' + name + '\\b', 'g')) || [];
       return uses.length <= 1;                              // its own definition

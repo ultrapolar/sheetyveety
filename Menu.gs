@@ -18,8 +18,10 @@ function onOpen() {
     .addItem('Start a new day', 'startNewDay')
     .addSeparator()
     .addItem('Pinks Printed', 'processSodPinks')
-    .addSeparator()
-    .addItem('Organise rows from the seating chart', 'organizeSeatingRows')
+    // Parked at your request. organizeSeatingRows and everything it uses are
+    // still there and still tested; putting this line back turns it on.
+    // .addSeparator()
+    // .addItem('Organise rows from the seating chart', 'organizeSeatingRows')
     .addToUi();
 
   ui.createMenu('EOD')

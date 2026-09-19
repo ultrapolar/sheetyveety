@@ -41,7 +41,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 
 | Menu | Entries |
 | --- | --- |
-| **SOD** | Jump to today · Start a new day · Pinks Printed · Organise rows from the seating chart |
+| **SOD** | Jump to today · Start a new day · Pinks Printed |
 | **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
@@ -372,6 +372,11 @@ row on the sheet that is a different colour. On a sheet with no earlier day it
 is written plain and says so.
 
 ## Start of day: organising the rows
+
+> **Parked.** The menu entry is commented out in `Menu.gs`. The code and its
+> tests are untouched — putting that one line back turns it on again. The
+> test that catches orphaned functions knows it is parked on purpose, and
+> still catches anything underneath it that falls out of use.
 
 **SOD → Organise rows from the seating chart** rewrites columns **A and B** of
 the Daily WOP into the order the room is actually arranged in:
