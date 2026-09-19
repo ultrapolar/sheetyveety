@@ -43,7 +43,7 @@ function loadScript(context) {
   parseSessionTitle_, sectionForTag_, timeRangeLabel_, timeOfDayLabel_,
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
   looksLikeShiftTitle_, sectionTemplateRow_, isExcludedShift_,
-  nextOpenDayAfter_, writeSeatingRoster_,
+  nextOpenDayAfter_, writeSeatingRoster_, firstNameLastInitial_, isNotice_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1450,8 +1450,9 @@ const DECK_FILLER_ROWS = [
   const week = () => p.chart('Weekdays').values;
   check('chart: the time goes in column S',
     [week()[0][18], week()[1][18]], ['9:00', '10:00']);
-  check('chart: and the name in column T',
-    [week()[0][19], week()[1][19]], ['Student One', 'Student Two']);
+  // Shortened on the way: the chart wants "Amalie L", not "Amalie Laz".
+  check('chart: and the shortened name in column T',
+    [week()[0][19], week()[1][19]], ['Student O', 'Student T']);
   check('chart: the student at home is not on the chart',
     week().map(r => String(r[19])).filter(v => v.indexOf('Bubba') !== -1), []);
   check('chart: nothing lands below the list', String(week()[2][19]), '');
@@ -1469,7 +1470,7 @@ const DECK_FILLER_ROWS = [
   check('chart: both columns are cleared the whole way down first',
     [String(week()[4][18]), String(week()[4][19])], ['', '']);
   check('chart: and today\'s list is what is there',
-    [String(week()[0][18]), String(week()[0][19])], ['9:00', 'Student One']);
+    [String(week()[0][18]), String(week()[0][19])], ['9:00', 'Student O']);
 
   // A Saturday goes on the Saturday chart.
   p = paste(Object.assign({}, chartDay, { today: '2026-09-19', calendars: [
@@ -1479,7 +1480,7 @@ const DECK_FILLER_ROWS = [
         end: new Date('2026-09-19T10:00:00') }] }] }));
   check('chart: a Saturday lands on the Saturday chart',
     [String(p.chart('Saturdays').values[0][18]),
-     String(p.chart('Saturdays').values[0][19])], ['9:00', 'Saturday Child']);
+     String(p.chart('Saturdays').values[0][19])], ['9:00', 'Saturday C']);
   check('chart: and not on the weekday one',
     String(p.chart('Weekdays').values[0][19]), '');
 
@@ -1494,6 +1495,77 @@ const DECK_FILLER_ROWS = [
     [String(week()[0][18]), String(week()[0][19])], ['', '']);
   checkTruthy('chart: and says so', p.said().includes('nobody is in'));
 
+  // The Daily WOP keeps the whole name; only the chart is shortened.
+  p = paste(chartDay);
+  checkTruthy('chart: the sheet itself still has the name in full',
+    p.colA().indexOf('9:00 Student One') !== -1);
+
+  const api5 = paste({ calendars: [] }).api;
+  const shorten = n => api5.firstNameLastInitial_(n);
+  check('shorten: a first name and a surname', shorten('Amalie Laz'), 'Amalie L');
+  check('shorten: one already short is left as it is', shorten('Amalie L'), 'Amalie L');
+  check('shorten: a middle name is kept, because it may be the only thing ' +
+    'telling two children apart', shorten('Mary Jane Smith'), 'Mary Jane S');
+  check('shorten: a hyphenated surname is still a surname',
+    shorten('Mary Lazeration-Smith'), 'Mary L');
+  check('shorten: one word has nothing to shorten', shorten('Cher'), 'Cher');
+  check('shorten: a lower-case surname comes up', shorten('amalie laz'), 'amalie L');
+  check('shorten: nothing is nothing', shorten(''), '');
+
+  // --- a notice, pulled up under the instructors -------------------------
+  p = paste({ at: 1, shiftCalendars: ['Staff Schedule'], charts: [], calendars: [
+    { id: 'staff@x', name: 'Staff Schedule', events: [
+      ev('IC (Amanda)  AL', '09:00', '13:00')] },
+    { id: 'misc@x', name: 'Centre', events: [
+      ev('Fire drill', '08:00', '08:30'),
+      ev('AHOD is Bo today', '12:00', '12:15')] },
+    { id: 'book@x', name: 'Appointy', events: [
+      ev('Student One - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] });
+  check('notice: sits directly under the instructors, above the rest',
+    [p.cell(1), p.cell(2), p.cell(3)],
+    ['9am - 1pm IC (Amanda)  AL', '12 - 12:15pm AHOD is Bo today',
+     '8 - 8:30am Fire drill']);
+  check('notice: and is set in bold', String(p.wop.fontWeights[1][0]), 'bold');
+  check('notice: while the rest are left as they were',
+    [String(p.wop.fontWeights[0][0]), String(p.wop.fontWeights[2][0])],
+    ['normal', 'normal']);
+  checkTruthy('notice: the report counts it', p.said().includes('Notices'));
+
+  // In the body of the event rather than its title.
+  p = paste({ at: 1, shiftCalendars: [], charts: [], calendars: [
+    { id: 'a@x', name: 'Centre', events: [
+      { title: 'Morning briefing', start: at('2026-09-17', '08:00'),
+        end: at('2026-09-17', '08:30'), description: 'AHOD cover needed' }] }] });
+  check('notice: found in the body of the event too',
+    [p.cell(1), String(p.wop.fontWeights[0][0])],
+    ['8 - 8:30am Morning briefing', 'bold']);
+
+  // On the instructors' own calendar, it is still pulled out from among them.
+  p = paste({ at: 1, shiftCalendars: ['Staff Schedule'], charts: [], calendars: [
+    { id: 'staff@x', name: 'Staff Schedule', events: [
+      ev('IC (Amanda)  AL', '09:00', '13:00'),
+      ev('AHOD is Bo today', '10:00', '10:15')] }] });
+  check('notice: hoisted out of the instructors, not left among them',
+    [p.cell(1), p.cell(2)],
+    ['9am - 1pm IC (Amanda)  AL', '10 - 10:15am AHOD is Bo today']);
+  check('notice: and set in bold there as well',
+    String(p.wop.fontWeights[1][0]), 'bold');
+
+  // A student is a student first: a word in the body must not take somebody
+  // off the list they are expected on.
+  p = paste({ at: 1, shiftCalendars: [], charts: [], calendars: [
+    { id: 'a@x', name: 'Appointy', events: [
+      { title: 'Student One - (IN-CENTER) 1 hour session',
+        start: at('2026-09-17', '09:00'), end: at('2026-09-17', '10:00'),
+        description: 'AHOD note' }] }] });
+  checkTruthy('notice: a booking with the word in it is still a booking',
+    p.colA().indexOf('9:00 Student One') !== -1);
+
+  const api6 = paste({ calendars: [] }).api;
+  checkTruthy('notice: the word in a title', api6.isNotice_('AHOD is Bo', ''));
+  checkTruthy('notice: or in a body', api6.isNotice_('Briefing', 'ahod cover'));
+  check('notice: and nothing without it', api6.isNotice_('Fire drill', 'all staff'), false);
+
   // Thursday and Friday share a chart, so setting tomorrow up takes today's
   // list off it. Worth a word while the room may still be full.
   p = paste(Object.assign({}, chartDay, { which: 'tomorrow', calendars: [
@@ -1502,7 +1574,7 @@ const DECK_FILLER_ROWS = [
         start: new Date('2026-09-18T09:00:00'),
         end: new Date('2026-09-18T10:00:00') }] }] }));
   check('chart: tomorrow\'s list goes on the chart it shares with today',
-    String(p.chart('Weekdays').values[0][19]), 'Friday Child');
+    String(p.chart('Weekdays').values[0][19]), 'Friday C');
   checkTruthy('chart: and taking today\'s off is said out loud',
     p.said().includes('not today') && p.said().includes('9/18/2026 Friday'));
 

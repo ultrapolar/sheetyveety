@@ -98,6 +98,35 @@ function looksLikeShiftTitle_(title) {
 }
 
 /**
+ * "Amalie Laz" as "Amalie L", for the seating chart.
+ *
+ * First name whole, last name down to its letter. Anything in the middle is
+ * kept: a second given name is part of who somebody is, and dropping it could
+ * be the only thing telling two children apart. A one-word name has nothing to
+ * shorten and is left alone.
+ */
+function firstNameLastInitial_(name) {
+  const words = String(name == null ? '' : name).trim().split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 2) return words.join(' ');
+  const last = words[words.length - 1];
+  return words.slice(0, -1).join(' ') + ' ' + last.charAt(0).toUpperCase();
+}
+
+/**
+ * True for an item carrying the notice marker, in its title or its body.
+ *
+ * "in the message" is taken to mean either: whoever writes one puts it
+ * wherever it reads best, and a notice nobody sees is the thing this is for.
+ */
+function isNotice_(title, description) {
+  const marker = String(CONFIG.SCHEDULE.NOTICE_MARKER || '').trim().toUpperCase();
+  if (!marker) return false;
+  return (String(title || '') + ' ' + String(description || ''))
+    .toUpperCase().indexOf(marker) !== -1;
+}
+
+/**
  * True for a shift belonging to somebody who is never on the list.
  *
  * Matched on the line as a whole rather than on the bracket alone, because
@@ -147,6 +176,7 @@ function hourStartOf_(date) {
  */
 function scheduleItemsFor_(calendars, date) {
   const shifts = [];
+  const notices = [];
   const other = [];
   const sessions = [];
   const unplaced = [];
@@ -174,16 +204,38 @@ function scheduleItemsFor_(calendars, date) {
       const item = { title: title, start: start, end: end, allDay: !!allDay,
         asIs: asIs, calendar: calendar.getName() };
 
-      if (fromShifts || looksLikeShiftTitle_(title)) {
-        if (isExcludedShift_(title)) { excluded.push(item); return; }
-        if (seen['shift|' + asIs]) return;
-        seen['shift|' + asIs] = true;
-        shifts.push(item);
-        return;
+      // A student is a student first. A word in the body of a booking must
+      // not take somebody off the list they are expected on.
+      const session = (allDay || !start) ? null : parseSessionTitle_(title);
+      const section = session ? sectionForTag_(session.tag) : -1;
+
+      if (!session || section === -1) {
+        let description = '';
+        try {
+          description = event.getDescription ? event.getDescription() : '';
+        } catch (err) {
+          description = '';   // some calendars will not hand it over
+        }
+
+        // A notice is hoisted out of the leftovers even when it is sitting on
+        // the instructors' calendar -- under them is where it was asked for.
+        if (isNotice_(title, description)) {
+          if (seen['notice|' + asIs]) return;
+          seen['notice|' + asIs] = true;
+          notices.push(item);
+          return;
+        }
+
+        if (fromShifts || looksLikeShiftTitle_(title)) {
+          if (isExcludedShift_(title)) { excluded.push(item); return; }
+          if (seen['shift|' + asIs]) return;
+          seen['shift|' + asIs] = true;
+          shifts.push(item);
+          return;
+        }
       }
 
-      const session = parseSessionTitle_(title);
-      if (!session || allDay || !start) {
+      if (!session) {
         if (seen['other|' + asIs]) return;
         seen['other|' + asIs] = true;
         other.push(item);
@@ -195,7 +247,6 @@ function scheduleItemsFor_(calendars, date) {
       if (seen[key]) return;
       seen[key] = true;
 
-      const section = sectionForTag_(session.tag);
       if (section === -1) {
         // A bracket nobody has taught it about. Kept, pasted as it stands so
         // nothing is lost, and named in the report -- putting the student in
@@ -213,13 +264,17 @@ function scheduleItemsFor_(calendars, date) {
 
   const byTime = function (a, b) { return a.start - b.start; };
   shifts.sort(byTime);
+  notices.sort(function (a, b) {
+    if (!a.start || !b.start) return a.start ? 1 : -1;
+    return a.start - b.start;
+  });
   other.sort(function (a, b) {
     if (!a.start || !b.start) return a.start ? 1 : -1;
     return a.start - b.start;
   });
   sessions.sort(byTime);
 
-  return { shifts: shifts, other: other, sessions: sessions,
+  return { shifts: shifts, notices: notices, other: other, sessions: sessions,
     unplaced: unplaced, excluded: excluded };
 }
 
@@ -237,6 +292,10 @@ function scheduleBlock_(items) {
   };
 
   items.shifts.forEach(function (shift) { push({ 1: shift.asIs }); });
+  // Directly under the instructors, where somebody will see it.
+  items.notices.forEach(function (item) {
+    rows[push({ 1: item.asIs })].notice = true;
+  });
   items.other.forEach(function (item) { push({ 1: item.asIs }); });
 
   (CONFIG.SCHEDULE.SECTIONS || []).forEach(function (section, index) {
@@ -336,7 +395,9 @@ function writeSeatingRoster_(items, date, log) {
     sheet.getRange(roster.startRow, roster.timeColumn, mine.length, 1)
       .setValues(mine.map(function (s) { return [hourLabel_(s.start)]; }));
     sheet.getRange(roster.startRow, roster.nameColumn, mine.length, 1)
-      .setValues(mine.map(function (s) { return [s.name]; }));
+      .setValues(mine.map(function (s) {
+        return [firstNameLastInitial_(s.name)];
+      }));
 
     wrote += mine.length;
     const forToday = sameDayAs_(date, new Date());
@@ -504,8 +565,8 @@ function importCalendarFor_(date, source) {
       if (row.section === undefined) return;
       row.template = sectionTemplateRow_(sheet, sections[row.section], startRow);
     });
-    const bodyRows = items.shifts.length + items.other.length +
-      items.sessions.length;
+    const bodyRows = items.shifts.length + items.notices.length +
+      items.other.length + items.sessions.length;
     if (!bodyRows) {
       showError_('Nothing on any calendar for ' + dayHeaderText_(day.date) +
         ' (taken from ' + day.from + '), so nothing was pasted.');
@@ -600,6 +661,15 @@ function importCalendarFor_(date, source) {
         }));
     }
 
+    // A notice is set in bold. Everything else is left as it was, the same
+    // way the shading is, so a row that came pre-formatted keeps its weight.
+    if (rows.some(function (row) { return row.notice; })) {
+      sheet.getRange(startRow, CONFIG.WOP_COL.NAME, rows.length, 1)
+        .setFontWeights(rows.map(function (row) {
+          return [row.notice ? 'bold' : null];
+        }));
+    }
+
     // The copied headers go down after the columns, so nothing written by the
     // column pass lands on top of one.
     let typedOut = 0;
@@ -657,6 +727,8 @@ function importCalendarFor_(date, source) {
       { label: 'Shifts', value: items.shifts.length },
       { label: 'Instructors left off', value: items.excluded.length },
       { label: 'Sent to the seating chart', value: onChart },
+      { label: 'Notices', value: items.notices.length,
+        alert: items.notices.length > 0 },
       { label: 'Pasted as they stand', value: items.other.length },
       { label: 'Section not recognised', value: items.unplaced.length,
         alert: items.unplaced.length > 0 }

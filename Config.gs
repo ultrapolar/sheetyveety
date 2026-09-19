@@ -67,6 +67,11 @@ const CONFIG = {
     // own and are not who anybody is looking for when they read the hour.
     SHIFT_EXCLUDE: ['Ashley', 'Trevor'],
 
+    // A notice worth seeing. Anything with this in its title or its
+    // description is pulled up directly under the instructors and set in bold,
+    // rather than sitting in the middle of the leftovers.
+    NOTICE_MARKER: 'AHOD',
+
     // Days the centre does not open, 0 being Sunday. "Tomorrow" skips them,
     // so on a Saturday it means Monday.
     CLOSED_DAYS: [0],

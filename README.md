@@ -422,6 +422,12 @@ The In-Center students are also written to the **seating chart**, split in two:
 the time into **column S**, the name into **column T**, one to a row. That is
 the list the chart gets filled in against.
 
+**The name is shortened on the way** — `Amalie Laz` goes over as `Amalie L`.
+First name whole, last name down to its letter. A middle name is kept, since it
+may be the only thing telling two children apart, and a one-word name has
+nothing to shorten. The Daily WOP itself keeps the name in full; only the chart
+is shortened.
+
 **Only In-Center.** The chart is the room, and a student at home is not in it.
 Which sections go is `roster` in `CONFIG.SCHEDULE.SECTIONS`.
 
@@ -466,7 +472,8 @@ rather than becoming a formula of its own.
 | --- | --- | --- |
 | **A session** | its title has a bracket: `Amalie Laz - (IN-CENTER) 1 hour session - Appointy` | `9:00 Amalie Laz`, under the section the bracket names |
 | **A shift** | it is on the **Instructor Availability** calendar, **or** its line reads like one: `IC (Amanda)  AL`, `@H (Bo)  BK` | the top of the block, as it stands — and beside each hour it covers |
-| **Anything else** | everything left | under the shifts, as it stands |
+| **A notice** | `AHOD` in its title **or** its description (`CONFIG.SCHEDULE.NOTICE_MARKER`) | directly under the instructors, in bold |
+| **Anything else** | everything left | under the notices, as it stands |
 
 **All the instructors end up together**, whichever calendar they came from.
 Two ways of knowing one, because either alone lets somebody slip through:
@@ -486,8 +493,18 @@ left off the group **and** off the hours beside the students, not quietly moved
 into the leftovers, and the report says they were left off on purpose so it
 does not read as something having gone missing.
 
-Everything that is neither a shift nor a session follows underneath in calendar
-order, still ahead of the two student sections.
+A **notice** — anything with `AHOD` in it — is pulled up to sit directly under
+the instructors and set in **bold**, rather than sitting somewhere in the
+middle of the leftovers where nobody reads it. It is looked for in the title
+*and* the description, because whoever writes one puts it wherever it reads
+best. It is hoisted out even when it is on the instructors' own calendar —
+*under* them is where it was asked for.
+
+**A booking is a booking first.** A word in the body of a session does not take
+a student off the list they are expected on.
+
+Everything that is neither a shift, a notice nor a session follows underneath
+in calendar order, still ahead of the two student sections.
 
 ### Reading a booking title
 
