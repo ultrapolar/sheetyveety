@@ -343,6 +343,105 @@ function scheduleBlock_(items) {
 }
 
 /**
+ * A grade as a number to sort by, or null when it is not one.
+ *
+ * Pre-K is -1 and K is 0, so they sort ahead of first grade. "5", "5th",
+ * "Grade 5" and "G5" are all 5. Anything else -- "Algebra 1", "HS" -- is not
+ * guessed at: a course name with a number in it is not a grade, and sorting
+ * it as one would put a high-schooler among the first-graders. The report
+ * names every value it could not read, so the rule can be taught.
+ */
+function gradeRank_(raw) {
+  if (typeof raw === 'number') {
+    return raw >= 0 && raw <= 12 && raw === Math.floor(raw) ? raw : null;
+  }
+  const text = String(raw == null ? '' : raw).trim().toUpperCase();
+  if (!text) return null;
+  if (/^PRE[-\s]?K(INDERGARTEN)?$/.test(text)) return -1;
+  if (/^(K|KG|KINDER|KINDERGARTEN)$/.test(text)) return 0;
+
+  const parts = text.match(/^(?:(?:GRADE|GR|G)\.?\s*)?(\d{1,2})(?:ST|ND|RD|TH)?$/);
+  if (!parts) return null;
+  const grade = Number(parts[1]);
+  return grade <= 12 ? grade : null;
+}
+
+/**
+ * Puts each hour's students in grade order, so the ones the column A colours
+ * group together are sitting together.
+ *
+ * Hours stay in time order; grade only decides the order within an hour. A
+ * student whose grade cannot be found or read goes to the end of their hour
+ * rather than anywhere in the middle, and is named -- a guessed grade is how a
+ * student ends up with the wrong instructor, which is what the colours are
+ * there to stop.
+ *
+ * The grades are read from the tab the colours are worked out from. With no
+ * tab named, nothing changes.
+ */
+function orderByGrade_(sessions, log) {
+  const config = CONFIG.SCHEDULE.GRADES || {};
+  const tab = String(config.SHEET_NAME || '').trim();
+  if (!tab || !sessions.length) return;
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(tab);
+  if (!sheet) {
+    log.error('Grades', 'there is no tab named "' + tab + '", so each hour ' +
+      'is in calendar order rather than grade order. Check ' +
+      'CONFIG.SCHEDULE.GRADES.SHEET_NAME.');
+    return;
+  }
+
+  const values = sheet.getDataRange().getValues();
+  const grades = {};
+  const names = [];
+  for (let r = config.HEADER_ROWS || 0; r < values.length; r++) {
+    const name = cellText_(values[r][config.NAME_COLUMN - 1]);
+    if (!name) continue;
+    grades[name] = values[r][config.GRADE_COLUMN - 1];
+    names.push(name);
+  }
+
+  const unread = [];
+  sessions.forEach(function (session) {
+    // The calendar may say "Amalie Laz" where the grade sheet says "Amalie
+    // Lazeration"; the matching is the seating chart's, so a name written in
+    // full wins, and shorthand that could be two children is not settled by
+    // guessing between them.
+    const hits = seatingCandidates_(session.name, names);
+    if (hits.length !== 1) {
+      session.gradeRank = null;
+      log.warn(session.name, hits.length
+        ? 'could be ' + hits.join(' or ') + ' on "' + tab + '", so their ' +
+          'grade is not known. Listed at the end of their hour.'
+        : 'is not on "' + tab + '", so their grade is not known. Listed at ' +
+          'the end of their hour.');
+      return;
+    }
+
+    const raw = grades[hits[0]];
+    session.gradeRank = gradeRank_(raw);
+    if (session.gradeRank === null) {
+      if (unread.indexOf(String(raw)) === -1) unread.push(String(raw));
+      log.warn(session.name, 'has "' + cellText_(raw) + '" for a grade, which ' +
+        'is not one I can put in order. Listed at the end of their hour.');
+    }
+  });
+
+  const direction = config.YOUNGEST_FIRST === false ? -1 : 1;
+  sessions.sort(function (a, b) {
+    if (a.start - b.start) return a.start - b.start;
+    const aKnown = a.gradeRank !== null && a.gradeRank !== undefined;
+    const bKnown = b.gradeRank !== null && b.gradeRank !== undefined;
+    if (aKnown !== bKnown) return aKnown ? -1 : 1;
+    if (aKnown && a.gradeRank !== b.gradeRank) {
+      return direction * (a.gradeRank - b.gradeRank);
+    }
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
  * Sends a section's students over to the seating chart, as a time and a name.
  *
  * Only the sections marked `roster` in CONFIG.SCHEDULE.SECTIONS go -- the
@@ -554,6 +653,10 @@ function importCalendarFor_(date, source) {
 
   try {
     const items = scheduleItemsFor_(found.calendars, day.date);
+    // The report is written as the run goes, so anything the grade lookup
+    // has to say is kept alongside the rest.
+    const log = ActionLog_();
+    orderByGrade_(items.sessions, log);
     const rows = scheduleBlock_(items);
     const sections = CONFIG.SCHEDULE.SECTIONS || [];
     const width = sheet.getMaxColumns();
@@ -682,7 +785,6 @@ function importCalendarFor_(date, source) {
 
     writeStudentFormulas_(sheet, startRow, rows);
 
-    const log = ActionLog_();
     const onChart = writeSeatingRoster_(items, day.date, log);
 
     if (day.mismatch) {

@@ -76,6 +76,20 @@ const CONFIG = {
     // so on a Saturday it means Monday.
     CLOSED_DAYS: [0],
 
+    // Ordering each hour by grade, so the students the column A colours put
+    // together are sitting together. The colours come from a conditional
+    // formatting rule, which a script cannot see -- so rather than read the
+    // colour, the grade it is worked out from is read instead.
+    GRADES: {
+      // The tab in this spreadsheet holding each student's grade. Blank turns
+      // this off, and each hour stays in the order the calendar gave.
+      SHEET_NAME: '',
+      NAME_COLUMN: 1,     // A
+      GRADE_COLUMN: 2,    // B
+      HEADER_ROWS: 1,
+      YOUNGEST_FIRST: true
+    },
+
     // Each hour of students takes the next of these, so one hour reads as one
     // block. Both sections start again at the first.
     HOUR_SHADES: ['#ffffff', '#d9d9d9'],
