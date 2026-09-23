@@ -1907,6 +1907,82 @@ const DECK_FILLER_ROWS = [
   check('layout: agreeing headers are not a conflict', layout.conflicts, []);
 }
 
+// 45d2a. Only the seats are seats.
+//
+//        Each block on the real chart ends in a row of its own workings -- the
+//        hour again in the wall columns (=$A15), =TODAY() in the table columns
+//        -- and the sheet carries on below the last block. None of it is a
+//        student and none of it is an instructor. The first version of the
+//        live fixture had the dates stripped out, and every student in it sat
+//        in the one pod whose wall column does not repeat the hour, so it hid
+//        this twice over. This is the shape column N showed it in.
+{
+  const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+    Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  install(ctx, [], null);
+  const api = loadScript(ctx);
+
+  const grid = JSON.parse(fs.readFileSync('tests/fixtures/seating-live-layout.json', 'utf8'))
+    .map(r => r.slice());
+  const put = (row, col, v) => {
+    while (grid.length < row) grid.push(new Array(grid[0].length).fill(''));
+    grid[row - 1][col - 1] = v;
+  };
+  const F = 6, G = 7, H = 8;     // table 6, the wall, table 5
+
+  // 6:00 -- header row 13, seats 14 to 16, its workings on 17.
+  put(14, G, 'AL'); put(16, G, 'DY');
+  put(14, F, 'Six C'); put(14, H, 'Five C'); put(15, F, 'Six B');
+  put(16, F, 'Six A'); put(16, H, 'Five A');
+
+  // 7:00 -- header row 18, seats 19 to 21, its workings on 22.
+  put(19, G, 'AL'); put(21, G, 'DY');
+  put(19, F, 'Late Six C'); put(21, H, 'Late Five A');
+
+  // And whatever the sheet holds under the chart.
+  ['KS', 'NN', 'OB', 'PB', 'PE', 'PP', 'PY', 'RG'].forEach(function (code, i) {
+    put(24 + i, G, code);
+    put(24 + i, H, 'key entry ' + code);
+  });
+
+  const seats = api.parseSeatingChart_(grid);
+  const of = name => seats.filter(e => e.occupant === name)[0] || {};
+  const n = name => api.formatSeating_([of(name)]);
+
+  check('workings: the 6:00 pod has its two instructors and nothing else',
+    ['Six C', 'Five C', 'Six B', 'Six A', 'Five A'].map(n),
+    ['6C | AL DY | AL', '5C | AL DY | AL', '6B | AL DY | AL',
+     '6A | AL DY | AL', '5A | AL DY | AL']);
+  check('workings: the 7:00 pod the same, without the rest of the sheet',
+    ['Late Six C', 'Late Five A'].map(n),
+    ['6C | AL DY | AL', '5A | AL DY | AL']);
+
+  // Nobody is a date, nobody is a time, nobody is a key entry.
+  check('workings: the row of =TODAY() is not a row of students',
+    seats.filter(e => /\d{4}/.test(e.occupant)), []);
+  check('workings: nor is anything under the chart',
+    seats.filter(e => /key entry/.test(e.occupant)), []);
+  check('workings: an hour is never an instructor',
+    seats.filter(e => (e.instructors || []).some(i => /^\d+:\d\d$/.test(i))), []);
+  check('workings: and neither is a code from under the chart',
+    seats.filter(e => (e.instructors || []).indexOf('KS') !== -1), []);
+
+  // An instructor written beside a seat row nobody is sitting in still
+  // worked that pod. The old reading took instructors only from rows with a
+  // student in them, so this one was dropped without a word.
+  const quiet = grid.map(r => r.slice());
+  quiet[14][5] = ''; quiet[15][5] = ''; quiet[15][7] = '';   // empty rows 15-16
+  const q = api.parseSeatingChart_(quiet).filter(e => e.occupant === 'Six C')[0];
+  check('workings: an instructor beside an empty row still counts',
+    (q || {}).instructors, ['AL', 'DY']);
+
+  // Exactly the students written in, and no more.
+  check('workings: everybody found, nobody invented',
+    seats.map(e => e.occupant).sort(),
+    ['April V', 'Audrina S', 'Five A', 'Five C', 'Late Five A', 'Late Six C',
+     'Luca B', 'Neil D', 'Sharon Y', 'Six A', 'Six B', 'Six C']);
+}
+
 // 45d2b. The hour tables beside the chart: whoever covered a whole hour.
 {
   const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,

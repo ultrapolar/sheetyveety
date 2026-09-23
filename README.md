@@ -729,6 +729,17 @@ it. **The real chart uses the third**: it has no labels and no markers. If the
 rows run the other way, `SEAT_ROW_ORDER` is the one line to flip — everything
 else follows from it.
 
+**By position means the rows directly under the header, and only those.** Each
+block on the real chart ends in a row of its own workings — the hour repeated
+in the wall columns (`=$A15`), `=TODAY()` in the table columns — and the sheet
+carries on below the last block. None of that is a seat. An earlier version
+took "the first three rows with anything in them" instead, which in an empty
+block is the workings row: its dates came out as students and its hour as an
+instructor (`6C | AL DY 6:00`), and under the last block every code below the
+chart joined the list. It also dropped an instructor written beside a row
+nobody was sitting in. Where the seats are is fixed by the layout; what happens
+to be written near them is not.
+
 A cell still showing its own label is an **empty seat**, not a student.
 
 ### One room, drawn four times

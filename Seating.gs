@@ -257,7 +257,9 @@ function parseSeatingChart_(values) {
     // Which rows of this block are seat rows, and what each one is called.
     // Gathered for the whole block before any of it is read, so that one
     // labelled seat anywhere in the block names its row for every table.
-    const seatRows = [];
+    // Rows that name themselves: a seat still showing its label, or markers
+    // down the side.
+    const named = [];
     for (let r = header.row + 1; r < stop; r++) {
       const row = values[r];
 
@@ -274,24 +276,28 @@ function parseSeatingChart_(values) {
         if (letter) from = 'marker';
       }
 
-      const occupied = layout.columns.some(function (c) {
-        return cellText_(row[c]) !== '';
-      });
-      if (letter || occupied) seatRows.push({ row: r, letter: letter, from: from });
+      if (letter) named.push({ row: r, letter: letter, from: from });
     }
 
-    // Anything with no letter of its own takes one from where it sits. A chart
-    // that says nothing about its rows is read in the configured order, and a
-    // block with more rows than that order names is left alone rather than run
-    // off the end of it.
-    const order = CONFIG.SEATING.SEAT_ROW_ORDER || [];
-    seatRows.forEach(function (seatRow, i) {
-      if (seatRow.letter) return;
-      if (i < order.length) {
-        seatRow.letter = order[i];
-        seatRow.from = 'position';
+    // A chart that says nothing about its rows has its seats directly under
+    // the header, in the configured order -- and only those.
+    //
+    // This used to be "the first rows that have anything in them", which is
+    // not the same thing. Each block on the real chart ends in a row of its
+    // own workings: the hour again in the wall columns, =TODAY() in the table
+    // columns. In a block nobody is sitting in, that is the first row with
+    // anything in it, so its dates were read as students and its hour as an
+    // instructor. Under the last block the rest of the sheet was counted too.
+    // Where the seats are is fixed by the layout; what happens to be written
+    // near them is not.
+    let seatRows = named;
+    if (!named.length) {
+      const order = CONFIG.SEATING.SEAT_ROW_ORDER || [];
+      seatRows = [];
+      for (let i = 0; i < order.length && header.row + 1 + i < stop; i++) {
+        seatRows.push({ row: header.row + 1 + i, letter: order[i], from: 'position' });
       }
-    });
+    }
 
     // The instructors of a pod, for this hour.
     //
@@ -313,7 +319,6 @@ function parseSeatingChart_(values) {
 
     seatRows.forEach(function (seatRow) {
       const row = values[seatRow.row];
-      if (!seatRow.letter) return;   // more rows than the order names
 
       layout.columns.forEach(function (c) {
         const occupant = cellText_(row[c]);
