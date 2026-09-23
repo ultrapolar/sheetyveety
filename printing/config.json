@@ -1,0 +1,58 @@
+{
+  "behavior": {
+    "log_path": "print_log.csv",
+    "retain_watermarked": false
+  },
+  "paths": {
+    "assess_subdir": "Assessments",
+    "base": "\\\\newcloud\\Public\\NEW Current Students",
+    "deck_subdir": "Upcoming Decks"
+  },
+  "print": {
+    "copies": 1,
+    "settings": "noscale",
+    "timeout": 120
+  },
+  "printers": {
+    "ProvisionalBear": {
+      "batch": 4,
+      "batch_pause": 60,
+      "duplex": false,
+      "gap": 30,
+      "paced": true
+    },
+    "SMALLFATBEAR": {
+      "batch": 0,
+      "batch_pause": 0,
+      "duplex": true,
+      "gap": 0,
+      "paced": false
+    }
+  },
+  "routing": {
+    "assessment": "SMALLFATBEAR",
+    "deck": "ProvisionalBear",
+    "lp": "ProvisionalBear",
+    "supp": "ProvisionalBear",
+    "temp": "ProvisionalBear"
+  },
+  "sheet": {
+    "col_items": "Print",
+    "col_name": "Name",
+    "csv_url": "https://docs.google.com/spreadsheets/d/XXXX/pub?gid=0&single=true&output=csv"
+  },
+  "supp": {
+    "label": "SUPP",
+    "pages": 15,
+    "watermark": "WOB"
+  },
+  "temp": {
+    "pages": 20,
+    "watermark": ""
+  },
+  "watermark_style": {
+    "darkness": 0.15,
+    "font": "Helvetica",
+    "size": 72
+  }
+}

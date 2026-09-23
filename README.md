@@ -14,6 +14,7 @@ spreadsheet.
 | `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
+| `printing/` | Batch Print — a separate Windows tool that prints student decks/assessments from a published CSV of this sheet. Self-contained; not yet wired into the menus above. See below. |
 
 ## Installing
 
@@ -32,6 +33,26 @@ node tests/run.js
 421 assertions covering the parsing rules and both scripts end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
+
+## Printing
+
+`printing/` holds **Batch Print**: a Windows desktop tool that reads a print
+list from this sheet (published as CSV — Apps Script's sandbox can't reach a
+network share or a physical printer) and prints each student's deck or
+assessment to the right printer, watermarked, after a human confirms. It runs
+independently of the `.gs` files above — installed once on whichever PC is
+wired to the printers, not through the spreadsheet's menus.
+
+It used to take editing constants at the top of a single Python file to
+change the Sheet URL, printer names, or pacing. That's now a settings screen
+("Batch Print Settings") backed by `printing/config.json`, so a printer can
+be renamed, added, or re-routed without touching code — see
+`printing/README.md` and `printing/INSTALL.txt`.
+
+The intent is to eventually run this as part of the same menus as SOD/EOD
+rather than as a separate installed app; for now it's kept as its own
+subsection of this repo so that integration can happen without disturbing
+either side.
 
 ---
 
