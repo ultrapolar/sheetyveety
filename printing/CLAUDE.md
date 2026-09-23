@@ -58,6 +58,22 @@ have to change shape.
   the old name to the new one automatically. Don't collapse rename into
   remove-and-add, or every routed job on that printer silently breaks the
   moment someone corrects a typo in its name.
+- **`printer_discovery.py`** backs the fourth way: **detect**, via the
+  "Detect printers on this PC" button. It's real Windows printer enumeration
+  (`win32print.EnumPrinters`, local + network-connected), not a subnet scan
+  -- SumatraPDF can only print to a name Windows already recognizes, so a
+  device still has to be added in Windows first (Settings > Printers > Add
+  device); after that, Detect finds it without anyone typing its exact
+  name. It only adds rows for names not already present (never touches an
+  existing row, so it's safe to click again after adding a printer to
+  Windows), and leaves the new row's duplex/pacing at the off defaults --
+  detection can tell you a name exists, not how it should behave, so that
+  stays a manual step. Raises `PrinterDiscoveryUnavailable` with a
+  plain-English reason (not Windows / no pywin32 / spooler unreachable)
+  that `settings_gui.py` shows as-is in a messagebox rather than a
+  traceback; keep that contract if you touch it; `test_printer_discovery.py`
+  covers the non-Windows and missing-pywin32 paths, and dedup/error-wrapping
+  behavior, entirely with a faked `win32print` module.
 - **`settings_gui.py`** is the only supported way to edit `config.json` for a
   non-technical user. It mirrors `config_store.validate()`'s rules at parse
   time in `_collect()` (e.g. an unpaced printer's `batch` field has no
@@ -127,8 +143,9 @@ never modified**.
 
 ```
 py -m pip install pypdf reportlab
-py test_batch_print.py      # matching / routing / printing logic, 26 tests
-py test_config_store.py     # settings schema, 26 tests, no pypdf/reportlab needed
+py test_batch_print.py         # matching / routing / printing logic, 26 tests
+py test_config_store.py        # settings schema, 26 tests, no pypdf/reportlab needed
+py test_printer_discovery.py   # printer detection, 6 tests, fakes win32print -- no Windows/pywin32 needed
 ```
 
 Both must pass after any change to matching, the decision tree, watermarking,

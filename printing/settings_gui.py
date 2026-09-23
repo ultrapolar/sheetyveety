@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from config_store import JOB_KINDS, load_config, save_config, validate
+from printer_discovery import PrinterDiscoveryUnavailable, list_windows_printers
 
 JOB_LABELS = {
     "deck": "Decks (SD##)",
@@ -188,8 +189,12 @@ class SettingsApp(ttk.Frame):
         for name, p in self.config["printers"].items():
             self._add_printer_row(name, p["duplex"], p["paced"], p["gap"], p["batch"], p["batch_pause"])
 
-        ttk.Button(t, text="+ Add printer", command=lambda: self._add_printer_row()).grid(
-            row=3, column=0, sticky="w", pady=(0, 12))
+        printer_buttons = ttk.Frame(t)
+        printer_buttons.grid(row=3, column=0, sticky="w", pady=(0, 12))
+        ttk.Button(printer_buttons, text="+ Add printer",
+                   command=lambda: self._add_printer_row()).pack(side="left")
+        ttk.Button(printer_buttons, text="Detect printers on this PC",
+                   command=self._detect_printers).pack(side="left", padx=(8, 0))
 
         ttk.Separator(t).grid(row=4, column=0, sticky="we", pady=6)
 
@@ -217,6 +222,37 @@ class SettingsApp(ttk.Frame):
     def _live_printer_names(self):
         names = [r.name_var.get().strip() for r in self.printer_rows if r.winfo_exists()]
         return [n for n in names if n]
+
+    def _detect_printers(self):
+        """Ask Windows what printers it already knows about and add any not
+        already listed. Their protocol (duplex/pacing) defaults to off --
+        detection only saves typing the name, it can't know a printer's
+        protocol, so that's still the user's call to review before Save."""
+        try:
+            found = list_windows_printers()
+        except PrinterDiscoveryUnavailable as e:
+            messagebox.showinfo("Detect printers", str(e))
+            return
+
+        if not found:
+            messagebox.showinfo("Detect printers", "Windows didn't report any printers.")
+            return
+
+        existing = set(self._live_printer_names())
+        new = [name for name in found if name not in existing]
+        for name in new:
+            self._add_printer_row(name=name)
+        self._refresh_routing_options()
+
+        if not new:
+            messagebox.showinfo("Detect printers",
+                                 f"Found {len(found)} printer(s) -- all already listed below.")
+        else:
+            messagebox.showinfo(
+                "Detect printers",
+                f"Found {len(found)} printer(s). Added {len(new)} new:\n"
+                + "\n".join(f"  - {name}" for name in new)
+                + "\n\nReview Duplex/Paced for each before routing jobs to it and saving.")
 
     def _printer_renamed(self, old, new):
         """A printer's name changed in place (not removed) -- carry any

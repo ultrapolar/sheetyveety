@@ -42,10 +42,11 @@ REM --- 3. Create the app folder and copy files in ---------------------------
 set "APP=%LOCALAPPDATA%\BatchPrint"
 echo [..] Installing into  %APP%
 if not exist "%APP%" mkdir "%APP%"
-copy /y "%~dp0batch_print.py"   "%APP%\" >nul
-copy /y "%~dp0config_store.py"  "%APP%\" >nul
-copy /y "%~dp0settings_gui.py"  "%APP%\" >nul
-copy /y "%~dp0SumatraPDF.exe"   "%APP%\" >nul
+copy /y "%~dp0batch_print.py"       "%APP%\" >nul
+copy /y "%~dp0config_store.py"      "%APP%\" >nul
+copy /y "%~dp0settings_gui.py"      "%APP%\" >nul
+copy /y "%~dp0printer_discovery.py" "%APP%\" >nul
+copy /y "%~dp0SumatraPDF.exe"       "%APP%\" >nul
 echo [ok] Files copied.
 
 REM Don't clobber a site's already-configured settings on a re-run.
@@ -69,6 +70,18 @@ if errorlevel 1 (
   exit /b 1
 )
 echo [ok] Dependencies installed.
+
+REM pywin32 only powers "Detect printers on this PC" in Settings -- Batch
+REM Print itself runs fine without it, so a failure here doesn't stop setup.
+echo [..] Installing pywin32 (for "Detect printers on this PC" in Settings)...
+%PY% -m pip install --upgrade --quiet pywin32
+if errorlevel 1 (
+  echo [!] pywin32 didn't install -- Settings will still work, but you'll need
+  echo     to type printer names in by hand instead of using Detect. Try
+  echo     "py -m pip install pywin32" yourself later if you want it.
+) else (
+  echo [ok] pywin32 installed.
+)
 
 REM --- 5. Write the launchers ------------------------------------------------
 > "%APP%\run.bat" echo @echo off

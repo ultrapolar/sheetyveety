@@ -17,9 +17,11 @@ if not defined PY (
   exit /b 1
 )
 
-echo [..] Installing build tools (pyinstaller, pypdf, reportlab)...
-%PY% -m pip install --upgrade --quiet pyinstaller pypdf reportlab
+echo [..] Installing build tools (pyinstaller, pypdf, reportlab, pywin32)...
+%PY% -m pip install --upgrade --quiet pyinstaller pypdf reportlab pywin32
 if errorlevel 1 ( echo [X] Tool install failed. & pause & exit /b 1 )
+REM pywin32 only powers "Detect printers on this PC"; PyInstaller ships its
+REM own hook for it, so no extra --hidden-import flags are needed below.
 
 echo [..] Compiling batch_print.exe...
 %PY% -m PyInstaller --onefile --console --name batch_print "%~dp0batch_print.py"

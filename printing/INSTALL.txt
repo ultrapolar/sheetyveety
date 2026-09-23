@@ -64,11 +64,20 @@ Open "Batch Print Settings" and fill in, on the "Sheet & Folders" tab:
   - Name / Print-items column headers -- the two column headers in your sheet
 
 On the "Printers & Routing" tab:
-  - Add a printer for each physical printer, using its EXACT Windows printer
-    name (Settings > Bluetooth & devices > Printers). For each one, tick
-    Duplex if it should always print double-sided, and Paced if it should
-    pause between jobs (set how long, and how often to take a longer rest)
-    to avoid overheating on long runs.
+  - Click "Detect printers on this PC" to pull in every printer Windows
+    already knows about (local, shared from another PC, or already added
+    by IP/network) -- no need to type an exact name. A brand-new printer
+    still needs to be added in Windows once first (Settings > Bluetooth &
+    devices > Printers > Add device); after that, Detect will find it.
+    Detect never removes or renames anything already listed -- click it
+    again any time you add a new printer to Windows, and just review
+    Duplex/Paced for whatever's new.
+  - Or add one by hand ("+ Add printer") if you'd rather type its exact
+    Windows printer name yourself.
+  - For each printer, tick Duplex if it should always print double-sided,
+    and Paced if it should pause between jobs (set how long, and how often
+    to take a longer rest) to avoid overheating on long runs. Detection
+    can't know either of these -- they default off and are yours to set.
   - Under Routing, pick which printer handles decks, lesson plans, TEMP,
     SUPP, and everything else.
 
