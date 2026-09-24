@@ -190,12 +190,17 @@ const CONFIG = {
       { key: 'masteryAndAssessment', column: 7,  label: 'Mastery / assessment' },// G
       { key: 'pagesCompleted',       column: 8,  label: 'Pages completed' },     // H
       { key: 'finalizedFlag',        column: 10, label: 'Finalized' },           // J
+      // Parked: instructors do not set "Needs deck update" in Radius reliably
+      // yet, so a Y here would be a guess dressed as a fact, and column K is
+      // what EOD advances the Deck List from. The reading is untouched and
+      // still tested -- uncomment these two lines to turn it back on.
+      //
       // Column K is the EOD script's Y/P status column, and a deck update is
-      // the same thing as a P there. merge: 'statusLetters' folds the P into
-      // whatever the cell already holds instead of replacing it, skips rows
-      // EOD has already finished, and leaves EOD's markers untouched.
-      { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (Y)',
-        merge: 'statusLetters' },                                               // K
+      // the same thing as a Y there. merge: 'statusLetters' folds the letter
+      // into whatever the cell already holds instead of replacing it, skips
+      // rows EOD has already finished, and leaves EOD's markers untouched.
+      // { key: 'deckNeedsUpdateFlag',  column: 11, label: 'Deck update (Y)',
+      //   merge: 'statusLetters' },                                            // K
       { key: 'signedIn',             column: 12, label: 'Signed in' },           // L
       { key: 'signedOut',            column: 13, label: 'Signed out' },          // M
       { key: 'sessionSummary',       column: 15, label: 'Session summary',

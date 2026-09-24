@@ -107,6 +107,22 @@ function scenario(deckRows, wopRows, selection, today) {
 }
 
 /**
+ * Switches the parked "Needs deck update" field back on inside one test's
+ * copy of the config, exactly as uncommenting it in Config.gs would.
+ *
+ * It is parked because instructors do not set it in Radius reliably yet, not
+ * because it is broken -- so the code behind it stays tested, and turning it
+ * back on is a one-line change that is known to work.
+ */
+function enableDeckUpdate(context) {
+  vm.runInContext(
+    "CONFIG.RADIUS.FIELDS.push({ key: 'deckNeedsUpdateFlag', column: 11, " +
+    "label: 'Deck update (Y)', merge: 'statusLetters' }); " +
+    "CONFIG.RADIUS.FIELDS.sort(function (a, b) { return a.column - b.column; });",
+    context);
+}
+
+/**
  * Drives the whole import: fetch, then answer the preview dialog. Returns the
  * preview dialog so a test can assert on what the operator was shown.
  */
@@ -900,11 +916,11 @@ const DECK_FILLER_ROWS = [
   checkTruthy('check setup: shows the headings found from the sheet',
     full.includes('HDR-Pages') && full.includes('HDR-Summary'));
 
-  // K is configured twice -- once by EOD, once by the import -- and is one
-  // column, so it gets one row naming both uses.
+  // K is EOD's. The import's deck-update field is parked, so the import no
+  // longer claims it.
   check('check setup: K appears once', (full.match(/<b>K<\/b>/g) || []).length, 1);
-  checkTruthy('check setup: K names both of its uses',
-    full.includes('Deck update / paperwork') && full.includes('Deck update (Y)'));
+  checkTruthy('check setup: K is listed as EOD\'s alone',
+    full.includes('Deck update / paperwork') && !full.includes('Deck update (Y)'));
 
   // Row 1 left blank as a spacer: the heading is really in row 2.
   const spacer = setupDialog([
@@ -4616,21 +4632,29 @@ const DECK_FILLER_ROWS = [
     G: 'masteryAndAssessment',
     H: 'pagesCompleted',
     J: 'finalizedFlag',
-    K: 'deckNeedsUpdateFlag',
     L: 'signedIn',
     M: 'signedOut',
     O: 'sessionSummary',
     P: 'internalNotes'
   });
 
-  // Column K is shared with EOD, so it must be a merge field -- never a
-  // plain overwrite -- and nothing may ever target the name column.
+  // "Needs deck update" is parked: instructors do not set it in Radius
+  // reliably yet, and column K is what EOD advances the Deck List from. So
+  // the import writes nothing into K -- and the entry is still in Config.gs,
+  // commented, so turning it back on is one uncomment.
+  check('parked: the import writes nothing into column K',
+    api.CONFIG.RADIUS.FIELDS.filter(f => f.column === api.CONFIG.WOP_COL.STATUS), []);
+  checkTruthy('parked: the entry is still there to uncomment',
+    /\/\/ \{ key: 'deckNeedsUpdateFlag'/.test(fs.readFileSync('Config.gs', 'utf8')));
+  checkTruthy('every field left is a plain write',
+    api.CONFIG.RADIUS.FIELDS.filter(f => f.merge).length === 0);
+
+  // Switched back on, K is a merge field -- never a plain overwrite.
+  enableDeckUpdate(ctx);
   const statusField = api.CONFIG.RADIUS.FIELDS
     .filter(f => f.column === api.CONFIG.WOP_COL.STATUS)[0];
-  check('the EOD status column is written by merge, not overwrite',
+  check('switched back on: the EOD status column is written by merge',
     statusField && statusField.merge, 'statusLetters');
-  checkTruthy('every other field is a plain write',
-    api.CONFIG.RADIUS.FIELDS.filter(f => f.merge).length === 1);
   checkTruthy('nothing targets the name column',
     api.CONFIG.RADIUS.FIELDS.every(f => f.column !== api.CONFIG.WOP_COL.NAME));
 
@@ -4672,7 +4696,8 @@ const DECK_FILLER_ROWS = [
 
 // 52e. The import writing into column K for real.
 {
-  function runImport(existingStatus, statusBg) {
+  function runImport(existingStatus, statusBg, opts) {
+    opts = opts || {};
     const s = scenario([HEADER, ...DECK_FILLER_ROWS,
       ['Amalie Laz', '', '', '', '', '', '', '', '', '', '', '', '', '']],
       [{ name: 'Amalie Laz', status: existingStatus, statusBg: statusBg }],
@@ -4681,6 +4706,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; CONFIG.RADIUS.TOKEN_PAGE_URL = "";',
       s.context);
+    if (opts.parked !== true) enableDeckUpdate(s.context);
     const DONE = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1
@@ -4690,7 +4716,16 @@ const DECK_FILLER_ROWS = [
     return s;
   }
 
-  let s = runImport('');
+  // As shipped: parked, so the import leaves K exactly as it found it and
+  // column K stays the person's call.
+  let s = runImport('', undefined, { parked: true });
+  check('parked: an empty K stays empty', s.wopStatus(0), '');
+  check('parked: the other columns still land', String(s.wop.values[0][7]), '33');
+  s = runImport('P', undefined, { parked: true });
+  check('parked: a typed P is left as typed', s.wopStatus(0), 'P');
+
+  // Switched back on, it behaves exactly as before.
+  s = runImport('');
   check('import into K: empty cell gets the Y', s.wopStatus(0), 'Y');
   check('import into K: other columns still land', String(s.wop.values[0][7]), '33');
 
@@ -5017,6 +5052,7 @@ const DECK_FILLER_ROWS = [
     vm.runInContext(
       'CONFIG.RADIUS.ROSTER_URL = "https://radius.mathnasium.com/IM"; ' +
       'CONFIG.RADIUS.TOKEN_PAGE_URL = "";', s.context);
+    enableDeckUpdate(s.context);
     const page = dwp('complete');
     s.harness.fetchHandler.value = url => ({ code: 200, body:
       url.indexOf('/IM') !== -1 ? rosterReply(['Amalie Laz']) : page });
@@ -5322,7 +5358,7 @@ const DECK_FILLER_ROWS = [
     [5, 6, 7, 9, 10, 11, 12, 14, 15].map(c => String(s.wop.values[0][c])),
     ['', '', '', '', '', '9:59 AM', '', '', '']);
   checkTruthy('import reports every column it wrote',
-    lastDialog(s).html.includes('F, G, H, J, K, L, M, O, P'));
+    lastDialog(s).html.includes('F, G, H, J, L, M, O, P'));
 }
 
 // 54. A roster link pointing at the wrong student writes nothing.

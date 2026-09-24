@@ -888,11 +888,19 @@ the replacement is named in the report. One already correct is left alone.
 | G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
 | H | Pages completed | the number |
 | J | Finalized | `Y`; `N` once the session is over and it still is not |
-| K | Deck update | `P`, folded into the existing cell |
+| K | Deck update | **parked** — see below |
 | L | Signed in | `10:48 AM`, or blank |
 | M | Signed out | `11:48 AM`, or blank |
 | O | Session summary | `ALB: ` then the note text |
 | P | Internal notes | `ALB: ` then the note text, plus timing notes, plus `MLS (3)` |
+
+**Column K is parked.** Radius's "Needs deck update" switch reads correctly,
+but instructors do not set it in Radius reliably yet — and column K is what EOD
+advances the Deck List from, so a `Y` there on the strength of an unset switch
+would move a student on for no reason. The import leaves K exactly as it finds
+it. The entry is commented out in `CONFIG.RADIUS.FIELDS`, and uncommenting its
+two lines turns it back on: it then writes a `Y` folded into whatever the cell
+already holds. The code behind it is still tested, so that works when you do.
 
 Yes/no answers write a bare **`Y`**, matching how the sheet is filled in by
 hand; a No writes nothing rather than the word "No". Times are plain times,
