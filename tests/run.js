@@ -61,7 +61,7 @@ function loadScript(context) {
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
   attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_,
-  isDoneColor_, isChangelogTask_, asDate_
+  isDoneColor_, isChangelogTask_, asDate_, attendanceOutOfDateFiles_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -6069,6 +6069,39 @@ const ATTENDANCE_WOP = wopRows([
   checkTruthy('deck not saved: and said', broken.said().includes('could not be saved'));
 }
 
+
+
+// 60i. An out-of-date file is named, not left as "X is not defined".
+{
+  const stale = (setup, entry) => {
+    const t = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+    vm.runInContext(setup, t.ctx);
+    t.api[entry || 'radiusAttendanceToday']();
+    return t;
+  };
+  const oldRadius = stale('radiusPostForm_ = undefined;');
+  checkTruthy('stale Radius.gs: named', String(oldRadius.h.alerts[0]).includes('Radius.gs'));
+  check('stale Radius.gs: Radius not asked, nothing coloured, no dialog',
+    [oldRadius.h.fetchLog.length, oldRadius.wop.writeCount, oldRadius.h.dialogs.length], [0, 0, 0]);
+  checkTruthy('stale Radius.gs: says what to do',
+    String(oldRadius.h.alerts[0]).includes('Copy it again'));
+
+  const oldConfig = stale('delete CONFIG.RADIUS.ATTENDANCE;');
+  checkTruthy('stale Config.gs: named, not a crash',
+    String(oldConfig.h.alerts[0]).includes('Config.gs'));
+
+  const two = stale('slotMinutes_ = undefined; looksLikeShiftTitle_ = undefined;');
+  checkTruthy('two stale files: both named',
+    String(two.h.alerts[0]).includes('Common.gs, Schedule.gs') &&
+    String(two.h.alerts[0]).includes('Copy them again'));
+
+  const day = stale('wopSheet_ = undefined;', 'radiusAttendancePickDay');
+  checkTruthy('stale Day.gs: named before the day is even asked',
+    String(day.h.alerts[0]).includes('Day.gs') && day.h.prompts.length === 0);
+
+  const fresh = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  check('everything current: nothing named', fresh.api.attendanceOutOfDateFiles_(), []);
+}
 
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

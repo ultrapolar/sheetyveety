@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1184 assertions covering the parsing rules and every menu entry end to end,
+1191 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -186,6 +186,14 @@ runs: a bare 4:00 is the afternoon.
 No row for the day on the Daily WOP, or nothing under it yet: the sign-ins are
 still shown, with a note saying why, and **nobody is called a no-show or an
 extra**. Without column A there is no knowing who was expected.
+
+### If a file is out of date
+
+Auto Attendance leans on functions in Radius.gs, Config.gs, Common.gs, Day.gs
+and Schedule.gs. Copy Attendance.gs in without the newer versions of those
+and, rather than Apps Script's "radiusPostForm_ is not defined", it says
+which file(s) to copy again, before asking Radius anything or touching the
+sheet.
 
 ### Where it comes from
 

@@ -635,13 +635,58 @@ function showAttendanceFor_(date) {
     'Auto Attendance');
 }
 
+/**
+ * The other files this one leans on that are older than it, by name.
+ *
+ * Files go into Apps Script one at a time, by hand, so it is easy to update
+ * this one and miss one of them -- and what Apps Script says then is
+ * "radiusPostForm_ is not defined", which names a function nobody has heard
+ * of rather than the file to copy again. Each check is on something only the
+ * current version of that file has. `typeof` is used because it answers
+ * "undefined" for a name that does not exist at all, where reading the name
+ * would throw.
+ */
+function attendanceOutOfDateFiles_() {
+  const stale = [];
+  if (typeof CONFIG !== 'object' || !CONFIG.RADIUS || !CONFIG.RADIUS.ATTENDANCE ||
+      !CONFIG.RADIUS.ATTENDANCE.OK_COLOR) {
+    stale.push('Config.gs');
+  }
+  if (typeof radiusPostForm_ !== 'function' || typeof formEncode_ !== 'function') {
+    stale.push('Radius.gs');
+  }
+  if (typeof leadingTimeOf_ !== 'function' || typeof slotMinutes_ !== 'function') {
+    stale.push('Common.gs');
+  }
+  if (typeof dayHeaderRows_ !== 'function' || typeof wopSheet_ !== 'function') {
+    stale.push('Day.gs');
+  }
+  if (typeof looksLikeShiftTitle_ !== 'function' || typeof parseTypedDate_ !== 'function') {
+    stale.push('Schedule.gs');
+  }
+  return stale;
+}
+
+/** True when everything is current; otherwise says which files to copy again. */
+function attendanceReady_() {
+  const stale = attendanceOutOfDateFiles_();
+  if (!stale.length) return true;
+  showError_('Auto Attendance needs a newer copy of ' + stale.join(', ') +
+    ' than this spreadsheet has. Copy ' + (stale.length > 1 ? 'them' : 'it') +
+    ' again from the repo, replacing everything in the file, then save and ' +
+    'reload the spreadsheet. Nothing was changed.');
+  return false;
+}
+
 /** Menu entry: today, so far. */
 function radiusAttendanceToday() {
+  if (!attendanceReady_()) return;
   showAttendanceFor_(new Date());
 }
 
 /** Menu entry: the same, for a day you type in. */
 function radiusAttendancePickDay() {
+  if (!attendanceReady_()) return;
   const ui = SpreadsheetApp.getUi();
   const response = ui.prompt('Auto Attendance: pick a day',
     'Which day? Type it as 9/18/2026, or 9/18 for this year.',
