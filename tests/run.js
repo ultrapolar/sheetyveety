@@ -3,7 +3,7 @@ const fs = require('fs');
 const vm = require('vm');
 const { FakeSheet, makeGrid, install, fixedDate } = require('./fakeSheets.js');
 
-const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Day.gs', 'Schedule.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Progress.gs', 'Menu.gs'];
+const SOURCES = ['Config.gs', 'Common.gs', 'Sod.gs', 'Day.gs', 'Schedule.gs', 'Eod.gs', 'Setup.gs', 'Radius.gs', 'Seating.gs', 'Changelog.gs', 'Progress.gs', 'Attendance.gs', 'Menu.gs'];
 
 let passed = 0;
 const failures = [];
@@ -58,7 +58,10 @@ function loadScript(context) {
   cookieComplaint_,
   draftProgressReport, nameColumnFor_, highlightedStudents_, upcomingTopics_,
   masteredTopics_, progressDraft_, topicLines_, PROGRESS_EXTRACTORS,
-  progressAssessmentUrl_
+  progressAssessmentUrl_,
+  radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
+  attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
+  attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -5397,6 +5400,393 @@ const DECK_FILLER_ROWS = [
   check('unset roster URL: nothing fetched', s.harness.fetchLog.length, 0);
   checkTruthy('unset roster URL: says what to set',
     s.harness.alerts.some(a => String(a).includes('ROSTER_URL')));
+}
+
+
+// 60. Who signed in and out: the Student Attendance Report.
+//
+//      The reply fixture is the real one's shape, key for key, with the names
+//      and ids of anybody who was not a test student swapped for made-up ones.
+//      Every group in it carries its rows twice, under Items and again under
+//      Subgroups, which is the thing most worth getting wrong.
+const ATTENDANCE_REPLY = fs.readFileSync('tests/fixtures/attendance-report.json', 'utf8');
+const ATTENDANCE_TOKEN_PAGE = '<html><body><form action="/Account/LogOff" method="post">' +
+  '<input name="__RequestVerificationToken" type="hidden" value="tok-att" />' +
+  '</form></body></html>';
+
+function attendanceCase(opts) {
+  const o = opts || {};
+  const wop = new FakeSheet('Daily WOP', [['9/26/2026 Saturday'], ['4:00 Amalie Laz']]);
+  const ctx = vm.createContext({ console, Buffer, JSON, Math,
+    Date: fixedDate(o.today || '2026-09-26'), String, Number, Object,
+    Array, RegExp, Error, isNaN, parseInt, parseFloat });
+  const h = install(ctx, [wop], 'Daily WOP');
+  (o.calendars || []).forEach(c => h.addCalendar(c.id, c.name, c.events));
+  const api = loadScript(ctx);
+  if (o.cookie !== false) h.scriptProps.RADIUS_COOKIE = 'session=abc';
+  if (o.config) vm.runInContext(o.config, ctx);
+  if (o.calendarsThrow) ctx.__calendarsThrow = true;
+  const replies = o.replies || [ATTENDANCE_REPLY];
+  let page = 0;
+  h.fetchHandler.value = function (url, params) {
+    if (params.method === 'get') return { code: 200, body: ATTENDANCE_TOKEN_PAGE };
+    const reply = replies[Math.min(page, replies.length - 1)];
+    page++;
+    return typeof reply === 'string' ? { code: 200, body: reply } : reply;
+  };
+  const posts = () => h.fetchLog.filter(c => c.params.method === 'post');
+  const form = call => {
+    const out = [];
+    String(call.params.payload).split('&').forEach(function (pair) {
+      const i = pair.indexOf('=');
+      out.push([decodeURIComponent(pair.slice(0, i)), decodeURIComponent(pair.slice(i + 1))]);
+    });
+    return out;
+  };
+  return { api, h, ctx, wop, posts, form };
+}
+
+// A reply holding exactly these rows, grouped the way the real one is.
+function attendanceReplyOf(rows, extra) {
+  return JSON.stringify(Object.assign({
+    Data: rows.map(r => ({ Key: r.StudentFullName, HasSubgroups: true,
+      Member: 'StudentFullName',
+      Items: [{ Key: r.EnrollmentId || 1, HasSubgroups: false, Member: 'EnrollmentId', Items: [r], Subgroups: [] }],
+      Subgroups: [{ Key: r.EnrollmentId || 1, HasSubgroups: false, Member: 'EnrollmentId', Items: [r], Subgroups: [] }] })),
+    Total: rows.length, Errors: null }, extra || {}));
+}
+function attendanceRow(name, id, inAt, outAt, day) {
+  return { StudentFullName: name, StudentId: id, EnrollmentId: id + 1000,
+    ArrivalTime: '/Date(' + id + ')/', ArrivalTimeString: inAt,
+    DepartureTime: outAt ? '/Date(' + (id + 1) + ')/' : null,
+    DepartureTimeString: outAt || '', DurationInMinutes: outAt ? 60 : 0,
+    AttendanceDateString: day || '9/26/2026', DeliveryText: 'In-Center' };
+}
+
+// 60a. The request is the page's own, field for field.
+{
+  const t = attendanceCase();
+  const found = t.api.loadAttendance_(new t.ctx.Date(2026, 8, 26));
+  const call = t.posts()[0];
+
+  check('attendance request: one post for a day that fits one page', t.posts().length, 1);
+  check('attendance request: the report\'s data source', call.url,
+    'https://radius.mathnasium.com/StudentAttendanceReport/StudentAttendanceReport_Read');
+  checkTruthy('attendance request: sent as a form, not JSON',
+    /^application\/x-www-form-urlencoded/.test(String(call.params.contentType)));
+  check('attendance request: the fields, in the page\'s order', t.form(call), [
+    ['__RequestVerificationToken', 'tok-att'],
+    ['sort', ''], ['page', '1'], ['pageSize', '100'],
+    ['group', 'StudentFullName-asc~EnrollmentId-asc'],
+    ['aggregate', 'DurationInHours-sum'], ['filter', ''],
+    ['start', '9/26/2026 12:00:00 AM'], ['end', '9/26/2026 12:00:00 AM'],
+    ['centerId', '2514'], ['membershipTypeList', ''], ['selectStudent', ''],
+    ['delivery', ''], ['schoolPartnership', '2'], ['ctrIds', ''],
+    ['parameter', 'value']]);
+  check('attendance request: the session cookie', call.params.headers.Cookie, 'session=abc');
+  check('attendance request: an AJAX call, like the page\'s',
+    call.params.headers['X-Requested-With'], 'XMLHttpRequest');
+  checkTruthy('attendance request: the token rides in the body, not a header',
+    call.params.headers.__RequestVerificationToken === undefined);
+
+  // The reply holds every row twice, once under Items and once under
+  // Subgroups. Six students signed in, so six it is -- not twelve.
+  check('attendance reply: each sign-in read once', found.entries.length, 6);
+  // And not by leaning on the de-duplication further down, which would hide
+  // a walk that read every row twice -- and throw the paging count off.
+  check('attendance reply: the walk itself finds six rows',
+    t.api.attendanceRowsOf_(JSON.parse(ATTENDANCE_REPLY)).length, 6);
+  check('attendance reply: complete', found.complete, true);
+  check('attendance reply: nothing from another day', found.otherDays.length, 0);
+  check('attendance reply: names, as Radius writes them',
+    found.entries.map(e => e.name),
+    ['Amalie Laz', 'Casey Sample', 'Jordan Example', 'Riley Placeholder (IC)',
+     'Test Student 1', 'Test Student2']);
+  const amalie = found.entries[0];
+  check('attendance reply: the time Radius wrote out, not the UTC stamp',
+    [amalie.signedIn, amalie.signedOut], ['4:48 AM', '']);
+  const riley = found.entries[3];
+  check('attendance reply: a finished session',
+    [riley.signedIn, riley.signedOut, riley.minutes, riley.delivery],
+    ['7:48 AM', '8:48 AM', 60, 'In-Center']);
+
+  // The date is read off the page's own text. The stamp beside it is UTC
+  // midnight, which in New York is the evening before.
+  check('attendance reply: dated by its text',
+    [amalie.day.getFullYear(), amalie.day.getMonth(), amalie.day.getDate()], [2026, 8, 26]);
+
+  const odd = attendanceCase().api.formEncode_([['a b', 'x/y&z'], ['e', null]]);
+  check('form encoding: escaped, blanks kept', odd, 'a%20b=x%2Fy%26z&e=');
+}
+
+// 60b. What the reply can look like besides the usual.
+{
+  const api = attendanceCase().api;
+  // Grouping turned off: the rows come back flat.
+  check('reply: flat rows are rows',
+    api.attendanceRowsOf_({ Data: [{ StudentFullName: 'A' }, { StudentFullName: 'B' }] })
+      .map(r => r.StudentFullName), ['A', 'B']);
+  // A group that keeps its rows only under Subgroups is still read.
+  check('reply: rows under Subgroups alone are found',
+    api.attendanceRowsOf_({ Data: [{ Key: 'A', HasSubgroups: true, Member: 'StudentFullName',
+      Items: [], Subgroups: [{ Key: 1, HasSubgroups: false, Member: 'EnrollmentId',
+        Items: [{ StudentFullName: 'A' }], Subgroups: [] }] }] }).length, 1);
+  check('reply: nobody signed in is an empty day, not a fault',
+    api.attendanceRowsOf_({ Data: [], Total: 0, Errors: null }), []);
+
+  let err = '';
+  try { api.attendanceRowsOf_({ Data: null, Errors: { start: { errors: ['bad date'] } } }); }
+  catch (e) { err = e.message; }
+  checkTruthy('reply: Radius\'s own complaint is quoted', err.includes('bad date'));
+  err = '';
+  try { api.attendanceRowsOf_({ rows: [] }); } catch (e) { err = e.message; }
+  checkTruthy('reply: an unknown shape is refused, not read as nobody',
+    err.includes('shape'));
+
+  // No first-and-last-name text: built from the two halves.
+  check('entry: a name from its halves',
+    api.attendanceEntry_({ StudentFirstName: 'Jo', StudentLastName: 'Ng' }).name, 'Jo Ng');
+}
+
+// 60c. A day that runs past one page, and one that never ends.
+{
+  const rows = [1, 2, 3, 4, 5].map(i => attendanceRow('Kid ' + i, i * 10, (i + 2) + ':00 PM'));
+  const t = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.PAGE_SIZE = 2;',
+    replies: [attendanceReplyOf(rows.slice(0, 2)), attendanceReplyOf(rows.slice(2, 4)),
+      attendanceReplyOf(rows.slice(4))] });
+  const found = t.api.loadAttendance_(new t.ctx.Date(2026, 8, 26));
+  check('paging: every page read', found.entries.map(e => e.name),
+    ['Kid 1', 'Kid 2', 'Kid 3', 'Kid 4', 'Kid 5']);
+  check('paging: asked for pages 1, 2, 3', t.posts().map(c => t.form(c)[2]),
+    [['page', '1'], ['page', '2'], ['page', '3']]);
+  check('paging: the token is read once, not once a page',
+    t.h.fetchLog.filter(c => c.params.method === 'get').length, 1);
+  check('paging: complete', found.complete, true);
+
+  // A full last page costs one more request, which comes back empty.
+  const even = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.PAGE_SIZE = 2;',
+    replies: [attendanceReplyOf(rows.slice(0, 2)), attendanceReplyOf(rows.slice(2, 4)),
+      attendanceReplyOf([])] });
+  const evenFound = even.api.loadAttendance_(new even.ctx.Date(2026, 8, 26));
+  check('paging: a full last page, then an empty one', [even.posts().length,
+    evenFound.entries.length, evenFound.complete], [3, 4, true]);
+
+  // A row that turns up on two pages is one sign-in.
+  const overlap = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.PAGE_SIZE = 2;',
+    replies: [attendanceReplyOf(rows.slice(0, 2)), attendanceReplyOf(rows.slice(1, 2))] });
+  check('paging: a repeated row counted once',
+    overlap.api.loadAttendance_(new overlap.ctx.Date(2026, 8, 26)).entries.length, 2);
+
+  // A reply that never comes up short stops at the cap and says so.
+  const endless = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.PAGE_SIZE = 1; ' +
+    'CONFIG.RADIUS.ATTENDANCE.MAX_PAGES = 3;',
+    replies: [attendanceReplyOf([rows[0]]), attendanceReplyOf([rows[1]]),
+      attendanceReplyOf([rows[2]]), attendanceReplyOf([rows[3]])] });
+  const cut = endless.api.loadAttendance_(new endless.ctx.Date(2026, 8, 26));
+  check('paging: stops at the cap', [endless.posts().length, cut.complete], [3, false]);
+
+  // One day was asked for. A row dated another is mentioned, not reported.
+  const stray = attendanceCase({ replies: [attendanceReplyOf([rows[0],
+    attendanceRow('Old Kid', 99, '3:00 PM', '4:00 PM', '9/25/2026')])] });
+  const strayFound = stray.api.loadAttendance_(new stray.ctx.Date(2026, 8, 26));
+  check('another day: kept out', [strayFound.entries.map(e => e.name),
+    strayFound.otherDays.map(e => e.name)], [['Kid 1'], ['Old Kid']]);
+
+  // Unset settings are reported before anything is fetched.
+  const noUrl = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.URL = "";' });
+  let err = '';
+  try { noUrl.api.loadAttendance_(new noUrl.ctx.Date(2026, 8, 26)); } catch (e) { err = e.message; }
+  check('no URL: nothing fetched', noUrl.h.fetchLog.length, 0);
+  checkTruthy('no URL: says what to set', err.includes('ATTENDANCE.URL'));
+  const noCentre = attendanceCase({ config: 'CONFIG.RADIUS.ATTENDANCE.CENTER_ID = " ";' });
+  err = '';
+  try { noCentre.api.loadAttendance_(new noCentre.ctx.Date(2026, 8, 26)); } catch (e) { err = e.message; }
+  check('no centre: nothing fetched', noCentre.h.fetchLog.length, 0);
+  checkTruthy('no centre: says what to set', err.includes('CENTER_ID'));
+}
+
+// 60d. Laying the sign-ins beside the bookings.
+{
+  const t = attendanceCase();
+  const api = t.api;
+  const D = t.ctx.Date;
+  const day = new D(2026, 8, 26);
+  const now = new D();   // noon
+  const entries = api.loadAttendance_(day).entries;
+  const at = (h, m) => new D(2026, 8, 26, h, m || 0);
+  const sessions = [
+    { name: 'Amalie Laz', start: at(4), section: 1 },
+    { name: 'Riley Placeholder', start: at(7), section: 1 },   // Radius adds (IC)
+    { name: 'Test Student 1', start: at(8), section: 1 },
+    { name: 'No Show', start: at(9), section: 1 },
+    { name: 'No Show', start: at(10), section: 1 },           // a double, booked as two
+    { name: 'Later Kid', start: at(15), section: 0 }
+  ];
+  const r = api.compareAttendance_(entries, sessions, day, now);
+
+  check('compare: six students signed in', r.people, 6);
+  check('compare: still signed in, earliest first', r.stillIn.map(e => e.name),
+    ['Amalie Laz', 'Casey Sample', 'Jordan Example']);
+  check('compare: booked, hour gone, never came', r.missing.map(b => b.name), ['No Show']);
+  check('compare: a double is one booking with both hours',
+    r.missing[0].starts.length, 2);
+  check('compare: booked for later today is not a no-show', r.later.map(b => b.name),
+    ['Later Kid']);
+  check('compare: signed in without a booking', r.unbooked.map(p => p.name),
+    ['Test Student2', 'Casey Sample', 'Jordan Example']);
+  check('compare: a bracketed note in Radius still matches the booking',
+    r.unbooked.some(p => p.name === 'Riley Placeholder (IC)'), false);
+  check('compare: the table runs in sign-in order', r.rows.map(x => x.entry.name),
+    ['Amalie Laz', 'Test Student2', 'Riley Placeholder (IC)', 'Test Student 1',
+     'Casey Sample', 'Jordan Example']);
+
+  // The same review the Radius import gives a session.
+  const note = name => r.rows.filter(x => x.entry.name === name)[0];
+  check('compare: an 11 minute session is flagged', note('Test Student 1').odd, true);
+  checkTruthy('compare: and says why',
+    note('Test Student 1').notes.indexOf('left 11 minutes early') !== -1);
+  check('compare: an hour is an hour', [note('Riley Placeholder (IC)').odd,
+    note('Riley Placeholder (IC)').notes], [false, []]);
+  check('compare: two hours is a double', [note('Test Student2').odd,
+    note('Test Student2').notes], [false, ['2 hour session']]);
+  check('compare: somebody still in is not judged', [note('Amalie Laz').odd,
+    note('Amalie Laz').notes], [false, []]);
+
+  // An exact name beats one with its bracket taken off.
+  const e = (name, id, inAt, outAt) => api.attendanceEntry_(attendanceRow(name, id, inAt, outAt));
+  const exact = api.compareAttendance_([e('Sam Lee', 1, '3:00 PM', '4:00 PM'),
+    e('Sam Lee (IC)', 2, '3:05 PM', '4:05 PM')], [{ name: 'Sam Lee', start: at(15) }], day, now);
+  check('exact beats loose', [exact.unbooked.map(p => p.name), exact.contested.length],
+    [['Sam Lee (IC)'], 0]);
+
+  // Two students one booking could belong to: neither is picked.
+  const twins = api.compareAttendance_([e('Pat Doe', 1, '3:00 PM', '4:00 PM'),
+    e('Pat Doe', 2, '3:00 PM', '4:00 PM')], [{ name: 'Pat Doe', start: at(15) }], day, now);
+  check('two of a name: refused', [twins.contested.length, twins.missing.length,
+    twins.unbooked.length], [1, 0, 0]);
+  const loose = api.compareAttendance_([e('Sam Lee (IC)', 1, '3:00 PM', '4:00 PM'),
+    e('Sam Lee (@H)', 2, '3:00 PM', '4:00 PM')], [{ name: 'Sam Lee', start: at(15) }], day, now);
+  check('two loose matches: refused too', loose.contested.length, 1);
+
+  // One student in twice is one student, and one booking covers them.
+  const twice = api.compareAttendance_([e('Jo Ng', 5, '3:00 PM', '3:30 PM'),
+    Object.assign(e('Jo Ng', 5, '3:40 PM', '4:00 PM'), { key: 'second' })],
+    [{ name: 'Jo Ng', start: at(15) }], day, now);
+  check('in twice: one student, booked', [twice.people, twice.unbooked.length,
+    twice.rows.length], [1, 0, 2]);
+
+  // No calendar: the sign-ins are reported, and nobody is called a no-show.
+  const blind = api.compareAttendance_(entries, null, day, now);
+  check('no calendar: nothing said about who did not come',
+    [blind.calendarRead, blind.missing.length, blind.unbooked.length, blind.rows.length],
+    [false, 0, 0, 6]);
+
+  // A day gone by: every booking was due, whatever the clock says now.
+  const past = api.compareAttendance_([], [{ name: 'Late Kid', start: new D(2026, 8, 25, 18) }],
+    new D(2026, 8, 25), now);
+  check('past day: an evening booking is a no-show', [past.today, past.missing.length,
+    past.later.length], [false, 1, 0]);
+  // A day to come: none of them was.
+  const ahead = api.compareAttendance_([], [{ name: 'Early Kid', start: new D(2026, 8, 28, 9) }],
+    new D(2026, 8, 28), now);
+  check('day to come: nobody is a no-show yet', [ahead.missing.length, ahead.later.length],
+    [0, 1]);
+}
+
+// 60e. What the dialog says.
+{
+  const t = attendanceCase();
+  const api = t.api;
+  const D = t.ctx.Date;
+  const day = new D(2026, 8, 26);
+  const entries = api.loadAttendance_(day).entries.concat([
+    api.attendanceEntry_(attendanceRow('<b>Bold</b> Kid', 77, '9:00 AM', '10:00 AM'))]);
+  const r = api.compareAttendance_(entries, [{ name: 'No Show', start: new D(2026, 8, 26, 9), section: 1 }],
+    day, new D());
+  const html = api.attendanceReportHtml_(r, {});
+
+  checkTruthy('dialog: the day', html.includes('9/26/2026 Saturday'));
+  checkTruthy('dialog: still signed in, today', html.includes('Still signed in (3)'));
+  checkTruthy('dialog: the no-show with the hour and the section',
+    html.includes('No Show') && html.includes('booked 9am (In-Center)'));
+  checkTruthy('dialog: somebody still in reads as such', html.includes('<i>still in</i>'));
+  checkTruthy('dialog: a name is text, not markup',
+    html.includes('&lt;b&gt;Bold&lt;/b&gt; Kid') && !html.includes('<b>Bold</b>'));
+  checkTruthy('dialog: says it changed nothing', html.includes('Nothing on the sheet was changed'));
+  checkTruthy('dialog: an odd length is shaded', html.includes('#fef3c7'));
+
+  const past = api.attendanceReportHtml_(api.compareAttendance_(entries, [], new D(2026, 8, 25), new D()), {});
+  checkTruthy('dialog: a past day says never signed out', past.includes('Never signed out (3)'));
+
+  const blind = api.attendanceReportHtml_(api.compareAttendance_(entries, null, day, new D()),
+    { calendarProblem: 'No calendar access.', otherDays: 2, incomplete: true });
+  checkTruthy('dialog: why the calendar is missing', blind.includes('No calendar access.'));
+  checkTruthy('dialog: no no-show count without a calendar', !blind.includes('Booked, no sign-in'));
+  checkTruthy('dialog: rows from another day are mentioned', blind.includes('2 row(s)'));
+  checkTruthy('dialog: a cut-short read is mentioned', blind.includes('MAX_PAGES'));
+
+  const empty = api.attendanceReportHtml_(api.compareAttendance_([], [], day, new D()), {});
+  checkTruthy('dialog: an empty day says so', empty.includes('Nobody signed in on this day'));
+}
+
+// 60f. The menu entries, end to end.
+{
+  const at = (h, m) => new Date(2026, 8, 26, h, m || 0);
+  const t = attendanceCase({ calendars: [{ id: 'bookings', name: 'Bookings', events: [
+    { title: 'Amalie Laz - (IN-CENTER) 1 hour session - Appointy', start: at(4), end: at(5) },
+    { title: 'No Show - (IN-CENTER) 1 hour session - Appointy', start: at(9), end: at(10) }] }] });
+  const writesBefore = t.wop.writeCount;
+  t.api.radiusAttendanceToday();
+  check('today: one dialog', t.h.dialogs.length, 1);
+  check('today: titled', t.h.dialogs[0].title, 'Who signed in and out');
+  checkTruthy('today: the no-show from the calendar', t.h.dialogs[0].html.includes('No Show'));
+  checkTruthy('today: asked Radius for today',
+    t.form(t.posts()[0]).some(p => p[0] === 'start' && p[1] === '9/26/2026 12:00:00 AM'));
+  check('today: nothing written to the sheet', t.wop.writeCount, writesBefore);
+  check('today: no alert', t.h.alerts, []);
+
+  // No cookie: said plainly, and no dialog pretending it found nobody.
+  const noCookie = attendanceCase({ cookie: false });
+  noCookie.api.radiusAttendanceToday();
+  check('no cookie: no dialog', noCookie.h.dialogs.length, 0);
+  checkTruthy('no cookie: says so', String(noCookie.h.alerts[0]).includes('cookie'));
+
+  // An expired session answers with the sign-in page.
+  const expired = attendanceCase({ replies: ['<form action="/Account/Login"></form>'] });
+  expired.api.radiusAttendanceToday();
+  checkTruthy('expired: says so', String(expired.h.alerts[0]).includes('expired'));
+  check('expired: no dialog', expired.h.dialogs.length, 0);
+
+  // The calendar will not answer: the sign-ins are still shown.
+  const blind = attendanceCase({ calendarsThrow: true });
+  blind.api.radiusAttendanceToday();
+  check('no calendar: still a dialog', blind.h.dialogs.length, 1);
+  checkTruthy('no calendar: says why', blind.h.dialogs[0].html.includes('No calendar access.'));
+
+  // Pick a day.
+  const pick = attendanceCase();
+  pick.h.promptAnswer.next = '9/24';
+  pick.api.radiusAttendancePickDay();
+  checkTruthy('pick a day: that day is asked for',
+    pick.form(pick.posts()[0]).some(p => p[0] === 'end' && p[1] === '9/24/2026 12:00:00 AM'));
+
+  const nonsense = attendanceCase();
+  nonsense.h.promptAnswer.next = 'thursday';
+  nonsense.api.radiusAttendancePickDay();
+  check('pick a day: nonsense asks nothing', nonsense.h.fetchLog.length, 0);
+  checkTruthy('pick a day: and says so', String(nonsense.h.alerts[0]).includes('thursday'));
+
+  const blank = attendanceCase();
+  blank.h.promptAnswer.next = '  ';
+  blank.api.radiusAttendancePickDay();
+  check('pick a day: blank asks nothing', blank.h.fetchLog.length, 0);
+  checkTruthy('pick a day: blank says nothing was typed',
+    String(blank.h.alerts[0]).includes('No day typed'));
+
+  const cancel = attendanceCase();
+  cancel.h.promptAnswer.button = 'CANCEL';
+  cancel.api.radiusAttendancePickDay();
+  check('pick a day: cancel does nothing', [cancel.h.fetchLog.length, cancel.h.alerts.length], [0, 0]);
 }
 
 

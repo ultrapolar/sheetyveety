@@ -11,7 +11,12 @@ spreadsheet.
 | `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart for highlighted rows**. |
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
-| `Radius.gs` | **Radius** menu — imports values from radius.mathnasium.com. Unfinished; see below. |
+| `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
+| `Attendance.gs` | **EOD → Who signed in and out**: Radius's attendance report beside the day's bookings. Reads only. |
+| `Day.gs` | **SOD → Jump to today / Start a new day**. |
+| `Schedule.gs` | **SOD → Paste the calendar**. |
+| `Changelog.gs` | The **Changelog** menu, and **Tools → Calendar: set the calendar**. |
+| `Progress.gs` | **Changelog → Draft a progress report**. |
 | `Menu.gs` | Menu construction. |
 | `tests/` | A fake Sheets API so the logic runs outside Google. |
 
@@ -29,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-421 assertions covering the parsing rules and both scripts end to end,
+1131 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -42,7 +47,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 | Menu | Entries |
 | --- | --- |
 | **SOD** | Jump to today · Start a new day · Paste the calendar (today / tomorrow / pick a day) · Pinks Printed |
-| **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating |
+| **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating · Who signed in and out (today / pick a day) |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
 
@@ -100,6 +105,78 @@ itself builds the link, so no id is ever guessed.
 
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
+
+## Who signed in and out
+
+**EOD → Who signed in and out — today** (or **— pick a day**). Asks Radius who
+signed in on the day, lays that beside the day's bookings on the calendar, and
+shows what it found:
+
+- **Still signed in**: an arrival with no departure. For a day gone by the
+  heading reads **Never signed out**, because by then that is what it means.
+- **Booked, no sign-in**: on the calendar, the hour has started, and Radius
+  has no sign-in for them.
+- **Signed in, not booked**: a walk-in or a make-up, or a name the calendar
+  spells differently from Radius.
+- **Booked, later today**: not in yet, and not due yet either. Kept apart so a
+  4pm student is not called a no-show at noon.
+- **Everybody who signed in**: name, in, out, minutes, In-Center or At Home,
+  in sign-in order. The note column is the same timing review the Radius
+  import gives a session (late, left early, a double), and an odd length is
+  shaded.
+
+**It writes nothing.** This is the first use of this part of Radius. A wrong
+report costs a second look; a wrong column costs a day's records. Filling in
+columns L and M from here, in place of the one-page-per-student read the
+Radius import does now, is the natural next step once it has proved itself.
+
+### Where it comes from
+
+Radius → **Student Attendance Report**, Detail View. The page builds its table
+in the browser, from one request:
+
+`POST /StudentAttendanceReport/StudentAttendanceReport_Read`
+
+That is a form post, not JSON, and it is sent **field for field as the page
+sends it**, copied from the browser's own request: start and end the same day
+(`9/26/2026 12:00:00 AM`), `centerId` from `CONFIG.RADIUS.ATTENDANCE.CENTER_ID`,
+the page's own grouping and paging, and the antiforgery token in the body.
+Some of those fields do nothing for us, but a server is only known to answer
+the request it has been seen answering.
+
+What comes back is grouped by student and then by enrollment, and **every
+group carries its rows twice**, under `Items` and again under `Subgroups`.
+Only one is followed; reading both would count everybody twice, and a test pins
+it.
+
+The times used are the ones Radius has already written out
+(`ArrivalTimeString`, `DepartureTimeString`), not the timestamps beside them.
+Those are UTC, and the day itself is stamped at UTC midnight, which in New
+York is the evening before. The text is what the page shows, so the text is
+what counts. A blank departure is somebody still signed in.
+
+The page asks for 100 rows at a time, and so does this. A page that comes back
+full means there may be more, so the next is asked for, until one comes back
+short (`PAGE_SIZE`, with `MAX_PAGES` as a backstop that the report mentions if
+it is ever hit). A row dated another day is left out and mentioned.
+
+### Matching a booking to a sign-in
+
+Names are compared the way the Radius import compares them: case and spacing
+ignored, "Last, First" read as "First Last". Radius also keeps notes inside a
+name ("Jane Doe (IC)") that a booking will not have, so a name with its
+brackets taken off is tried **only when nothing matches exactly**; an exact
+match always wins.
+
+A booking is matched to a **student**, not a sign-in: a double booked as two
+hours is one booking with two times, and a student who signed in twice is one
+student with two rows. When a booking's name fits two students Radius has
+signed in, **neither is chosen**. It is listed as one that could not be told
+apart.
+
+If the calendar cannot be read, the sign-ins are still shown, with a note
+saying why, and **nobody is called a no-show**. Without the bookings there is
+no knowing who was expected.
 
 ## The Deck Changelog
 

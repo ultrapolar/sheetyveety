@@ -301,27 +301,55 @@ function radiusFetch_(url) {
   return html;
 }
 
+/** Posts a JSON body to Radius, the way the Instruction Manager sends one. */
+function radiusPostJson_(url, payload) {
+  const token = radiusVerificationToken_();
+  return radiusPost_(url, 'application/json; charset=utf-8',
+    JSON.stringify(payload), token ? { '__RequestVerificationToken': token } : {});
+}
+
 /**
- * Posts a JSON body to Radius and hands back the decoded reply.
+ * Posts a form to Radius, the way a Kendo grid sends one.
+ *
+ * `fields` is a list of [name, value] pairs rather than an object, because it
+ * is the page's own request copied field for field, and a list keeps it that
+ * way. The antiforgery token goes in the body, which is where the page puts
+ * it. It is passed in rather than fetched here, so a report read a page at a
+ * time costs one extra request, not one extra request a page.
+ */
+function radiusPostForm_(url, fields, token) {
+  const all = token ? [['__RequestVerificationToken', token]].concat(fields) : fields;
+  return radiusPost_(url, 'application/x-www-form-urlencoded; charset=UTF-8',
+    formEncode_(all), {});
+}
+
+function formEncode_(fields) {
+  return fields.map(function (pair) {
+    return encodeURIComponent(pair[0]) + '=' +
+      encodeURIComponent(pair[1] == null ? '' : String(pair[1]));
+  }).join('&');
+}
+
+/**
+ * Posts to Radius as the signed-in user and hands back the decoded reply.
  *
  * Radius answers these with JSON, so anything else coming back -- an HTML page,
  * an empty body -- means the request did not reach the endpoint as a signed-in
  * user, whatever the status code claims.
  */
-function radiusPostJson_(url, payload) {
-  const token = radiusVerificationToken_();
+function radiusPost_(url, contentType, payload, extraHeaders) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
-    contentType: 'application/json; charset=utf-8',
-    payload: JSON.stringify(payload),
+    contentType: contentType,
+    payload: payload,
     headers: Object.assign({
       Cookie: radiusCookie_(),
-      // Radius reaches this endpoint through jQuery's $.ajax, and ASP.NET MVC
+      // Radius reaches these endpoints through jQuery's $.ajax, and ASP.NET MVC
       // decides whether a request is an AJAX call by looking for these. A
       // controller written for the AJAX path can fail outright without them.
       'X-Requested-With': 'XMLHttpRequest',
       Accept: 'application/json, text/javascript, */*; q=0.01'
-    }, token ? { '__RequestVerificationToken': token } : {}),
+    }, extraHeaders),
     muteHttpExceptions: true,
     followRedirects: true
   });

@@ -182,6 +182,21 @@ const CONFIG = {
     // token that ASP.NET expects alongside its cookie on a POST.
     TOKEN_PAGE_URL: 'https://radius.mathnasium.com/AnswerKey/AnswerkeyCheckin',
 
+    // Who signed in and out on a day: the Student Attendance Report's data
+    // source. The report page fills its table from here in the browser, the
+    // same way the Instruction Manager does, so this is the address that
+    // answers with the rows.
+    ATTENDANCE: {
+      URL: 'https://radius.mathnasium.com/StudentAttendanceReport/StudentAttendanceReport_Read',
+      // The report's Center box, as the page sends it: one centre.
+      CENTER_ID: '2514',
+      // The page asks for 100 rows at a time. A busy day can run past that, so
+      // the report is read a page at a time until one comes back short. The
+      // cap is a backstop against a reply that never does.
+      PAGE_SIZE: 100,
+      MAX_PAGES: 20
+    },
+
     // Which values to pull out of each DWP page, and which Daily WOP column
     // each one lands in. Add entries here as more values are identified --
     // every one needs a matching extractor in RADIUS_EXTRACTORS.

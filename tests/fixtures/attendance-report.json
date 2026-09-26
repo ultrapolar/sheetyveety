@@ -1,0 +1,941 @@
+{
+    "Data": [
+        {
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 0
+                }
+            },
+            "HasSubgroups": true,
+            "SubgroupCount": 0,
+            "Member": "StudentFullName",
+            "ItemCount": 1,
+            "Subgroups": [
+                {
+                    "Key": 8000001,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Amalie Laz",
+                            "ArrivalTime": "\/Date(1790412480000)\/",
+                            "ArrivalTimeString": "4:48 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 7,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000001,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000001,
+                            "StudentFirstName": "Amalie",
+                            "StudentLastName": "Laz",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Items": [
+                {
+                    "Key": 8000001,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Amalie Laz",
+                            "ArrivalTime": "\/Date(1790412480000)\/",
+                            "ArrivalTimeString": "4:48 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 7,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000001,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000001,
+                            "StudentFirstName": "Amalie",
+                            "StudentLastName": "Laz",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Key": "Amalie Laz"
+        },
+        {
+            "Key": "Casey Sample",
+            "ItemCount": 1,
+            "HasSubgroups": true,
+            "Member": "StudentFullName",
+            "Items": [
+                {
+                    "Key": 8000002,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Casey Sample",
+                            "ArrivalTime": "\/Date(1790427253693)\/",
+                            "ArrivalTimeString": "8:54 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 5,
+                            "SessionsPerMonth": 15,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000002,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": null,
+                            "VirtualCenterId": null,
+                            "LeadId": 7000002,
+                            "AccountId": "00000000-0000-0000-0000-000000000002",
+                            "StudentId": 9000002,
+                            "StudentFirstName": "Casey",
+                            "StudentLastName": "Sample",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 0
+                }
+            },
+            "SubgroupCount": 0,
+            "Subgroups": [
+                {
+                    "Key": 8000002,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Casey Sample",
+                            "ArrivalTime": "\/Date(1790427253693)\/",
+                            "ArrivalTimeString": "8:54 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 5,
+                            "SessionsPerMonth": 15,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000002,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": null,
+                            "VirtualCenterId": null,
+                            "LeadId": 7000002,
+                            "AccountId": "00000000-0000-0000-0000-000000000002",
+                            "StudentId": 9000002,
+                            "StudentFirstName": "Casey",
+                            "StudentLastName": "Sample",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ]
+        },
+        {
+            "Key": "Jordan Example",
+            "ItemCount": 1,
+            "HasSubgroups": true,
+            "Member": "StudentFullName",
+            "Items": [
+                {
+                    "Key": 8000003,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Jordan Example",
+                            "ArrivalTime": "\/Date(1790427455967)\/",
+                            "ArrivalTimeString": "8:57 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 3,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000003,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000003,
+                            "AccountId": "00000000-0000-0000-0000-000000000003",
+                            "StudentId": 9000003,
+                            "StudentFirstName": "Jordan",
+                            "StudentLastName": "Example",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 0
+                }
+            },
+            "SubgroupCount": 0,
+            "Subgroups": [
+                {
+                    "Key": 8000003,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Jordan Example",
+                            "ArrivalTime": "\/Date(1790427455967)\/",
+                            "ArrivalTimeString": "8:57 AM",
+                            "DepartureTime": null,
+                            "DepartureTimeString": "",
+                            "DurationInMinutes": 0,
+                            "DurationInHours": 0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 3,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000003,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000003,
+                            "AccountId": "00000000-0000-0000-0000-000000000003",
+                            "StudentId": 9000003,
+                            "StudentFirstName": "Jordan",
+                            "StudentLastName": "Example",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ]
+        },
+        {
+            "Key": "Riley Placeholder (IC)",
+            "ItemCount": 1,
+            "HasSubgroups": true,
+            "Member": "StudentFullName",
+            "Items": [
+                {
+                    "Key": 8000004,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Riley Placeholder (IC)",
+                            "ArrivalTime": "\/Date(1790423280000)\/",
+                            "ArrivalTimeString": "7:48 AM",
+                            "DepartureTime": "\/Date(1790426880000)\/",
+                            "DepartureTimeString": "8:48 AM",
+                            "DurationInMinutes": 60,
+                            "DurationInHours": 1.0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 12,
+                            "SessionsPerMonth": 15,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 1.0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000004,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000004,
+                            "AccountId": "00000000-0000-0000-0000-000000000004",
+                            "StudentId": 9000004,
+                            "StudentFirstName": "Riley",
+                            "StudentLastName": "Placeholder (IC)",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 1.0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 1.0
+                }
+            },
+            "SubgroupCount": 0,
+            "Subgroups": [
+                {
+                    "Key": 8000004,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Riley Placeholder (IC)",
+                            "ArrivalTime": "\/Date(1790423280000)\/",
+                            "ArrivalTimeString": "7:48 AM",
+                            "DepartureTime": "\/Date(1790426880000)\/",
+                            "DepartureTimeString": "8:48 AM",
+                            "DurationInMinutes": 60,
+                            "DurationInHours": 1.0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 12,
+                            "SessionsPerMonth": 15,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 1.0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000004,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000004,
+                            "AccountId": "00000000-0000-0000-0000-000000000004",
+                            "StudentId": 9000004,
+                            "StudentFirstName": "Riley",
+                            "StudentLastName": "Placeholder (IC)",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 1.0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ]
+        },
+        {
+            "Key": "Test Student 1",
+            "ItemCount": 1,
+            "HasSubgroups": true,
+            "Member": "StudentFullName",
+            "Items": [
+                {
+                    "Key": 8000005,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Test Student 1",
+                            "ArrivalTime": "\/Date(1790426280000)\/",
+                            "ArrivalTimeString": "8:38 AM",
+                            "DepartureTime": "\/Date(1790426940000)\/",
+                            "DepartureTimeString": "8:49 AM",
+                            "DurationInMinutes": 11,
+                            "DurationInHours": 0.18,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 9,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0.18,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000005,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000005,
+                            "StudentFirstName": "Test",
+                            "StudentLastName": "Student 1",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0.18
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 0.18
+                }
+            },
+            "SubgroupCount": 0,
+            "Subgroups": [
+                {
+                    "Key": 8000005,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Test Student 1",
+                            "ArrivalTime": "\/Date(1790426280000)\/",
+                            "ArrivalTimeString": "8:38 AM",
+                            "DepartureTime": "\/Date(1790426940000)\/",
+                            "DepartureTimeString": "8:49 AM",
+                            "DurationInMinutes": 11,
+                            "DurationInHours": 0.18,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 9,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 0.18,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000005,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000005,
+                            "StudentFirstName": "Test",
+                            "StudentLastName": "Student 1",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 0.18
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ]
+        },
+        {
+            "Key": "Test Student2",
+            "ItemCount": 1,
+            "HasSubgroups": true,
+            "Member": "StudentFullName",
+            "Items": [
+                {
+                    "Key": 8000006,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Test Student2",
+                            "ArrivalTime": "\/Date(1790419680000)\/",
+                            "ArrivalTimeString": "6:48 AM",
+                            "DepartureTime": "\/Date(1790426880000)\/",
+                            "DepartureTimeString": "8:48 AM",
+                            "DurationInMinutes": 120,
+                            "DurationInHours": 2.0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 9,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 2.0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000006,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000006,
+                            "StudentFirstName": "Test",
+                            "StudentLastName": "Student2",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 2.0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ],
+            "Aggregates": {
+                "DurationInHours": {
+                    "Sum": 2.0
+                }
+            },
+            "SubgroupCount": 0,
+            "Subgroups": [
+                {
+                    "Key": 8000006,
+                    "ItemCount": 1,
+                    "HasSubgroups": false,
+                    "Member": "EnrollmentId",
+                    "Items": [
+                        {
+                            "AttendanceDate": "\/Date(1790380800000)\/",
+                            "StudentFullName": "Test Student2",
+                            "ArrivalTime": "\/Date(1790419680000)\/",
+                            "ArrivalTimeString": "6:48 AM",
+                            "DepartureTime": "\/Date(1790426880000)\/",
+                            "DepartureTimeString": "8:48 AM",
+                            "DurationInMinutes": 120,
+                            "DurationInHours": 2.0,
+                            "TotalVisits": 1,
+                            "SessionsRemaining": 9,
+                            "SessionsPerMonth": 10,
+                            "MonthlyEnrollmentAdjustmentsCount": 0,
+                            "HoursPerMonth": 2.0,
+                            "AttendanceDateString": "9/26/2026",
+                            "EnrollmentId": 8000006,
+                            "Delivery": "In-Center",
+                            "DeliveryText": "In-Center",
+                            "VirtualCenterName": "Hillsborough@Home",
+                            "VirtualCenterId": 972,
+                            "LeadId": 7000001,
+                            "AccountId": "00000000-0000-0000-0000-000000000001",
+                            "StudentId": 9000006,
+                            "StudentFirstName": "Test",
+                            "StudentLastName": "Student2",
+                            "AvgSessionPerMonth": null,
+                            "AvgHoursPerMonth": null,
+                            "MembershipTypeSettingsId": null,
+                            "MembershipTypeName": "Monthly Sessions",
+                            "AttendanceCount": null,
+                            "TotalSessions": null,
+                            "AttendanceCountString": null,
+                            "TotalSessionsString": null,
+                            "CenterId": 0,
+                            "EnrollmentStart": null,
+                            "EnrollmentEnd": null,
+                            "EnrollmentTerm": null,
+                            "CenterName": "Hillsborough",
+                            "CenterNameDisplay": "Hillsborough",
+                            "SessionAverage": null,
+                            "Enrollment_Type": null,
+                            "January": null,
+                            "February": null,
+                            "March": null,
+                            "April": null,
+                            "May": null,
+                            "June": null,
+                            "July": null,
+                            "August": null,
+                            "September": null,
+                            "October": null,
+                            "November": null,
+                            "December": null
+                        }
+                    ],
+                    "Aggregates": {
+                        "DurationInHours": {
+                            "Sum": 2.0
+                        }
+                    },
+                    "SubgroupCount": 0,
+                    "Subgroups": []
+                }
+            ]
+        }
+    ],
+    "Total": 6,
+    "AggregateResults": [
+        {
+            "Value": 3.18,
+            "Member": "DurationInHours",
+            "FormattedValue": 3.18,
+            "ItemCount": 0,
+            "Caption": null,
+            "FunctionName": "Sum_DurationInHours",
+            "AggregateMethodName": "Sum"
+        }
+    ],
+    "Errors": null
+}
