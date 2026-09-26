@@ -5818,7 +5818,7 @@ const ATTENDANCE_WOP = wopRows([
   const writesBefore = t.wop.writeCount;
   t.api.radiusAttendanceToday();
   check('today: one dialog', t.h.dialogs.length, 1);
-  check('today: titled', t.h.dialogs[0].title, 'Who signed in and out');
+  check('today: titled', t.h.dialogs[0].title, 'Auto Attendance');
   checkTruthy('today: the no-show from column A', t.h.dialogs[0].html.includes('Kai Absent'));
   checkTruthy('today: the extra from Radius', t.h.dialogs[0].html.includes('Jordan Example'));
   checkTruthy('today: asked Radius for today',

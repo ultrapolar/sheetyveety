@@ -541,7 +541,7 @@ function showAttendanceFor_(date) {
   });
   SpreadsheetApp.getUi().showModalDialog(
     HtmlService.createHtmlOutput(html).setWidth(680).setHeight(620),
-    'Who signed in and out');
+    'Auto Attendance');
 }
 
 /** Menu entry: today, so far. */
@@ -552,7 +552,7 @@ function radiusAttendanceToday() {
 /** Menu entry: the same, for a day you type in. */
 function radiusAttendancePickDay() {
   const ui = SpreadsheetApp.getUi();
-  const response = ui.prompt('Who signed in and out: pick a day',
+  const response = ui.prompt('Auto Attendance: pick a day',
     'Which day? Type it as 9/18/2026, or 9/18 for this year.',
     ui.ButtonSet.OK_CANCEL);
   if (response.getSelectedButton() !== ui.Button.OK) return;

@@ -12,7 +12,7 @@ spreadsheet.
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
-| `Attendance.gs` | **EOD → Who signed in and out**: Radius's attendance report checked against column A. Reads only. |
+| `Attendance.gs` | **EOD → Auto Attendance**: Radius's attendance report checked against column A. Reads only. |
 | `Day.gs` | **SOD → Jump to today / Start a new day**. |
 | `Schedule.gs` | **SOD → Paste the calendar**. |
 | `Changelog.gs` | The **Changelog** menu, and **Tools → Calendar: set the calendar**. |
@@ -47,7 +47,7 @@ Grouped by what an entry does to the sheet, not by which feature it came from.
 | Menu | Entries |
 | --- | --- |
 | **SOD** | Jump to today · Start a new day · Paste the calendar (today / tomorrow / pick a day) · Pinks Printed |
-| **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating · Who signed in and out (today / pick a day) |
+| **EOD** | Colored Sheets Batch Process · Bring in Radius sessions · Bring in seating · Auto Attendance (today / pick a day) |
 | **Changelog** | 1. Create · 2. Grade · 3. Learning plan · Draft a progress report |
 | **Tools** | Check setup · Radius: sign in · Radius: test connection |
 
@@ -106,9 +106,9 @@ itself builds the link, so no id is ever guessed.
 The DWP page is server-rendered ASP.NET — values appear as real `value="..."`
 attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 
-## Who signed in and out
+## Auto Attendance: who signed in and out
 
-**EOD → Who signed in and out — today** (or **— pick a day**). Asks Radius who
+**EOD → Auto Attendance — today** (or **— pick a day**). Asks Radius who
 signed in on the day, checks that against **column A** of the day's block on
 the Daily WOP, and shows what it found. Flagged in red:
 

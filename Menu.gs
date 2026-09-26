@@ -34,8 +34,8 @@ function onOpen() {
     .addItem('Bring in Radius sessions (highlighted rows)', 'importRadiusData')
     .addItem('Bring in seating (highlighted rows)', 'importSeatingChart')
     .addSeparator()
-    .addItem('Who signed in and out — today', 'radiusAttendanceToday')
-    .addItem('Who signed in and out — pick a day', 'radiusAttendancePickDay')
+    .addItem('Auto Attendance — today', 'radiusAttendanceToday')
+    .addItem('Auto Attendance — pick a day', 'radiusAttendancePickDay')
     .addToUi();
 
   ui.createMenu('Changelog')
