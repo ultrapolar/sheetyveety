@@ -5884,12 +5884,16 @@ const ATTENDANCE_WOP = wopRows([
     install(ctx, [], null);
     return loadScript(ctx);
   })();
+  // The centre's own examples first.
   check('changelog task: the ones that count',
-    ['PC_4', 'CU_6', 'PCU_3', '2nd PC_4', '3rd CU_6', '21st CU_2', 'pcu_1', ' 2nd  PC_1']
-      .map(api0.isChangelogTask_), [true, true, true, true, true, true, true, true]);
+    ['CU1', 'PCU6', '2nd PC2', 'PC A1A', '3rd CU12', '21st PCU3', 'pcu6', ' 2nd  PC2',
+     'CU 6', 'PC_4']
+      .map(api0.isChangelogTask_), [true, true, true, true, true, true, true, true, true, true]);
   check('changelog task: the ones that do not',
-    ['PCX_1', 'Practice CU_2', 'CU 6', 'CU6', 'T1', '', '2nd', 'Worksheet PC_1']
-      .map(api0.isChangelogTask_), [false, false, false, false, false, false, false, false]);
+    ['PCX1', 'Practice CU1', 'CUBE', 'PCs review', 'CU', 'PC ', 'T1', '', '2nd',
+     'Worksheet PC2', 'PCUX 4']
+      .map(api0.isChangelogTask_),
+    [false, false, false, false, false, false, false, false, false, false, false]);
 
   const deckRow = (name, current, loaded) => {
     const row = new Array(13).fill('');
@@ -5938,8 +5942,8 @@ const ATTENDANCE_WOP = wopRows([
 
   const at = (iso, hour) => new Date(iso + 'T' + (hour || '16') + ':00:00');
   const day = {
-    deck: [deckRow('Jane Doe', 'PC_4', 'T2'), deckRow('Bo Peep', 'T1', 'T2'),
-      deckRow('Cass Jones', '2nd CU_6', 'T9'), deckRow('Dee Dee', 'T1', 'PCU_3, T3')],
+    deck: [deckRow('Jane Doe', 'PC2', 'T2'), deckRow('Bo Peep', 'T1', 'T2'),
+      deckRow('Cass Jones', '2nd PC A1A', 'T9'), deckRow('Dee Dee', 'T1', 'PCU6, T3')],
     wop: [wopRow('4:00 Jane Doe', 'Y'), wopRow('4:00 Bo Peep', 'Y'),
       wopRow('5:00 Cass Jones', 'Y'), wopRow('5:00 Dee Dee', 'YY')],
     events: [{ title: 'Jane Doe', start: at('2026-08-24') },     // a Monday
@@ -5958,7 +5962,7 @@ const ATTENDANCE_WOP = wopRows([
   check('changelog from EOD: nothing else in the new rows',
     r.changelog.values.slice(6, 9).map(row => row.slice(4).join('')), ['', '', '']);
   checkTruthy('changelog from EOD: the second of two Y\'s counts too',
-    r.said().includes('finished &quot;PCU_3&quot;') || r.said().includes('finished "PCU_3"'));
+    r.said().includes('finished &quot;PCU6&quot;') || r.said().includes('finished "PCU6"'));
   checkTruthy('changelog from EOD: no session found is said',
     r.said().includes('Cass Jones') && r.said().includes('question marks'));
   checkTruthy('changelog from EOD: counted in the summary',
@@ -5976,7 +5980,7 @@ const ATTENDANCE_WOP = wopRows([
     [none.changelog.values.length, none.changelog.writeCount], [8, 0]);
 
   // No changelog tab: the Deck List is still done, and the student is named.
-  const missing = eodDay({ deck: [deckRow('Jane Doe', 'PC_4', 'T2')],
+  const missing = eodDay({ deck: [deckRow('Jane Doe', 'PC2', 'T2')],
     wop: [wopRow('Jane Doe', 'Y')], changelog: false });
   check('no changelog tab: the Deck List still advanced', missing.deck.values[1][1], 'T2');
   checkTruthy('no changelog tab: said, naming the student and the task',
@@ -5984,7 +5988,7 @@ const ATTENDANCE_WOP = wopRows([
 
   // The Deck List could not be saved: no changelog row for a task it does
   // not record as finished.
-  const broken = eodDay({ deck: [deckRow('Jane Doe', 'PC_4', 'T2')],
+  const broken = eodDay({ deck: [deckRow('Jane Doe', 'PC2', 'T2')],
     wop: [wopRow('Jane Doe', 'Y')], breakDeck: true });
   check('deck not saved: nothing added to the changelog', broken.changelog.values.length, 8);
   checkTruthy('deck not saved: and said', broken.said().includes('could not be saved'));

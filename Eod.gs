@@ -10,7 +10,7 @@
  * it goes green and is skipped by later runs. When it cannot finish, the
  * letters left in the cell are exactly what a re-run should do.
  *
- * A finished task that is a checkup or a progress check (CU_, PC_, PCU_ --
+ * A finished task that is a checkup or a progress check (CU1, PCU6, 2nd PC2, PC A1A --
  * CONFIG.CHANGELOG.FROM_EOD) also gets the student a new row on the Deck
  * Changelog, dated today with their next session filled in. Only once the
  * Deck List has been saved, so the changelog never records a task the Deck

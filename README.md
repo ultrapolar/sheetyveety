@@ -363,9 +363,11 @@ When **EOD → Colored Sheets Batch Process** finishes a Deck List task that is 
 checkup or progress check, it gives the student a changelog row of their own —
 no need to type the name in and run Create.
 
-A task counts when it **starts with** `CU_`, `PC_` or `PCU_`, with or without
-a count in front: `PC_4`, `2nd PC_4` and `3rd CU_6` all count. `PCX_1`,
-`CU 6` and `Practice CU_2` do not. Case is ignored. The list is
+A task counts when it **starts with** `CU`, `PC` or `PCU` **followed by a
+number or a space**, with or without a count in front: `CU1`, `PCU6`,
+`2nd PC2` and `PC A1A` all count. A letter straight after the prefix is some
+other word, so `PCX1`, `CUBE` and `PCs review` do not, and neither does
+`Practice CU1` — the prefix has to come first. Case is ignored. The list is
 `CONFIG.CHANGELOG.FROM_EOD.TASK_PREFIXES`.
 
 Each one gets a **new row inserted directly under row 6** (so it lands as row

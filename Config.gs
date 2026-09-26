@@ -472,11 +472,12 @@ const CONFIG = {
 
 
     // The EOD batch adds a row here by itself when a student finishes one of
-    // these. A task counts when it starts with one of the prefixes, with or
-    // without a count in front of it: "PC_4", "2nd PC_4" and "3rd CU_6" all
-    // do, "PCX_1" and "Practice CU_2" do not. Case is ignored.
+    // these. A task counts when it starts with one of the prefixes followed by
+    // a number or a space, with or without a count in front of it: "CU1",
+    // "PCU6", "2nd PC2" and "PC A1A" all do; "PCX1", "Practice CU1" and
+    // "CUBE" do not. Case is ignored.
     FROM_EOD: {
-      TASK_PREFIXES: ['CU_', 'PC_', 'PCU_'],
+      TASK_PREFIXES: ['CU', 'PC', 'PCU'],
       // New rows go in directly under this one, so the newest is always here
       // (the rows above it stay where they are).
       INSERT_AFTER_ROW: 6

@@ -286,13 +286,18 @@ function nextSessionCells_(calendars, calendarProblem, name, today) {
  * True for a finished Deck List task that belongs on the changelog: one that
  * starts with a CONFIG.CHANGELOG.FROM_EOD prefix, after an optional count
  * like "2nd" or "3rd".
+ *
+ * The prefix has to end there: a number or a space must come next ("CU1",
+ * "PC A1A"). A letter straight after it is some other word -- "PCX1",
+ * "CUBE" -- and a bare "CU" with nothing after it names no checkup.
  */
 function isChangelogTask_(task) {
   const text = String(task == null ? '' : task).trim().toUpperCase()
     .replace(/^\d+\s*(?:ST|ND|RD|TH)\s+/, '');
   return (CONFIG.CHANGELOG.FROM_EOD.TASK_PREFIXES || []).some(function (prefix) {
     const mark = String(prefix).trim().toUpperCase();
-    return mark !== '' && text.indexOf(mark) === 0;
+    if (!mark || text.indexOf(mark) !== 0) return false;
+    return /^(?:\d|[\s_-]+[A-Z0-9])/.test(text.slice(mark.length));
   });
 }
 
