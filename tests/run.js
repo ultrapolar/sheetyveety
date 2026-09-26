@@ -5337,9 +5337,10 @@ const DECK_FILLER_ROWS = [
 //      Every group in it carries its rows twice, under Items and again under
 //      Subgroups, which is the thing most worth getting wrong.
 const ATTENDANCE_REPLY = fs.readFileSync('tests/fixtures/attendance-report.json', 'utf8');
-const ATTENDANCE_TOKEN_PAGE = '<html><body><form action="/Account/LogOff" method="post">' +
+const ATTENDANCE_TOKEN_PAGE = '<html><head><title>Student Attendance Report</title></head>' +
+  '<body><form action="/Account/LogOff" method="post">' +
   '<input name="__RequestVerificationToken" type="hidden" value="tok-att" />' +
-  '</form></body></html>';
+  '</form><div id="gridStudentAttendance"></div></body></html>';
 
 function attendanceCase(opts) {
   const o = opts || {};
@@ -5413,8 +5414,8 @@ function attendanceRow(name, id, inAt, outAt, day) {
   check('attendance request: the session cookie', call.params.headers.Cookie, 'session=abc');
   check('attendance request: an AJAX call, like the page\'s',
     call.params.headers['X-Requested-With'], 'XMLHttpRequest');
-  checkTruthy('attendance request: the token rides in the body, not a header',
-    call.params.headers.__RequestVerificationToken === undefined);
+  check('attendance request: the token also rides in a header, as the roster\'s does',
+    call.params.headers.__RequestVerificationToken, 'tok-att');
 
   // The reply holds every row twice, once under Items and once under
   // Subgroups. Six students signed in, so six it is -- not twelve.
@@ -6167,6 +6168,31 @@ const ATTENDANCE_WOP = wopRows([
     String(locked.h.alerts[0]).includes('StudentAttendanceMonthlyReport') &&
     String(locked.h.alerts[0]).includes('can open that page'));
   check('report page refused: the rows were not asked for', locked.posts().length, 0);
+}
+
+
+// 60k. When the rows are refused, what the visit to the report page found.
+{
+  const refusedAfter = page => {
+    const t = attendanceCase();
+    t.h.fetchHandler.value = (url, params) => params.method === 'get'
+      ? { code: 200, body: page } : { code: 403, body: '' };
+    t.api.radiusAttendanceToday();
+    return String(t.h.alerts[0]);
+  };
+  const onReport = refusedAfter(ATTENDANCE_TOKEN_PAGE);
+  checkTruthy('refused after the real page: says it opened, with its title',
+    onReport.includes('the report page opened ("Student Attendance Report")'));
+  checkTruthy('refused after the real page: says the token went both ways',
+    onReport.includes('found and sent in the body and a header'));
+  checkTruthy('refused after the real page: does not blame access',
+    !onReport.includes('may not use'));
+
+  // An account that may not use the report is sent somewhere it may.
+  const elsewhere = refusedAfter('<html><head><title>Dashboard</title></head><body>' +
+    '<input name="__RequestVerificationToken" type="hidden" value="t" /></body></html>');
+  checkTruthy('redirected: says where Radius showed instead',
+    elsewhere.includes('Radius showed "Dashboard" instead') && elsewhere.includes('may not use'));
 }
 
 // ==========================================================================

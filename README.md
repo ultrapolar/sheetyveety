@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1204 assertions covering the parsing rules and every menu entry end to end,
+1208 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -214,7 +214,9 @@ Before asking, the script **opens the report page itself**
 as the browser has by the time you press Search, and keeps two things from it:
 
 - **the antiforgery token** rendered into it, which the rows request carries
-  in its body — ASP.NET refuses a form post without the token made for it;
+  in its body *and* in a `__RequestVerificationToken` header, the way the
+  roster request (which Radius accepts) sends it — ASP.NET refuses a form post
+  without the token made for it;
 - **any cookie the page sets**, laid over the stored ones for the rows
   request. A fresh token comes with a fresh cookie it is paired with, and the
   token is refused without it. A browser keeps both without being asked.
@@ -226,7 +228,10 @@ with the same cookie means the sign-in is fine, and the message says so rather
 than sending you off to redo it. If the report page had no token on it, the
 message says that too, since it is the usual reason. If the report page itself
 is refused, the account whose cookie is stored cannot open it, and that is
-what the message says.
+what the message says. A refused request also ends by saying what the visit
+found: whether the page came back as the attendance report or as something
+else (and its title), whether a token was found, and how many cookies the page
+set.
 
 What comes back is grouped by student and then by enrollment, and **every
 group carries its rows twice**, under `Items` and again under `Subgroups`.

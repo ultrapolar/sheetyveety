@@ -153,11 +153,7 @@ function loadAttendance_(date) {
     try {
       reply = radiusPostForm_(url, attendanceRequestFields_(date, page), session);
     } catch (err) {
-      // A form turned away for want of its token says so in no words at all,
-      // so say it here.
-      throw new Error(err.message + (session.token ? '' : '\n\nThe report page ' +
-        'had no antiforgery token on it to send, which is the usual reason a ' +
-        'request like this is refused.'));
+      throw new Error(err.message + attendanceSessionNote_(session));
     }
     const rows = attendanceRowsOf_(reply);
 
@@ -179,6 +175,30 @@ function loadAttendance_(date) {
     }
   }
   return { entries: entries, otherDays: otherDays, complete: false };
+}
+
+/**
+ * What the visit to the report page found, for the end of an error. Radius
+ * refuses the rows request without a word, so the only clues are these.
+ */
+function attendanceSessionNote_(session) {
+  const onReport = /StudentAttendanceReport|gridStudentAttendance/i.test(session.html || '');
+  const lines = [];
+  if (!onReport) {
+    lines.push('The report page did not come back as the attendance report' +
+      (session.title ? ' -- Radius showed "' + session.title + '" instead' : '') +
+      ', which usually means the signed-in account may not use that report. ' +
+      'Check the account whose cookie is stored can open it in a browser.');
+  }
+  if (!session.token) {
+    lines.push('The report page had no antiforgery token on it to send, which ' +
+      'is the usual reason a request like this is refused.');
+  }
+  lines.push('What was sent: the report page ' + (onReport ? 'opened' : 'did not open') +
+    (session.title ? ' ("' + session.title + '")' : '') + '; token ' +
+    (session.token ? 'found and sent in the body and a header' : 'not found') +
+    '; ' + session.setCookies + ' cookie(s) set by the page and passed on.');
+  return '\n\n' + lines.join('\n\n');
 }
 
 /**

@@ -361,8 +361,13 @@ function radiusFormSession_(pageUrl) {
     set = set.concat(headers[name]);
   });
 
+  // What the page turned out to be. An account that may not use a page can
+  // be redirected somewhere it may, which arrives as a perfectly good 200 --
+  // so the title is kept, to be able to say where the visit actually ended.
+  const title = html.match(/<title>([\s\S]*?)<\/title>/i);
   return { token: value ? value[1] : '', cookie: mergeCookies_(stored, set),
-    referer: pageUrl };
+    referer: pageUrl, html: html, title: title ? htmlCellText_(title[1]) : '',
+    setCookies: set.length };
 }
 
 /**
@@ -395,7 +400,8 @@ function mergeCookies_(stored, setCookies) {
  * `fields` is a list of [name, value] pairs rather than an object, because it
  * is the page's own request copied field for field, and a list keeps it that
  * way. `session` is what radiusFormSession_ read off the form's page: the
- * token goes in the body, which is where the page puts it, the cookies are
+ * token goes in the body, which is where the page puts it, and in a header
+ * the way Radius's other AJAX calls send it; the cookies are
  * the ones it was made for, and the page is named as where the post came
  * from. It is passed in rather than fetched here, so a report read a page at
  * a time costs one extra request, not one extra request a page.
@@ -403,9 +409,14 @@ function mergeCookies_(stored, setCookies) {
 function radiusPostForm_(url, fields, session) {
   const all = session.token
     ? [['__RequestVerificationToken', session.token]].concat(fields) : fields;
+  const headers = {};
+  if (session.referer) headers.Referer = session.referer;
+  // In a header as well as the body. Radius's own AJAX calls carry it as a
+  // header -- the roster request is accepted that way -- and a server that
+  // checks one place ignores the other, so both costs nothing.
+  if (session.token) headers.__RequestVerificationToken = session.token;
   return radiusPost_(url, 'application/x-www-form-urlencoded; charset=UTF-8',
-    formEncode_(all), session.referer ? { Referer: session.referer } : {},
-    session.cookie);
+    formEncode_(all), headers, session.cookie);
 }
 
 function formEncode_(fields) {
