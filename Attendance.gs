@@ -153,6 +153,13 @@ function loadAttendance_(date) {
     try {
       reply = radiusPostForm_(url, attendanceRequestFields_(date, page), session);
     } catch (err) {
+      // Sent somewhere else when it asked for the report page, then refused:
+      // that is the account, and it is the one thing worth reading first. The
+      // request is still tried rather than skipped, so a page that merely
+      // looks different one day does not stop a request that would work.
+      if (!attendancePageWasReport_(session)) {
+        throw new Error(attendanceAccountProblem_(session));
+      }
       throw new Error(err.message + attendanceSessionNote_(session));
     }
     const rows = attendanceRowsOf_(reply);
@@ -181,8 +188,30 @@ function loadAttendance_(date) {
  * What the visit to the report page found, for the end of an error. Radius
  * refuses the rows request without a word, so the only clues are these.
  */
+function attendancePageWasReport_(session) {
+  return /StudentAttendanceReport|gridStudentAttendance/i.test(session.html || '');
+}
+
+/**
+ * The account behind the stored cookie may not use the report. Radius does
+ * not say so -- it sends the visit to the account's own home page instead and
+ * then refuses the rows without a word -- so this says it, and what to do.
+ */
+function attendanceAccountProblem_(session) {
+  const page = String(CONFIG.RADIUS.ATTENDANCE.PAGE_URL || '').trim();
+  return 'The Radius account whose sign-in this spreadsheet has stored cannot ' +
+    'use the Student Attendance Report. Asked for it, Radius sent it to ' +
+    (session.title ? '"' + session.title + '"' : 'another page') + ' instead, ' +
+    'and then refused the report itself (HTTP 403).\n\n' +
+    'Its other pages still work, which is why the Radius import is fine.\n\n' +
+    'To fix it: in a browser, sign in to Radius as an account that can open ' +
+    page + ' (it should show the report, not ' +
+    (session.title ? 'the ' + session.title : 'another page') + '), then run ' +
+    'Tools → Radius: sign in again from that browser. Nothing was changed.';
+}
+
 function attendanceSessionNote_(session) {
-  const onReport = /StudentAttendanceReport|gridStudentAttendance/i.test(session.html || '');
+  const onReport = attendancePageWasReport_(session);
   const lines = [];
   if (!onReport) {
     lines.push('The report page did not come back as the attendance report' +

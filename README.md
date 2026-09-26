@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1208 assertions covering the parsing rules and every menu entry end to end,
+1212 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -228,7 +228,17 @@ with the same cookie means the sign-in is fine, and the message says so rather
 than sending you off to redo it. If the report page had no token on it, the
 message says that too, since it is the usual reason. If the report page itself
 is refused, the account whose cookie is stored cannot open it, and that is
-what the message says. A refused request also ends by saying what the visit
+what the message says.
+
+**Sent to the Instruction Manager instead.** An account that may not use
+the report is not refused outright when it asks for the page: Radius quietly
+sends it to that account's own home page (for an instructor login, the
+Instruction Manager) and then refuses the report request with a bare 403. The
+message says exactly that, first: the stored sign-in belongs to an account
+without the report, and the fix is to sign in to Radius in a browser as an
+account that *can* open the report page, then run **Tools → Radius: sign in**
+again from that browser. The Radius import keeps working throughout, since
+that account's other pages are fine. A refused request also ends by saying what the visit
 found: whether the page came back as the attendance report or as something
 else (and its title), whether a token was found, and how many cookies the page
 set.

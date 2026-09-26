@@ -6151,7 +6151,7 @@ const ATTENDANCE_WOP = wopRows([
   // No token on the page, then refused: the likely reason is given.
   const bare = attendanceCase();
   bare.h.fetchHandler.value = (url, params) => params.method === 'get'
-    ? { code: 200, body: '<html><body>no form here</body></html>' }
+    ? { code: 200, body: '<html><body><div id="gridStudentAttendance"></div></body></html>' }
     : { code: 403, body: '' };
   bare.api.radiusAttendanceToday();
   checkTruthy('no token: the refusal says the page had none',
@@ -6191,8 +6191,16 @@ const ATTENDANCE_WOP = wopRows([
   // An account that may not use the report is sent somewhere it may.
   const elsewhere = refusedAfter('<html><head><title>Dashboard</title></head><body>' +
     '<input name="__RequestVerificationToken" type="hidden" value="t" /></body></html>');
-  checkTruthy('redirected: says where Radius showed instead',
-    elsewhere.includes('Radius showed "Dashboard" instead') && elsewhere.includes('may not use'));
+  checkTruthy('redirected: leads with the account, not the status',
+    elsewhere.indexOf('The Radius account whose sign-in this spreadsheet has stored ' +
+      'cannot use the Student Attendance Report') === 0);
+  checkTruthy('redirected: says where Radius sent it',
+    elsewhere.includes('sent it to "Dashboard" instead'));
+  checkTruthy('redirected: says how to fix it',
+    elsewhere.includes('StudentAttendanceMonthlyReport') &&
+    elsewhere.includes('Tools → Radius: sign in again'));
+  checkTruthy('redirected: no generic cookie advice on top',
+    !elsewhere.includes('Radius gave no reason'));
 }
 
 // ==========================================================================
