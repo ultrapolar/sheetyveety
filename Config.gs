@@ -177,6 +177,10 @@ const CONFIG = {
     // source. The report page fills its table from here in the browser, the
     // same way the Instruction Manager does, so this is the address that
     // answers with the rows.
+    //
+    // The page itself, for checking a day by hand (Detail View, the same date
+    // as start and end): https://radius.mathnasium.com/StudentAttendanceMonthlyReport
+    // The script never opens it -- it asks the address below directly.
     ATTENDANCE: {
       URL: 'https://radius.mathnasium.com/StudentAttendanceReport/StudentAttendanceReport_Read',
       // The report's Center box, as the page sends it: one centre.
