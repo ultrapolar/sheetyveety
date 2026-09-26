@@ -14,9 +14,10 @@
  *   - anybody in column A Radius has no sign-in for
  *   - anybody still signed in (or, for a day gone by, never signed out)
  *
- * It reads and it reports. Nothing is written to the sheet: this is the first
- * outing for this part of Radius, and a report that is wrong costs a second
- * look, where a column filled in wrong costs a day's records.
+ * Column A is coloured for the day's students: green for one sign-in and one
+ * sign-out an hour or a double apart, orange for anything worth a look. A row
+ * struck through or marked not coming is left as it is. Nothing else on the
+ * sheet is touched.
  */
 
 /**
@@ -200,6 +201,8 @@ function attendanceNameKeys_(name) {
  * compare against, and then nobody is reported as missing. A student listed
  * twice (a double, written as two hours) is one student with two rows.
  */
+const STRUCK_THROUGH_ = 'struck through';
+
 function wopStudentsFor_(sheet, date) {
   const headers = dayHeaderRows_(sheet);
   let mine = -1;
@@ -222,6 +225,10 @@ function wopStudentsFor_(sheet, date) {
 
   const values = sheet.getRange(first, 1, last - first + 1,
     Math.max(sheet.getLastColumn(), CONFIG.WOP_COL.NAME)).getValues();
+  // A name struck through is somebody who is not coming, said with a line
+  // instead of a word.
+  const lines = sheet.getRange(first, CONFIG.WOP_COL.NAME, last - first + 1, 1)
+    .getFontLines();
   const column = CONFIG.WOP_COL.NAME - 1;
   const headings = (CONFIG.SCHEDULE.SECTIONS || []).map(function (section) {
     return section.header && section.header[0]
@@ -259,10 +266,11 @@ function wopStudentsFor_(sheet, date) {
     student.rows.push(first + i);
     if (time) student.times.push(time);
     student.minutes.push(time ? slotMinutes_(time) : null);
-    student.notComing = student.notComing || rowSaysNotComing_(row);
+    student.notComing = student.notComing ||
+      (lines[i][0] === 'line-through' ? STRUCK_THROUGH_ : rowSaysNotComing_(row));
   });
 
-  return { students: students, problem: '',
+  return { students: students, problem: '', first: first, last: last,
     note: sectioned ? '' : 'No @HOME or In-Center heading under ' +
       dayHeaderText_(date) + ', so every row starting with a time was taken ' +
       'as a student.' };
@@ -335,10 +343,12 @@ function compareAttendance_(entries, students, date, now) {
 
     if (found.length === 1) {
       found[0].student = student;
+      student.person = found[0];
       if (student.notComing) report.cameAnyway.push({ student: student, person: found[0] });
       return;
     }
     if (found.length > 1) {
+      student.contested = true;
       found.forEach(function (p) { p.contested = true; });
       report.contested.push({ student: student, people: found });
       return;
@@ -353,6 +363,7 @@ function compareAttendance_(entries, students, date, now) {
     const due = !ahead && (!today || student.minutes.some(function (m) {
       return m === null || m <= nowMinutes;
     }));
+    student.missing = due;
     (due ? report.missing : report.later).push(student);
   });
 
@@ -369,7 +380,63 @@ function compareAttendance_(entries, students, date, now) {
       sheetRows: person.student ? person.student.rows : [],
       twice: person.entries.length > 1 };
   });
+  report.paint = attendancePaint_(students || []);
   return report;
+}
+
+/**
+ * The colour each of column A's rows is given, as [{ row, color }].
+ *
+ * Green only when there is nothing to look at: one sign-in, a sign-out, and a
+ * length the timing review calls an hour or a double. Everything else a
+ * student in column A can be -- in twice, still in, an odd length, never in,
+ * a name that fits two -- is orange. A student not due yet has not had the
+ * chance to be either and is left alone, as is anybody struck through or
+ * marked not coming.
+ */
+function attendancePaint_(students) {
+  const settings = CONFIG.RADIUS.ATTENDANCE;
+  const paint = [];
+  students.forEach(function (student) {
+    if (student.notComing) return;
+    let color = null;
+    if (student.person) {
+      const entries = student.person.entries;
+      const review = entries.length === 1
+        ? reviewSessionTiming_(entries[0].signedIn, entries[0].signedOut) : null;
+      // No sign-out leaves the length unknown, and that is not clean either.
+      const clean = review && !review.shade && review.durationMinutes !== null;
+      color = clean ? settings.OK_COLOR : settings.ISSUE_COLOR;
+    } else if (student.contested || student.missing) {
+      color = settings.ISSUE_COLOR;
+    }
+    if (!color) return;
+    student.rows.forEach(function (row) { paint.push({ row: row, color: color }); });
+  });
+  return paint;
+}
+
+/**
+ * Colours column A. Only the rows being coloured change: the rest of the
+ * block's backgrounds are read and written back as they were.
+ *
+ * Returns the number of rows coloured, or -1 when another run held the sheet.
+ */
+function paintAttendance_(sheet, list, paint) {
+  if (!paint.length) return 0;
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) return -1;
+  try {
+    const range = sheet.getRange(list.first, CONFIG.WOP_COL.NAME,
+      list.last - list.first + 1, 1);
+    const backgrounds = range.getBackgrounds();
+    paint.forEach(function (p) { backgrounds[p.row - list.first][0] = p.color; });
+    range.setBackgrounds(backgrounds);
+    SpreadsheetApp.flush();
+    return paint.length;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** "row 42 (9:00)" for a column A student. */
@@ -383,6 +450,21 @@ function attendanceTimesText_(person) {
   return person.entries.map(function (e) {
     return (e.signedIn || '?') + ' – ' + (e.signedOut || 'still in');
   }).join(', ');
+}
+
+/** What happened to column A, for the foot of the dialog. */
+function attendancePaintText_(painted, paint) {
+  if (painted === -1) {
+    return 'Another run was using the sheet, so column A was not coloured. ' +
+      'Run this again in a moment.';
+  }
+  if (!painted) return 'Nothing on the sheet was changed.';
+  const green = paint.filter(function (p) {
+    return p.color === CONFIG.RADIUS.ATTENDANCE.OK_COLOR;
+  }).length;
+  return 'Column A coloured: ' + green + ' row(s) green, ' + (paint.length - green) +
+    ' orange. Rows struck through or marked not coming, and anybody not due ' +
+    'yet, were left as they were. Nothing else on the sheet was changed.';
 }
 
 /** The report, as the page the dialog shows. */
@@ -411,6 +493,10 @@ function attendanceReportHtml_(report, extra) {
   const stillInTitle = report.today ? 'Still signed in' : 'Never signed out';
   const laterTitle = report.today ? 'In column A, later today' : 'In column A, not due yet';
 
+  const saysNotComing = function (s) {
+    return s.notComing === STRUCK_THROUGH_ ? ' is struck through'
+      : ' says "' + s.notComing + '"';
+  };
   const twice = report.twice.map(function (p) {
     return { name: p.name, text: p.entries.length + ' sign-ins: ' + attendanceTimesText_(p) };
   });
@@ -421,8 +507,9 @@ function attendanceReportHtml_(report, extra) {
     return { name: s.name, text: attendanceRowText_(s) };
   });
   const cameAnyway = report.cameAnyway.map(function (c) {
-    return { name: c.student.name, text: attendanceRowText_(c.student) + ' says "' +
-      c.student.notComing + '", but Radius has them in: ' + attendanceTimesText_(c.person) };
+    return { name: c.student.name, text: attendanceRowText_(c.student) +
+      saysNotComing(c.student) + ', but Radius has them in: ' +
+      attendanceTimesText_(c.person) };
   });
   const contested = report.contested.map(function (c) {
     return { name: c.student.name, text: attendanceRowText_(c.student) + ' fits ' +
@@ -436,7 +523,7 @@ function attendanceReportHtml_(report, extra) {
     return { name: s.name, text: attendanceRowText_(s) };
   });
   const notComing = report.notComing.map(function (s) {
-    return { name: s.name, text: attendanceRowText_(s) + ' says "' + s.notComing + '"' };
+    return { name: s.name, text: attendanceRowText_(s) + saysNotComing(s) };
   });
 
   let warnings = '';
@@ -510,15 +597,17 @@ function attendanceReportHtml_(report, extra) {
     section('Marked not coming', '#334155', notComing) +
     '<div style="font-weight: bold; margin: 14px 0 0;">Everybody who signed in</div>' +
     table +
-    '<p style="color: #64748b; font-size: 12px; margin-top: 12px;">Read only. ' +
-    'Nothing on the sheet was changed.</p></div>';
+    '<p style="color: #64748b; font-size: 12px; margin-top: 12px;">' +
+    h(attendancePaintText_(notes.painted, report.paint)) + '</p></div>';
 }
 
 /** Reads the day, lays it beside column A and shows what it found. */
 function showAttendanceFor_(date) {
   let list;
+  let wop = null;
   try {
-    list = wopStudentsFor_(wopSheet_(), date);
+    wop = wopSheet_();
+    list = wopStudentsFor_(wop, date);
   } catch (err) {
     list = { students: [], problem: err.message };
   }
@@ -533,7 +622,9 @@ function showAttendanceFor_(date) {
 
   const report = compareAttendance_(found.entries,
     list.problem ? null : list.students, date, new Date());
+  const painted = list.problem ? 0 : paintAttendance_(wop, list, report.paint);
   const html = attendanceReportHtml_(report, {
+    painted: painted,
     listProblem: list.problem,
     listNote: list.note,
     otherDays: found.otherDays.length,

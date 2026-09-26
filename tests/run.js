@@ -61,7 +61,8 @@ function loadScript(context) {
   progressAssessmentUrl_,
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
-  attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_
+  attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_,
+  isDoneColor_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -5815,7 +5816,6 @@ const ATTENDANCE_WOP = wopRows([
 // 60g. The menu entries, end to end.
 {
   const t = attendanceCase({ wop: ATTENDANCE_WOP });
-  const writesBefore = t.wop.writeCount;
   t.api.radiusAttendanceToday();
   check('today: one dialog', t.h.dialogs.length, 1);
   check('today: titled', t.h.dialogs[0].title, 'Auto Attendance');
@@ -5823,7 +5823,10 @@ const ATTENDANCE_WOP = wopRows([
   checkTruthy('today: the extra from Radius', t.h.dialogs[0].html.includes('Jordan Example'));
   checkTruthy('today: asked Radius for today',
     t.form(t.posts()[0]).some(p => p[0] === 'start' && p[1] === '9/26/2026 12:00:00 AM'));
-  check('today: nothing written to the sheet', t.wop.writeCount, writesBefore);
+  check('today: only column A\'s backgrounds change',
+    [t.wop.values.map(r => r.join('|')), t.wop.backgrounds.map(r => r.slice(1).join('|'))],
+    [wopRows([]).concat(ATTENDANCE_WOP).map(r => r.join('|')),
+     ATTENDANCE_WOP.map(r => r.slice(1).map(() => '#ffffff').join('|'))]);
   check('today: no alert', t.h.alerts, []);
 
   // No cookie: said plainly, and no dialog pretending it found nobody.
@@ -5846,6 +5849,7 @@ const ATTENDANCE_WOP = wopRows([
   checkTruthy('no row for today: says why', blind.h.dialogs[0].html.includes('no row for 9/26/2026'));
   checkTruthy('no row for today: yesterday is not compared',
     !blind.h.dialogs[0].html.includes('Jane Doe'));
+  check('no row for today: nothing coloured', blind.wop.writeCount, 0);
 
   // Pick a day: that day's block, and that day from Radius.
   const pick = attendanceCase({ wop: ATTENDANCE_WOP });
@@ -5875,6 +5879,86 @@ const ATTENDANCE_WOP = wopRows([
   check('pick a day: cancel does nothing', [cancel.h.fetchLog.length, cancel.h.alerts.length], [0, 0]);
 }
 
+
+
+// 60h. Column A coloured: green when all is well, orange when it is not.
+{
+  const colours = t => t.wop.backgrounds.map(r => r[0]);
+  const G = '#00ff00', O = '#ff9900', W = '#ffffff';
+
+  const t = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  t.wop.backgrounds[3][0] = '#abcdef';   // the instructor's row, coloured by hand
+  t.wop.backgrounds[13][0] = G;          // Called Off, green from Pinks Printed
+  t.api.radiusAttendanceToday();
+  check('colour: each row of the day', colours(t), [
+    W,        // 1  yesterday's heading
+    W,        // 2  yesterday's student: another day, not touched
+    W,        // 3  today's heading
+    '#abcdef',// 4  an instructor, left as it was
+    W,        // 5  staff meeting
+    W,        // 6  @HOME
+    O,        // 7  Kai Absent: due, never signed in
+    W,        // 8  In-Center
+    O,        // 9  Amalie Laz: never signed out
+    G,        // 10 Riley Placeholder: in and out, an hour
+    O,        // 11 Test Student 1: eleven minutes
+    G, G,     // 12, 13 Test Student2: a double, both rows
+    G,        // 14 Called Off: LM cancel, left as it was
+    W,        // 15 Later Kid: not due yet
+    W,        // 16 Casey Sample: marked no show, left (the dialog flags it)
+    W,        // 17
+    W, W      // 18, 19 Monday
+  ]);
+  checkTruthy('colour: the dialog says what it did',
+    t.h.dialogs[0].html.includes('Column A coloured: 3 row(s) green, 3 orange'));
+  check('colour: flushed before the dialog', t.h.flushes.length > 0, true);
+
+  // Signed in twice is orange, however clean each visit was.
+  const twice = attendanceCase({ wop: wopRows(['9/26/2026 Saturday', 'In-Center', '3:00 Jo Ng']),
+    replies: [attendanceReplyOf([attendanceRow('Jo Ng', 5, '3:00 PM', '4:00 PM'),
+      Object.assign(attendanceRow('Jo Ng', 5, '4:10 PM', '5:10 PM'), { ArrivalTime: '/Date(9)/' })])] });
+  twice.api.radiusAttendanceToday();
+  check('colour: two clean sign-ins is still orange', colours(twice)[2], O);
+
+  // A name that fits two signed-in students is orange: somebody has to look.
+  const twins = attendanceCase({ wop: wopRows(['9/26/2026 Saturday', 'In-Center', '3:00 Pat Doe']),
+    replies: [attendanceReplyOf([attendanceRow('Pat Doe', 1, '3:00 PM', '4:00 PM'),
+      attendanceRow('Pat Doe', 2, '3:00 PM', '4:00 PM')])] });
+  twins.api.radiusAttendanceToday();
+  check('colour: an ambiguous name is orange', colours(twins)[2], O);
+
+  // Struck through: left alone, listed as not coming, and flagged if they
+  // signed in anyway.
+  const struck = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  struck.wop.fontLines[10][0] = 'line-through';   // Test Student 1
+  struck.wop.fontLines[6][0] = 'line-through';    // Kai Absent
+  struck.api.radiusAttendanceToday();
+  check('struck: left as they were', [colours(struck)[10], colours(struck)[6]], [W, W]);
+  const html = struck.h.dialogs[0].html;
+  checkTruthy('struck: listed as not coming', html.includes('row 7 (9:00) is struck through'));
+  checkTruthy('struck: but signed in is flagged',
+    html.includes('row 11 (8:00) is struck through, but Radius has them in'));
+  check('struck: the rest coloured as before', colours(struck)[9], G);
+
+  // Another run holding the sheet: nothing coloured, and the dialog says so.
+  const busy = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  vm.runInContext('LockService.getDocumentLock().tryLock()', busy.ctx);
+  busy.api.radiusAttendanceToday();
+  check('busy: nothing coloured', busy.wop.writeCount, 0);
+  checkTruthy('busy: says so', busy.h.dialogs[0].html.includes('column A was not coloured'));
+
+  // A day to come: nobody is due, so nothing is coloured.
+  const ahead = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  ahead.h.promptAnswer.next = '9/28';
+  ahead.api.radiusAttendancePickDay();
+  check('day to come: nothing coloured', ahead.wop.writeCount, 0);
+  checkTruthy('day to come: says nothing changed',
+    ahead.h.dialogs[0].html.includes('Nothing on the sheet was changed'));
+
+  // Both colours read as done to Pinks Printed, so a second run over the
+  // day does not move anybody's tasks again.
+  check('colour: both count as done', [t.api.isDoneColor_(G), t.api.isDoneColor_(O)], [true, true]);
+}
 
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);

@@ -7,8 +7,9 @@
  * Tools is everything else -- the checks and the Radius sign-in, set up once
  * and then forgotten, and none of which writes a student's data.
  *
- * Nothing here runs on its own. Every entry is a deliberate click, and the two
- * that fetch from elsewhere show you what they found before writing any of it.
+ * Nothing here runs on its own. Every entry is a deliberate click. The Radius
+ * and seating imports show you what they found before writing any of it; Auto
+ * Attendance colours column A and nothing else, then says what it coloured.
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();

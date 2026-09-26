@@ -12,7 +12,7 @@ spreadsheet.
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
-| `Attendance.gs` | **EOD → Auto Attendance**: Radius's attendance report checked against column A. Reads only. |
+| `Attendance.gs` | **EOD → Auto Attendance**: Radius's attendance report checked against column A, which it colours green or orange. |
 | `Day.gs` | **SOD → Jump to today / Start a new day**. |
 | `Schedule.gs` | **SOD → Paste the calendar**. |
 | `Changelog.gs` | The **Changelog** menu, and **Tools → Calendar: set the calendar**. |
@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1153 assertions covering the parsing rules and every menu entry end to end,
+1168 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -120,7 +120,8 @@ the Daily WOP, and shows what it found. Flagged in red:
 - **In column A, no sign-in.** In the day's block, the hour on their row has
   started, and Radius has no sign-in for them. The row number is given.
 - **Marked not coming, but signed in.** The row says `LM cancel` or `no show`
-  (`CONFIG.RADIUS.SKIP_MARKERS`) and Radius has them in anyway.
+  (`CONFIG.RADIUS.SKIP_MARKERS`), or the name is struck through, and Radius
+  has them in anyway.
 
 And for information:
 
@@ -128,15 +129,43 @@ And for information:
   heading reads **Never signed out**.
 - **In column A, later today**: not in yet, and not due yet either, so a 4:00
   student is not called a no-show at noon.
-- **Marked not coming**: rows that already say so, left out of the no-shows.
+- **Marked not coming**: rows that already say so, or are struck through, left
+  out of the no-shows.
 - **Everybody who signed in**: name, the column A row(s) they are on, in, out,
   minutes, In-Center or At Home, in sign-in order. A flagged sign-in is shaded
   red; an odd session length (the Radius import's timing review) amber.
 
-**It writes nothing.** This is the first use of this part of Radius. A wrong
-report costs a second look; a wrong column costs a day's records. Filling in
-columns L and M from here, in place of the one-page-per-student read the
-Radius import does now, is the natural next step once it has proved itself.
+### Column A is coloured
+
+Every student in the day's block gets a background in **column A**:
+
+| Colour | When |
+| --- | --- |
+| **Green** `#00ff00` | Signed in **once**, signed out, and the length is an hour or a double (the Radius import's timing bands, `CONFIG.RADIUS.TIMING`). |
+| **Orange** `#ff9900` | Anything else: signed in more than once, never signed out, an odd length, no sign-in at all, or a name that fits two signed-in students. |
+| *left as it is* | Struck through, or marked `LM cancel` / `no show` anywhere on the row. Not due yet (a row whose hour has not started). Instructors, headings and anything else that is not a student. |
+
+A double written on two rows colours both rows the same. Only column A's
+background changes — every other row, and every other column, is left as it
+was — and the dialog says how many went green and orange.
+
+Struck-through names are read as "not coming", the same as `LM cancel`: they
+are left out of the no-shows and listed apart, and if Radius has them signed
+in anyway that is flagged.
+
+**Both colours count as done to SOD → Pinks Printed** (`CONFIG.DONE_COLORS`).
+Pinks Printed marks its finished rows with the same green, and Auto Attendance
+runs at the end of that day, often over it. Were the orange not on that list,
+a row that went orange would stop reading as done, and a second Pinks Printed
+over the day would move its tasks again.
+
+If the column A colours come from **conditional formatting** that sets a
+background, the rule wins over any colour a script sets and the green or
+orange will not show. A rule that only colours the text is not a problem.
+
+Columns L and M are not filled in from here yet. That is the natural next step
+once this has proved itself, in place of the one-page-per-student read the
+Radius import does now.
 
 ### Which rows of column A are students
 

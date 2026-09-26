@@ -59,6 +59,7 @@ class FakeRange {
   getFontColors() { return this._slice(this.sheet.fontColors); }
   setFontColors(block) { this._write(this.sheet.fontColors, block, 'setFontColors'); return this; }
   getFontWeights() { return this._slice(this.sheet.fontWeights); }
+  getFontLines() { return this._slice(this.sheet.fontLines); }
   setFontWeights(block) { this._write(this.sheet.fontWeights, block, 'setFontWeights'); return this; }
   setBackgrounds(block) { this._write(this.sheet.backgrounds, block, 'setBackgrounds'); return this; }
   getFormulas() {
@@ -141,6 +142,7 @@ class FakeSheet {
     this.backgrounds = backgrounds || makeGrid(values.length, values[0].length, '#ffffff');
     this.fontColors = makeGrid(values.length, values[0].length, '#000000');
     this.fontWeights = makeGrid(values.length, values[0].length, 'normal');
+    this.fontLines = makeGrid(values.length, values[0].length, 'none');
     this.activeRange = null;
     this.writeCount = 0;
     // What a formula works out to. A test overrides it to stand in for the
@@ -170,6 +172,7 @@ class FakeSheet {
       this.backgrounds.splice(row + n, 0, new Array(width).fill('#ffffff'));
       this.fontColors.splice(row + n, 0, new Array(width).fill('#000000'));
       this.fontWeights.splice(row + n, 0, new Array(width).fill('normal'));
+      this.fontLines.splice(row + n, 0, new Array(width).fill('none'));
     }
     return this;
   }

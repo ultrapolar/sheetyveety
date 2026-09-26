@@ -36,7 +36,12 @@ const CONFIG = {
 
   // Backgrounds that count as "already done". Add any other greens your team
   // uses here; anything not listed will be treated as unprocessed and re-run.
-  DONE_COLORS: ['#00ff00'],
+  //
+  // The orange is Auto Attendance's "look at this" mark in column A. It only
+  // goes on at the end of a day whose pinks were printed that morning, often
+  // over the green that says so -- and a row that stopped reading as done
+  // would have its tasks moved again by a second Pinks Printed.
+  DONE_COLORS: ['#00ff00', '#ff9900'],
 
   // The row that opens each day on the Daily WOP: "9/17/2026 Thursday".
   DAY_HEADER: {
@@ -194,7 +199,15 @@ const CONFIG = {
       // the report is read a page at a time until one comes back short. The
       // cap is a backstop against a reply that never does.
       PAGE_SIZE: 100,
-      MAX_PAGES: 20
+      MAX_PAGES: 20,
+
+      // What column A is coloured, for the day's students. Green: signed in
+      // and out once, for an hour or a double. Orange: anything else worth a
+      // look -- more than one sign-in, no sign-out, an odd length, no sign-in
+      // at all, or a name that fits two students. Both are listed in
+      // DONE_COLORS above, so Pinks Printed leaves the rows alone afterwards.
+      OK_COLOR: '#00ff00',
+      ISSUE_COLOR: '#ff9900'
     },
 
     // Which values to pull out of each DWP page, and which Daily WOP column
