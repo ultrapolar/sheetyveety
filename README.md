@@ -9,7 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart for highlighted rows**. |
-| `Eod.gs` | **EOD → Colored Sheets Batch Process** |
+| `Eod.gs` | **EOD → Colored Sheets Batch Process**, which also adds finished checkups and progress checks to the Deck Changelog. |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
 | `Attendance.gs` | **EOD → Auto Attendance**: Radius's attendance report checked against column A, which it colours green or orange. |
@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1155 assertions covering the parsing rules and every menu entry end to end,
+1171 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -356,6 +356,42 @@ already has a date in O is left alone.
 for R by name. Nothing the script can read says which book went into a plan or
 what should come next; those are judgements, and inventing a plausible one is
 worse than leaving the cell blank.
+
+### Rows the EOD batch adds by itself
+
+When **EOD → Colored Sheets Batch Process** finishes a Deck List task that is a
+checkup or progress check, it gives the student a changelog row of their own —
+no need to type the name in and run Create.
+
+A task counts when it **starts with** `CU_`, `PC_` or `PCU_`, with or without
+a count in front: `PC_4`, `2nd PC_4` and `3rd CU_6` all count. `PCX_1`,
+`CU 6` and `Practice CU_2` do not. Case is ignored. The list is
+`CONFIG.CHANGELOG.FROM_EOD.TASK_PREFIXES`.
+
+Each one gets a **new row inserted directly under row 6** (so it lands as row
+7 and everything below moves down; `INSERT_AFTER_ROW`), with:
+
+| Column | What goes in |
+| --- | --- |
+| A | Today, `m/dd` — the same as Create writes |
+| B | The student's name, as column A of the Daily WOP has it |
+| C, D | Their next session, found exactly the way **Create** finds it — `?` and `?/?` when the calendar does not say |
+
+Nothing else in the row is touched; the assessment, grade and the rest are
+still yours and the later stages'.
+
+- A student who finishes two in one run (`YY`) gets two rows.
+- Several students in one run go in together, in the order they were
+  processed.
+- **Only once the Deck List has been saved.** If saving it fails, nothing is
+  added — a changelog row for a task the Deck List never recorded as finished
+  would be the one record that disagrees with the rest.
+- A re-run does not add anyone twice: finished rows are green and skipped.
+- No Deck Changelog tab: the Deck List is still updated, and the report names
+  each student it could not add.
+
+The EOD summary counts the rows added, and says for each one what was
+finished and when they are next in.
 
 ### Who fills what
 

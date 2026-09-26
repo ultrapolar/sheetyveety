@@ -256,6 +256,109 @@ function changelogSelection_(sheet, rows) {
   });
 }
 
+/**
+ * The day-of-week and m/dd cells for a student's next session after `today`,
+ * and what to say about them. Shared by stage one and by the EOD batch, so a
+ * row reads the same whichever of them made it.
+ *
+ * Returns { day, date, next, why }. next is null when the calendar does not
+ * say, and then the cells are the question marks and why says what happened.
+ */
+function nextSessionCells_(calendars, calendarProblem, name, today) {
+  let next = null;
+  let why = calendarProblem;
+  if (!why) {
+    try {
+      next = nextSessionFor_(calendars, name, today);
+    } catch (err) {
+      why = 'the calendar could not be read: ' + err.message;
+    }
+  }
+  return {
+    day: next ? dayLabel_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DAY,
+    date: next ? monthDay_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DATE,
+    next: next,
+    why: why
+  };
+}
+
+/**
+ * True for a finished Deck List task that belongs on the changelog: one that
+ * starts with a CONFIG.CHANGELOG.FROM_EOD prefix, after an optional count
+ * like "2nd" or "3rd".
+ */
+function isChangelogTask_(task) {
+  const text = String(task == null ? '' : task).trim().toUpperCase()
+    .replace(/^\d+\s*(?:ST|ND|RD|TH)\s+/, '');
+  return (CONFIG.CHANGELOG.FROM_EOD.TASK_PREFIXES || []).some(function (prefix) {
+    const mark = String(prefix).trim().toUpperCase();
+    return mark !== '' && text.indexOf(mark) === 0;
+  });
+}
+
+/**
+ * Adds a row to the changelog for each { name, task }, the way stage one
+ * would have: today's date, the student, and when they are next in.
+ *
+ * All the rows go in together, directly under
+ * CONFIG.CHANGELOG.FROM_EOD.INSERT_AFTER_ROW, in the order given. Takes no
+ * lock -- the EOD batch calling it already holds the document's -- and
+ * reports into the caller's log. Returns the number of rows added.
+ */
+function addChangelogEntries_(entries, log) {
+  if (!entries.length) return 0;
+  const col = CONFIG.CHANGELOG.COL;
+  let sheet;
+  try {
+    sheet = changelogSheet_();
+  } catch (err) {
+    entries.forEach(function (entry) {
+      log.error(entry.name, 'finished "' + entry.task + '" but could not be ' +
+        'added to the changelog: ' + err.message);
+    });
+    return 0;
+  }
+
+  const today = new Date();
+  let calendars = [];
+  let calendarProblem = '';
+  try {
+    calendars = sessionCalendars_();
+  } catch (err) {
+    calendarProblem = err.message;
+  }
+
+  const width = Math.max(sheet.getMaxColumns(), col.NEXT_DATE);
+  const rows = entries.map(function (entry) {
+    const cells = nextSessionCells_(calendars, calendarProblem, entry.name, today);
+    const row = new Array(width).fill('');
+    row[col.DATE_DONE - 1] = monthDay_(today);
+    row[col.STUDENT - 1] = entry.name;
+    row[col.DAY_OF_WEEK - 1] = cells.day;
+    row[col.NEXT_DATE - 1] = cells.date;
+
+    if (cells.next) {
+      log.ok(entry.name, 'finished "' + entry.task + '" — added to the ' +
+        'changelog, next in ' + cells.day + ' ' + cells.date + '.');
+    } else {
+      log.warn(entry.name, 'finished "' + entry.task + '" and was added to the ' +
+        'changelog, but ' + (cells.why || 'is not on the calendar in the next ' +
+        (CONFIG.CHANGELOG.LOOKAHEAD_DAYS || 28) + ' days') + ', so columns ' +
+        columnLetter_(col.DAY_OF_WEEK) + ' and ' + columnLetter_(col.NEXT_DATE) +
+        ' are question marks.');
+    }
+    return row;
+  });
+
+  const after = Math.min(CONFIG.CHANGELOG.FROM_EOD.INSERT_AFTER_ROW, sheet.getMaxRows());
+  sheet.insertRowsAfter(after, rows.length);
+  // Only the four columns it knows are written; the rest of each new row is
+  // left for the later stages and for whatever formatting the sheet gives it.
+  sheet.getRange(after + 1, 1, rows.length, col.NEXT_DATE)
+    .setValues(rows.map(function (row) { return row.slice(0, col.NEXT_DATE); }));
+  return rows.length;
+}
+
 // ------------------------------------------------------------------
 // Stage one: creation
 // ------------------------------------------------------------------
@@ -302,21 +405,13 @@ function changelogCreate() {
         return;
       }
 
-      let next = null;
-      let why = calendarProblem;
-      if (!why) {
-        try {
-          next = nextSessionFor_(calendars, name, today);
-        } catch (err) {
-          why = 'the calendar could not be read: ' + err.message;
-        }
-      }
+      const cells = nextSessionCells_(calendars, calendarProblem, name, today);
+      const next = cells.next;
+      const why = cells.why;
 
       sheet.getRange(row.sheetRow, col.DATE_DONE).setValue(monthDay_(today));
-      sheet.getRange(row.sheetRow, col.DAY_OF_WEEK)
-        .setValue(next ? dayLabel_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DAY);
-      sheet.getRange(row.sheetRow, col.NEXT_DATE)
-        .setValue(next ? monthDay_(next.date) : CONFIG.CHANGELOG.UNKNOWN_DATE);
+      sheet.getRange(row.sheetRow, col.DAY_OF_WEEK).setValue(cells.day);
+      sheet.getRange(row.sheetRow, col.NEXT_DATE).setValue(cells.date);
       stats.created++;
 
       if (next) {

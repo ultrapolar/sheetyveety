@@ -9,6 +9,12 @@
  * Column K always describes the work still outstanding. When a row finishes,
  * it goes green and is skipped by later runs. When it cannot finish, the
  * letters left in the cell are exactly what a re-run should do.
+ *
+ * A finished task that is a checkup or a progress check (CU_, PC_, PCU_ --
+ * CONFIG.CHANGELOG.FROM_EOD) also gets the student a new row on the Deck
+ * Changelog, dated today with their next session filled in. Only once the
+ * Deck List has been saved, so the changelog never records a task the Deck
+ * List does not.
  */
 function processWopToDeck() {
   const lock = LockService.getDocumentLock();
@@ -34,7 +40,9 @@ function processWopToDeck() {
   }
 
   const log = ActionLog_();
-  const stats = { students: 0, yActions: 0, pActions: 0, skipped: 0 };
+  const stats = { students: 0, yActions: 0, pActions: 0, skipped: 0, changelog: 0 };
+  const forChangelog = [];
+  let saved = false;
   const dateStr = Utilities.formatDate(
     new Date(), sheets.ss.getSpreadsheetTimeZone(), CONFIG.DATE_FORMAT);
 
@@ -144,6 +152,9 @@ function processWopToDeck() {
         stats.yActions += completed.length;
         log.ok(name, 'finished "' + completed.join(', ') + '" and is now on "' +
           (current || 'nothing — Column E was empty') + '".');
+        completed.forEach(function (task) {
+          if (isChangelogTask_(task)) forChangelog.push({ name: name, task: task });
+        });
       }
 
       if (status.pCount > 0) {
@@ -178,8 +189,24 @@ function processWopToDeck() {
     try {
       if (deck) deck.flush();
       if (statusCol) statusCol.flush();
+      saved = true;
     } catch (flushErr) {
       log.error('Save failed', 'Could not write changes back: ' + flushErr.message);
+    }
+
+    // Still inside the lock, and only after the Deck List is saved: a
+    // changelog row for a task the Deck List never recorded as finished would
+    // be the one record that disagrees with the rest.
+    if (saved) {
+      try {
+        stats.changelog = addChangelogEntries_(forChangelog, log);
+      } catch (clErr) {
+        log.error('Deck Changelog', 'Could not add ' + forChangelog.length +
+          ' row(s): ' + clErr.message + ' The Deck List itself was saved.');
+      }
+    } else if (forChangelog.length) {
+      log.error('Deck Changelog', 'Nothing was added, because the Deck List ' +
+        'could not be saved.');
     }
     lock.releaseLock();
   }
@@ -196,6 +223,7 @@ function processWopToDeck() {
     { label: "Total 'Y' actions", value: stats.yActions },
     { label: "Total 'P' actions", value: stats.pActions },
     { label: 'Already green (skipped)', value: stats.skipped },
+    { label: 'Deck Changelog rows added', value: stats.changelog },
     { label: 'Needs attention', value: log.issueCount(), alert: log.issueCount() > 0 });
 
   showReport_('EOD Complete', '📊 EOD Summary', summary, log);

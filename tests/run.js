@@ -61,7 +61,7 @@ function loadScript(context) {
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
   attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_,
-  isDoneColor_
+  isDoneColor_, isChangelogTask_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -5874,6 +5874,122 @@ const ATTENDANCE_WOP = wopRows([
   // day does not move anybody's tasks again.
   check('colour: both count as done', [t.api.isDoneColor_(G), t.api.isDoneColor_(O)], [true, true]);
 }
+
+// 61. The EOD batch adds a changelog row when a checkup or progress check is
+//     finished.
+{
+  const api0 = (() => {
+    const ctx = vm.createContext({ console, Buffer, JSON, Math, Date, String, Number,
+      Object, Array, RegExp, Error, isNaN, parseInt, parseFloat });
+    install(ctx, [], null);
+    return loadScript(ctx);
+  })();
+  check('changelog task: the ones that count',
+    ['PC_4', 'CU_6', 'PCU_3', '2nd PC_4', '3rd CU_6', '21st CU_2', 'pcu_1', ' 2nd  PC_1']
+      .map(api0.isChangelogTask_), [true, true, true, true, true, true, true, true]);
+  check('changelog task: the ones that do not',
+    ['PCX_1', 'Practice CU_2', 'CU 6', 'CU6', 'T1', '', '2nd', 'Worksheet PC_1']
+      .map(api0.isChangelogTask_), [false, false, false, false, false, false, false, false]);
+
+  const deckRow = (name, current, loaded) => {
+    const row = new Array(13).fill('');
+    row[0] = name; row[1] = current; row[4] = loaded || '';
+    return row;
+  };
+  const wopRow = (name, status) => {
+    const row = new Array(26).fill('');
+    row[0] = name; row[10] = status;
+    return row;
+  };
+  const logRow = text => { const row = new Array(20).fill(''); row[0] = text; return row; };
+
+  function eodDay(opts) {
+    const o = opts || {};
+    const deck = new FakeSheet('Deck List', [HEADER].concat(o.deck));
+    const wop = new FakeSheet('Daily WOP', o.wop);
+    wop.setSelection(1, o.wop.length);
+    const sheets = [deck, wop];
+    let changelog = null;
+    if (o.changelog !== false) {
+      changelog = new FakeSheet('Deck Changelog', [
+        logRow('Date'), logRow('keep 2'), logRow('keep 3'), logRow('keep 4'),
+        logRow('keep 5'), logRow('keep 6'), logRow('older entry'), logRow('oldest entry')]);
+      sheets.push(changelog);
+    }
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-08-19'), String, Number, Object, Array, RegExp, Error,
+      isNaN, parseInt, parseFloat });
+    const h = install(ctx, sheets, 'Daily WOP');
+    h.addCalendar('own@example.com', 'My calendar', o.events || [], true);
+    const api = loadScript(ctx);
+    if (o.breakDeck) {
+      const plain = deck.getRange.bind(deck);
+      deck.getRange = function () {
+        const range = plain.apply(null, arguments);
+        range.setValues = () => { throw new Error('Service unavailable'); };
+        return range;
+      };
+    }
+    api.processWopToDeck();
+    return { deck, wop, changelog, h, api,
+      col: c => changelog.values.map(r => String(r[c - 1])),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+
+  const at = (iso, hour) => new Date(iso + 'T' + (hour || '16') + ':00:00');
+  const day = {
+    deck: [deckRow('Jane Doe', 'PC_4', 'T2'), deckRow('Bo Peep', 'T1', 'T2'),
+      deckRow('Cass Jones', '2nd CU_6', 'T9'), deckRow('Dee Dee', 'T1', 'PCU_3, T3')],
+    wop: [wopRow('4:00 Jane Doe', 'Y'), wopRow('4:00 Bo Peep', 'Y'),
+      wopRow('5:00 Cass Jones', 'Y'), wopRow('5:00 Dee Dee', 'YY')],
+    events: [{ title: 'Jane Doe', start: at('2026-08-24') },     // a Monday
+      { title: 'Dee Dee', start: at('2026-08-20') }]           // Thursday
+  };
+  const r = eodDay(day);
+
+  check('changelog from EOD: new rows go in under row 6, in batch order, the rest kept',
+    r.col(1), ['Date', 'keep 2', 'keep 3', 'keep 4', 'keep 5', 'keep 6',
+      '8/19', '8/19', '8/19', 'older entry', 'oldest entry']);
+  check('changelog from EOD: the students', r.col(2).slice(6, 9),
+    ['Jane Doe', 'Cass Jones', 'Dee Dee']);
+  check('changelog from EOD: next session off the calendar',
+    [r.col(3).slice(6, 9), r.col(4).slice(6, 9)],
+    [['M', '?', 'Th'], ['8/24', '?/?', '8/20']]);
+  check('changelog from EOD: nothing else in the new rows',
+    r.changelog.values.slice(6, 9).map(row => row.slice(4).join('')), ['', '', '']);
+  checkTruthy('changelog from EOD: the second of two Y\'s counts too',
+    r.said().includes('finished &quot;PCU_3&quot;') || r.said().includes('finished "PCU_3"'));
+  checkTruthy('changelog from EOD: no session found is said',
+    r.said().includes('Cass Jones') && r.said().includes('question marks'));
+  checkTruthy('changelog from EOD: counted in the summary',
+    /Deck Changelog rows added[\s\S]*?<b>3<\/b>/.test(r.said()));
+  check('changelog from EOD: the Deck List still advanced',
+    [r.deck.values[1][1], r.deck.values[3][1], r.deck.values[4][1]], ['T2', 'T9', 'T3']);
+
+  // Run again over the same rows: they are green now, and nobody is added twice.
+  r.api.processWopToDeck();
+  check('changelog from EOD: a second run adds nothing', r.changelog.values.length, 11);
+
+  // Nothing that counts: the changelog is not touched at all.
+  const none = eodDay({ deck: [deckRow('Bo Peep', 'T1', 'T2')], wop: [wopRow('Bo Peep', 'Y')] });
+  check('changelog from EOD: an ordinary task adds nothing',
+    [none.changelog.values.length, none.changelog.writeCount], [8, 0]);
+
+  // No changelog tab: the Deck List is still done, and the student is named.
+  const missing = eodDay({ deck: [deckRow('Jane Doe', 'PC_4', 'T2')],
+    wop: [wopRow('Jane Doe', 'Y')], changelog: false });
+  check('no changelog tab: the Deck List still advanced', missing.deck.values[1][1], 'T2');
+  checkTruthy('no changelog tab: said, naming the student and the task',
+    missing.said().includes('Jane Doe') && missing.said().includes('No sheet named'));
+
+  // The Deck List could not be saved: no changelog row for a task it does
+  // not record as finished.
+  const broken = eodDay({ deck: [deckRow('Jane Doe', 'PC_4', 'T2')],
+    wop: [wopRow('Jane Doe', 'Y')], breakDeck: true });
+  check('deck not saved: nothing added to the changelog', broken.changelog.values.length, 8);
+  checkTruthy('deck not saved: and said', broken.said().includes('could not be saved'));
+}
+
 
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
