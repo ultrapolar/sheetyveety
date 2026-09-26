@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1176 assertions covering the parsing rules and every menu entry end to end,
+1184 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -391,9 +391,15 @@ markers, the formula row), and `CONFIG.CHANGELOG.HEADER_ROWS` is 4, so no
 stage ever treats them as an entry — row 2 has "Student" in column B, which
 would otherwise read as a student.
 
-- A student who finishes two in one run (`YY`) gets two rows.
-- Several students in one run go in together, in the order they were
-  processed.
+- **This is on top of the normal Deck List work, not instead of it.** The
+  tasks are archived, the next one becomes current and column K goes green
+  exactly as for any other task; the changelog row is the extra.
+- **A student who finishes two in one run gets two rows** — typically a PCU
+  and the CU after it (`PCU6`, then `CU7`, from a `YY`). If only one of the
+  two is a checkup, only that one gets a row.
+- **Newest on top**, like the rest of the sheet: the rows from one run go in
+  together with the last one finished at the top, so that student reads
+  `CU7` above `PCU6`.
 - **Only once the Deck List has been saved.** If saving it fails, nothing is
   added — a changelog row for a task the Deck List never recorded as finished
   would be the one record that disagrees with the rest.

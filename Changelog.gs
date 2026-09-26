@@ -309,7 +309,9 @@ function isChangelogTask_(task) {
  * The sheet runs newest first, so the rows go in on top of the newest entry --
  * the first row under the headings with a student in it -- and take its
  * formatting, so they look like the entries around them. The empty rows above
- * it are left where they are. Several go in together, in the order given.
+ * it are left where they are. Several go in together, and newest on top like
+ * the rest of the sheet: the last one given is the top row, so a student who
+ * finishes PCU6 and then CU7 in one run reads CU7 above PCU6.
  *
  * Takes no lock -- the EOD batch calling it already holds the document's --
  * and reports into the caller's log. Returns the number of rows added.
@@ -361,7 +363,7 @@ function addChangelogEntries_(entries, log) {
         ' are question marks.');
     }
     return row;
-  });
+  }).reverse();
 
   const newest = newestChangelogRow_(sheet);
   // Nothing logged yet: straight under the last thing on the sheet, which is

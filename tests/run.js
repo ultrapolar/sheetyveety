@@ -5982,9 +5982,9 @@ const ATTENDANCE_WOP = wopRows([
   };
   const r = eodDay(day);
 
-  check('changelog from EOD: on top of the newest entry, in batch order, the rest kept',
+  check('changelog from EOD: on top of the newest entry, newest on top, the rest kept',
     r.col(2), ['', 'Student', '', '', '', '', '', '', '',
-      'Jane Doe', 'Cass Jones', 'Dee Dee', 'Amalie Laz', 'Older Kid']);
+      'Dee Dee', 'Cass Jones', 'Jane Doe', 'Amalie Laz', 'Older Kid']);
   check('changelog from EOD: the headings and the spacing rows are untouched',
     r.changelog.values.slice(0, 9).map(row => row.join('|')),
     logSheet().slice(0, 9).map(row => row.join('|')));
@@ -5995,9 +5995,9 @@ const ATTENDANCE_WOP = wopRows([
     [[2026, 8, 19, 0], [2026, 8, 19, 0], [2026, 8, 19, 0]]);
   check('changelog from EOD: next session off the calendar',
     [r.col(3).slice(9, 12), r.col(4).slice(9, 12)],
-    [['M', '?', 'Th'], ['8/24', '?/?', '8/20']]);
+    [['Th', '?', 'M'], ['8/20', '?/?', '8/24']]);
   check('changelog from EOD: the task in the CU finished column', r.col(5).slice(9, 12),
-    ['PC2', '2nd PC A1A', 'PCU6']);
+    ['PCU6', '2nd PC A1A', 'PC2']);
   check('changelog from EOD: nothing past column E',
     r.changelog.values.slice(9, 12).map(row => row.slice(5).join('')), ['', '', '']);
   check('changelog from EOD: the new rows look like the newest entry did',
@@ -6018,6 +6018,30 @@ const ATTENDANCE_WOP = wopRows([
   // Run again over the same rows: they are green now, and nobody is added twice.
   r.api.processWopToDeck();
   check('changelog from EOD: a second run adds nothing', r.changelog.values.length, 14);
+
+  // The case to be ready for: one student finishes a PCU and the CU after it
+  // in the same session. The Deck List does its whole ordinary job -- both
+  // tasks archived, the next one current, column K done -- and on top of that
+  // there is a changelog row for each, the later one on top.
+  const pair = eodDay({ deck: [deckRow('Eve Ng', 'PCU6', 'CU7, T8')],
+    wop: [wopRow('4:00 Eve Ng', 'YY')],
+    events: [{ title: 'Eve Ng', start: at('2026-08-21') }] });   // Friday
+  check('PCU then CU: the Deck List moves on two', pair.deck.values[1][1], 'T8');
+  check('PCU then CU: nothing left queued', pair.deck.values[1][4], '');
+  check('PCU then CU: both archived, in order',
+    pair.deck.values[1][12], 'PCU6 08/19 | CU7 08/19');
+  check('PCU then CU: column K finished', [pair.wop.values[0][10], pair.wop.backgrounds[0][10]],
+    ['YY', '#00ff00']);
+  check('PCU then CU: a changelog row for each, CU on top',
+    pair.changelog.values.slice(9, 12).map(row => [row[1], row[2], row[3], row[4]]),
+    [['Eve Ng', 'F', '8/21', 'CU7'], ['Eve Ng', 'F', '8/21', 'PCU6'],
+     ['Amalie Laz', 'M', '9/28', '2nd PCU6']]);
+  checkTruthy('PCU then CU: counted as two', /Deck Changelog rows added[\s\S]*?<b>2<\/b>/.test(pair.said()));
+
+  // Only one of the two is a checkup: one row.
+  const half = eodDay({ deck: [deckRow('Fay Ho', 'T1', 'CU3, T4')], wop: [wopRow('Fay Ho', 'YY')] });
+  check('one of two counts: one row', half.col(2).slice(9, 11), ['Fay Ho', 'Amalie Laz']);
+  check('one of two counts: the Deck List still moves on two', half.deck.values[1][1], 'T4');
 
   // Nothing that counts: the changelog is not touched at all.
   const none = eodDay({ deck: [deckRow('Bo Peep', 'T1', 'T2')], wop: [wopRow('Bo Peep', 'Y')] });
