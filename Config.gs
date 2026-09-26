@@ -81,20 +81,6 @@ const CONFIG = {
     // so on a Saturday it means Monday.
     CLOSED_DAYS: [0],
 
-    // Ordering each hour by grade, so the students the column A colours put
-    // together are sitting together. The colours come from a conditional
-    // formatting rule, which a script cannot see -- so rather than read the
-    // colour, the grade it is worked out from is read instead.
-    GRADES: {
-      // The tab in this spreadsheet holding each student's grade. Blank turns
-      // this off, and each hour stays in the order the calendar gave.
-      SHEET_NAME: '',
-      NAME_COLUMN: 1,     // A
-      GRADE_COLUMN: 2,    // B
-      HEADER_ROWS: 1,
-      YOUNGEST_FIRST: true
-    },
-
     // Each hour of students takes the next of these, so one hour reads as one
     // block. Both sections start again at the first.
     HOUR_SHADES: ['#ffffff', '#d9d9d9'],
@@ -284,9 +270,11 @@ const CONFIG = {
     ABSENT_MARK: '?',
 
     // If any of these appears anywhere in a row, the student is known not to be
-    // coming and Radius is not asked about them at all. Matched without regard
-    // to case, anywhere in the row, because whoever takes the call writes it
-    // wherever they happen to be looking.
+    // coming: the Radius import does not ask about them, and Auto Attendance
+    // neither colours them nor counts them as a no-show. They usually go in
+    // column N, O or P, but the whole row is searched, without regard to case,
+    // so a note that moves columns -- or was typed wherever the person taking
+    // the call happened to be looking -- is still found.
     SKIP_MARKERS: ['LM cancel', 'no show'],
 
     UNFINALIZED_FIELD: 'finalizedFlag',

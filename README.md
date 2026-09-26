@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1168 assertions covering the parsing rules and every menu entry end to end,
+1155 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -515,37 +515,6 @@ In-Center | Issue | … | IAAT | Hist     the section header
 9:00 Student Two      9 - 11am IC (Bo)  BK
 11:00 Student Three   8:45am - 1:15pm IC (Amanda)  AL
 ```
-
-### Each hour in grade order
-
-The column A colours come from a **conditional formatting rule** on each
-student's grade, and a script cannot see conditional formatting — it only ever
-gets the plain cell. So rather than read the colour, it reads the **grade the
-colour is worked out from**, and puts each hour in grade order. Students the
-colours group together end up sitting together, from the moment the day is
-pasted, before anybody has styled anything.
-
-Point `CONFIG.SCHEDULE.GRADES` at the tab: `SHEET_NAME`, and which columns hold
-the name and the grade. Left blank, nothing changes and each hour stays in the
-order the calendar gave.
-
-- **Hours stay in time order**; grade only decides the order *within* an hour.
-  Youngest first, unless `YOUNGEST_FIRST` says otherwise. A tie goes by name,
-  so it comes out the same every time.
-- **Names are matched the way the seating chart matches them**, so the
-  calendar's `Amalie Laz` finds `Amalie Lazeration` on the tab — and shorthand
-  that could be two children is not settled by guessing.
-- **Grades are read as** `K`, `Pre-K`, `5`, `5th`, `Grade 5`, `G5`. Anything
-  else — `Algebra 1`, `HS` — is not guessed at: a course name with a number in
-  it is not a grade, and sorting it as one would seat a high-schooler with the
-  first-graders.
-- **A student whose grade cannot be found or read goes to the end of their
-  hour** and is named in the report, along with the value it could not read. A
-  guessed grade is how somebody ends up with the wrong instructor, which is the
-  thing the colours are there to stop.
-- **The seating chart's S and T get the same order.**
-- A tab that is not there does not stop the paste: the day goes in, in
-  calendar order, and the report names the tab it looked for.
 
 ### One hour, one shade
 

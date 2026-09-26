@@ -44,7 +44,6 @@ function loadScript(context) {
   shiftCoversHour_, isShiftCalendar_, hourStartOf_, writeStudentFormulas_,
   looksLikeShiftTitle_, sectionTemplateRow_, isExcludedShift_,
   nextOpenDayAfter_, writeSeatingRoster_, firstNameLastInitial_, isNotice_,
-  gradeRank_, orderByGrade_,
   seatingSheetName_, spreadsheetIdFromLink_, setSeatingSource, seatingLayout_,
   seatLabelLetter_, wallColumns_, seatingSpreadsheetId_,
   podOfTable_, resolveSeatingAlias_, rowSaysNotComing_, hourInstructorTables_,
@@ -1110,20 +1109,9 @@ const DECK_FILLER_ROWS = [
       Date: fixedDate(opts.today || '2026-09-17'), String, Number, Object,
       Array, RegExp, Error, isNaN, parseInt, parseFloat });
     if (opts.compute) wop.computeFormula = opts.compute;
-    // The grade tab the column A colours are worked out from, when a test
-    // wants one.
-    const extra = opts.grades
-      ? [new FakeSheet('Grades', [['Student', 'Grade']].concat(opts.grades))] : [];
-    const h = install(ctx, [deck, wop].concat(charts).concat(extra), 'Daily WOP');
+    const h = install(ctx, [deck, wop].concat(charts), 'Daily WOP');
     (opts.calendars || []).forEach(c => h.addCalendar(c.id, c.name, c.events));
     const api = loadScript(ctx);
-    if (opts.grades || opts.gradeTab) {
-      vm.runInContext('CONFIG.SCHEDULE.GRADES.SHEET_NAME = ' +
-        JSON.stringify(opts.gradeTab || 'Grades') + ';', ctx);
-    }
-    if (opts.oldestFirst) {
-      vm.runInContext('CONFIG.SCHEDULE.GRADES.YOUNGEST_FIRST = false;', ctx);
-    }
     if (opts.shiftCalendars) {
       vm.runInContext('CONFIG.SCHEDULE.SHIFT_CALENDARS = ' +
         JSON.stringify(opts.shiftCalendars) + ';', ctx);
@@ -1620,79 +1608,6 @@ const DECK_FILLER_ROWS = [
     p.colA().indexOf('9:00 Student One') !== -1);
   checkTruthy('chart: and not reaching the chart is reported',
     p.said().includes('could not be opened'));
-
-  // --- each hour in grade order --------------------------------------------
-  // The column A colours are a conditional formatting rule on the grade, which
-  // a script cannot see. So the grade is read instead, and each hour is put in
-  // grade order -- the students one colour groups together end up together.
-  const gradeDay = {
-    at: 1, shiftCalendars: [], charts: [{ name: 'Weekdays' }],
-    grades: [['Amalie Lazeration', '7th'], ['Bo Peep', 'K'], ['Cass Jones', 11],
-             ['Dee Dee', 'Grade 3'], ['Eli Moss', '7']],
-    calendars: [{ id: 'a@x', name: 'Appointy', events: [
-      ev('Cass Jones - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Amalie Laz - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Bo Peep - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Dee Dee - (IN-CENTER) 1 hour session', '10:00', '11:00'),
-      ev('Eli Moss - (IN-CENTER) 1 hour session', '10:00', '11:00')] }]
-  };
-
-  p = paste(gradeDay);
-  const centre = () => p.colA().filter(v => /^\d+:\d\d /.test(v));
-  check('grades: each hour youngest first, the hours still in time order',
-    centre(), ['9:00 Bo Peep', '9:00 Amalie Laz', '9:00 Cass Jones',
-               '10:00 Dee Dee', '10:00 Eli Moss']);
-  check('grades: the shortened calendar name found its full one on the tab',
-    centre()[1], '9:00 Amalie Laz');
-  check('grades: the seating chart gets the same order',
-    p.chart('Weekdays').values.slice(0, 5).map(r => String(r[19])),
-    ['Bo P', 'Amalie L', 'Cass J', 'Dee D', 'Eli M']);
-
-  p = paste(Object.assign({}, gradeDay, { oldestFirst: true }));
-  check('grades: oldest first when that is what the setting says',
-    centre().slice(0, 3), ['9:00 Cass Jones', '9:00 Amalie Laz', '9:00 Bo Peep']);
-
-  // Same grade: by name, so the order is the same every time it is run.
-  p = paste(Object.assign({}, gradeDay, { grades: [['Zed Ay', 5], ['Abe Be', 5]],
-    calendars: [{ id: 'a@x', name: 'Appointy', events: [
-      ev('Zed Ay - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Abe Be - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] }));
-  check('grades: a tie is settled by name', centre(), ['9:00 Abe Be', '9:00 Zed Ay']);
-
-  // Not on the tab, shorthand that could be two children, or a grade that is
-  // not a grade: all go to the end of their hour and are named. A guessed
-  // grade is how a student ends up with the wrong instructor.
-  p = paste(Object.assign({}, gradeDay, {
-    grades: [['Bo Peep', 'K'], ['Amalie Laz', 3], ['Amalie Lee', 9],
-             ['Cass Jones', 'Algebra 1']],
-    calendars: [{ id: 'a@x', name: 'Appointy', events: [
-      ev('New Kid - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Amalie L - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Cass Jones - (IN-CENTER) 1 hour session', '09:00', '10:00'),
-      ev('Bo Peep - (IN-CENTER) 1 hour session', '09:00', '10:00')] }] }));
-  check('grades: the ones with no readable grade go last, by name',
-    centre(), ['9:00 Bo Peep', '9:00 Amalie L', '9:00 Cass Jones', '9:00 New Kid']);
-  checkTruthy('grades: not on the tab is named', p.said().includes('is not on'));
-  checkTruthy('grades: shorthand that could be two is named with both',
-    p.said().includes('Amalie Laz or Amalie Lee'));
-  checkTruthy('grades: a grade that is not one is quoted back',
-    p.said().includes('Algebra 1'));
-
-  // A tab that is not there: the day still goes in, in calendar order.
-  p = paste(Object.assign({}, gradeDay, { grades: undefined, gradeTab: 'Grade List' }));
-  checkTruthy('grades: a missing tab still pastes the day',
-    centre().indexOf('9:00 Cass Jones') !== -1);
-  checkTruthy('grades: and says which tab it could not find',
-    p.said().includes('Grade List'));
-
-  const api7 = paste({ calendars: [] }).api;
-  const rank = v => api7.gradeRank_(v);
-  check('grade: the ways a grade gets written',
-    ['K', 'Kindergarten', 'Pre-K', '1', 1, '5th', 'Grade 5', 'G5', 'gr. 12'].map(rank),
-    [0, 0, -1, 1, 1, 5, 5, 5, 12]);
-  check('grade: things that are not grades',
-    ['Algebra 1', 'HS', '', '13', 5.5, 'Grade'].map(rank),
-    [null, null, null, null, null, null]);
 
   // --- the section headers keep the look of the day before ---------------
   // Yesterday's @HOME and In-Center rows carry formatting and links. Today's
