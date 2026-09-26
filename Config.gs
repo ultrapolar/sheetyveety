@@ -428,8 +428,10 @@ const CONFIG = {
   CHANGELOG: {
     SHEET_NAME: 'Deck Changelog',
 
-    // Row 1 is the heading. Everything below it is an assessment.
-    HEADER_ROWS: 1,
+    // Rows 1 to 4 are the centre's own: the links, the column names, the D and
+    // M/D markers, and the formula row. Everything below them is an
+    // assessment, newest at the top.
+    HEADER_ROWS: 4,
 
     // The columns the three stages read and write, by name.
     COL: {
@@ -472,15 +474,15 @@ const CONFIG = {
 
 
     // The EOD batch adds a row here by itself when a student finishes one of
-    // these. A task counts when it starts with one of the prefixes followed by
+    // these, on top of the newest entry: the first row under the headings
+    // with a student in it. The row gets today's date, the student, their
+    // next session, and the task itself in the assessment column.
+    // A task counts when it starts with one of the prefixes followed by
     // a number or a space, with or without a count in front of it: "CU1",
     // "PCU6", "2nd PC2" and "PC A1A" all do; "PCX1", "Practice CU1" and
     // "CUBE" do not. Case is ignored.
     FROM_EOD: {
-      TASK_PREFIXES: ['CU', 'PC', 'PCU'],
-      // New rows go in directly under this one, so the newest is always here
-      // (the rows above it stay where they are).
-      INSERT_AFTER_ROW: 6
+      TASK_PREFIXES: ['CU', 'PC', 'PCU']
     },
 
     COLUMNS: [

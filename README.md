@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1171 assertions covering the parsing rules and every menu entry end to end,
+1176 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -370,17 +370,26 @@ other word, so `PCX1`, `CUBE` and `PCs review` do not, and neither does
 `Practice CU1` — the prefix has to come first. Case is ignored. The list is
 `CONFIG.CHANGELOG.FROM_EOD.TASK_PREFIXES`.
 
-Each one gets a **new row inserted directly under row 6** (so it lands as row
-7 and everything below moves down; `INSERT_AFTER_ROW`), with:
+Each one gets a **new row on top of the newest entry**: the first row under
+the four heading rows with a student in column B. The empty rows kept for
+spacing above it stay where they are, and the new row takes the newest entry's
+formatting so it looks like the rows around it. With nothing logged yet, it
+goes straight under the headings.
 
 | Column | What goes in |
 | --- | --- |
-| A | Today, `m/dd` — the same as Create writes |
+| A | Today, as a real date — it shows however the column is formatted (`9/25/2026` on the sheet) |
 | B | The student's name, as column A of the Daily WOP has it |
 | C, D | Their next session, found exactly the way **Create** finds it — `?` and `?/?` when the calendar does not say |
+| E | The task they finished, as the Deck List has it: `2nd PCU6` |
 
-Nothing else in the row is touched; the assessment, grade and the rest are
-still yours and the later stages'.
+Nothing past column E is touched; the grading and the rest are still yours and
+the later stages'.
+
+**Rows 1 to 4 are the centre's own** (links, column names, the D and M/D
+markers, the formula row), and `CONFIG.CHANGELOG.HEADER_ROWS` is 4, so no
+stage ever treats them as an entry — row 2 has "Student" in column B, which
+would otherwise read as a student.
 
 - A student who finishes two in one run (`YY`) gets two rows.
 - Several students in one run go in together, in the order they were

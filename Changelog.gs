@@ -302,13 +302,17 @@ function isChangelogTask_(task) {
 }
 
 /**
- * Adds a row to the changelog for each { name, task }, the way stage one
- * would have: today's date, the student, and when they are next in.
+ * Adds a row to the changelog for each { name, task }: today's date, the
+ * student, when they are next in (found the way stage one finds it), and the
+ * task they finished in the assessment column.
  *
- * All the rows go in together, directly under
- * CONFIG.CHANGELOG.FROM_EOD.INSERT_AFTER_ROW, in the order given. Takes no
- * lock -- the EOD batch calling it already holds the document's -- and
- * reports into the caller's log. Returns the number of rows added.
+ * The sheet runs newest first, so the rows go in on top of the newest entry --
+ * the first row under the headings with a student in it -- and take its
+ * formatting, so they look like the entries around them. The empty rows above
+ * it are left where they are. Several go in together, in the order given.
+ *
+ * Takes no lock -- the EOD batch calling it already holds the document's --
+ * and reports into the caller's log. Returns the number of rows added.
  */
 function addChangelogEntries_(entries, log) {
   if (!entries.length) return 0;
@@ -324,7 +328,8 @@ function addChangelogEntries_(entries, log) {
     return 0;
   }
 
-  const today = new Date();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   let calendars = [];
   let calendarProblem = '';
   try {
@@ -333,14 +338,17 @@ function addChangelogEntries_(entries, log) {
     calendarProblem = err.message;
   }
 
-  const width = Math.max(sheet.getMaxColumns(), col.NEXT_DATE);
+  const written = Math.max(col.DATE_DONE, col.STUDENT, col.DAY_OF_WEEK,
+    col.NEXT_DATE, col.ASSESSMENT);
   const rows = entries.map(function (entry) {
     const cells = nextSessionCells_(calendars, calendarProblem, entry.name, today);
-    const row = new Array(width).fill('');
-    row[col.DATE_DONE - 1] = monthDay_(today);
+    const row = new Array(written).fill('');
+    // A real date, so it shows however the column is formatted.
+    row[col.DATE_DONE - 1] = today;
     row[col.STUDENT - 1] = entry.name;
     row[col.DAY_OF_WEEK - 1] = cells.day;
     row[col.NEXT_DATE - 1] = cells.date;
+    row[col.ASSESSMENT - 1] = entry.task;
 
     if (cells.next) {
       log.ok(entry.name, 'finished "' + entry.task + '" — added to the ' +
@@ -355,13 +363,41 @@ function addChangelogEntries_(entries, log) {
     return row;
   });
 
-  const after = Math.min(CONFIG.CHANGELOG.FROM_EOD.INSERT_AFTER_ROW, sheet.getMaxRows());
-  sheet.insertRowsAfter(after, rows.length);
-  // Only the four columns it knows are written; the rest of each new row is
-  // left for the later stages and for whatever formatting the sheet gives it.
-  sheet.getRange(after + 1, 1, rows.length, col.NEXT_DATE)
-    .setValues(rows.map(function (row) { return row.slice(0, col.NEXT_DATE); }));
+  const newest = newestChangelogRow_(sheet);
+  // Nothing logged yet: straight under the last thing on the sheet, which is
+  // at worst the headings.
+  const at = newest || Math.max(sheet.getLastRow(), CONFIG.CHANGELOG.HEADER_ROWS) + 1;
+  sheet.insertRowsAfter(at - 1, rows.length);
+
+  if (newest) {
+    const width = sheet.getMaxColumns();
+    const pattern = sheet.getRange(newest + rows.length, 1, 1, width);
+    for (let i = 0; i < rows.length; i++) {
+      pattern.copyTo(sheet.getRange(at + i, 1, 1, width), { formatOnly: true });
+    }
+  }
+
+  // Only the columns it knows are written; the rest of each new row is left
+  // for the later stages.
+  sheet.getRange(at, 1, rows.length, written).setValues(rows);
   return rows.length;
+}
+
+/**
+ * The newest entry's row: the first under the headings with a student in
+ * column B, or 0 when there is none. Blank rows between the headings and it
+ * are spacing, not entries.
+ */
+function newestChangelogRow_(sheet) {
+  const first = CONFIG.CHANGELOG.HEADER_ROWS + 1;
+  const last = sheet.getLastRow();
+  if (last < first) return 0;
+  const names = sheet.getRange(first, CONFIG.CHANGELOG.COL.STUDENT,
+    last - first + 1, 1).getValues();
+  for (let i = 0; i < names.length; i++) {
+    if (String(names[i][0] == null ? '' : names[i][0]).trim()) return first + i;
+  }
+  return 0;
 }
 
 // ------------------------------------------------------------------

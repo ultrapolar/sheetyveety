@@ -61,7 +61,7 @@ function loadScript(context) {
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
   attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_,
-  isDoneColor_, isChangelogTask_
+  isDoneColor_, isChangelogTask_, asDate_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -3384,11 +3384,21 @@ const DECK_FILLER_ROWS = [
 
 // 45aa. The three stages against a sheet.
 {
+  // The centre's own four heading rows, as the sheet has them: links, the
+  // column names, the D and M/D markers, and the formula row. Row 2 carries a
+  // "Student" in column B, which is exactly what a stage must not take for one.
+  const CHANGELOG_HEAD = [['', '', '', '', 'Curriculum links'],
+    ['Date', 'Student', 'Returning', '', 'CU finished'],
+    ['', '', 'D', 'M/D', ''],
+    ['CU Formula', '', '', '', '']].map(function (r) {
+    const row = r.slice();
+    while (row.length < 20) row.push('');
+    return row;
+  });
+
   function book(rows, options) {
     const opts = options || {};
-    const head = new Array(20).fill('');
-    head[1] = 'Student';
-    const values = [head].concat(rows.map(function (r) {
+    const values = CHANGELOG_HEAD.map(r => r.slice()).concat(rows.map(function (r) {
       const row = new Array(20).fill('');
       Object.keys(r).forEach(function (k) { row[Number(k) - 1] = r[k]; });
       return row;
@@ -3420,7 +3430,8 @@ const DECK_FILLER_ROWS = [
         JSON.stringify(opts.counts) + ';', ctx);
     }
     return { log: log, api: api,
-      cell: (r, c) => String(log.values[r][c - 1]),
+      // Entry r is the r-th row under the headings.
+      cell: (r, c) => String(log.values[r + 3][c - 1]),
       said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
   }
 
@@ -3653,12 +3664,12 @@ const DECK_FILLER_ROWS = [
   // writing an initials column fails here rather than quietly taking it over.
   b = book([{ 2: 'Amalie Laz', 5: 'Checkup 6', 8: '85' }],
     { counts: { 'Checkup 6': 20 } });
-  const beforeRun = b.log.values[1].slice();
+  const beforeRun = b.log.values[4].slice();
   b.api.changelogCreate();
   b.api.changelogGrade();
   b.api.changelogLearningPlan();
   const touched = [];
-  b.log.values[1].forEach(function (value, i) {
+  b.log.values[4].forEach(function (value, i) {
     if (String(value) !== String(beforeRun[i])) touched.push(i + 1);
   });
   check('stages: write exactly the columns CONFIG calls the script\'s',
@@ -5905,7 +5916,23 @@ const ATTENDANCE_WOP = wopRows([
     row[0] = name; row[10] = status;
     return row;
   };
-  const logRow = text => { const row = new Array(20).fill(''); row[0] = text; return row; };
+  const logRow = cells => {
+    const row = new Array(20).fill('');
+    (cells || []).forEach((v, i) => { row[i] = v; });
+    return row;
+  };
+  // The sheet as the centre keeps it: four heading rows, some blank rows kept
+  // for spacing, then the entries, newest first.
+  const logSheet = () => [
+    logRow(['', '', '', '', 'Curriculum links']),
+    logRow(['Date', 'Student', 'Returning', '', 'CU finished']),
+    logRow(['', '', 'D', 'M/D']),
+    logRow(['CU Formula']),
+    logRow(), logRow(), logRow(),                                        // 5-7
+    logRow(['9/20/2026']),     // 8: a stray date with nobody on it is not an entry
+    logRow(),                                                            // 9
+    logRow(['9/25/2026', 'Amalie Laz', 'M', '9/28', '2nd PCU6', 'x']),  // 10
+    logRow(['9/24/2026', 'Older Kid', 'T', '9/29', 'CU1'])];            // 11
 
   function eodDay(opts) {
     const o = opts || {};
@@ -5915,9 +5942,13 @@ const ATTENDANCE_WOP = wopRows([
     const sheets = [deck, wop];
     let changelog = null;
     if (o.changelog !== false) {
-      changelog = new FakeSheet('Deck Changelog', [
-        logRow('Date'), logRow('keep 2'), logRow('keep 3'), logRow('keep 4'),
-        logRow('keep 5'), logRow('keep 6'), logRow('older entry'), logRow('oldest entry')]);
+      const values = o.changelog || logSheet();
+      changelog = new FakeSheet('Deck Changelog', values);
+      // The newest entry's look, which new rows should take on.
+      if (values.length >= 10) {
+        changelog.backgrounds[9] = changelog.backgrounds[9].map(() => '#fff2cc');
+        changelog.fontColors[9][3] = '#ff0000';
+      }
       sheets.push(changelog);
     }
     const ctx = vm.createContext({ console, Buffer, JSON, Math,
@@ -5951,16 +5982,30 @@ const ATTENDANCE_WOP = wopRows([
   };
   const r = eodDay(day);
 
-  check('changelog from EOD: new rows go in under row 6, in batch order, the rest kept',
-    r.col(1), ['Date', 'keep 2', 'keep 3', 'keep 4', 'keep 5', 'keep 6',
-      '8/19', '8/19', '8/19', 'older entry', 'oldest entry']);
-  check('changelog from EOD: the students', r.col(2).slice(6, 9),
-    ['Jane Doe', 'Cass Jones', 'Dee Dee']);
+  check('changelog from EOD: on top of the newest entry, in batch order, the rest kept',
+    r.col(2), ['', 'Student', '', '', '', '', '', '', '',
+      'Jane Doe', 'Cass Jones', 'Dee Dee', 'Amalie Laz', 'Older Kid']);
+  check('changelog from EOD: the headings and the spacing rows are untouched',
+    r.changelog.values.slice(0, 9).map(row => row.join('|')),
+    logSheet().slice(0, 9).map(row => row.join('|')));
+  const dated = r.changelog.values.slice(9, 12).map(row => row[0]);
+  check('changelog from EOD: today, as a real date',
+    dated.map(d => r.api.asDate_(d) ? [d.getFullYear(), d.getMonth() + 1, d.getDate(),
+      d.getHours()] : String(d)),
+    [[2026, 8, 19, 0], [2026, 8, 19, 0], [2026, 8, 19, 0]]);
   check('changelog from EOD: next session off the calendar',
-    [r.col(3).slice(6, 9), r.col(4).slice(6, 9)],
+    [r.col(3).slice(9, 12), r.col(4).slice(9, 12)],
     [['M', '?', 'Th'], ['8/24', '?/?', '8/20']]);
-  check('changelog from EOD: nothing else in the new rows',
-    r.changelog.values.slice(6, 9).map(row => row.slice(4).join('')), ['', '', '']);
+  check('changelog from EOD: the task in the CU finished column', r.col(5).slice(9, 12),
+    ['PC2', '2nd PC A1A', 'PCU6']);
+  check('changelog from EOD: nothing past column E',
+    r.changelog.values.slice(9, 12).map(row => row.slice(5).join('')), ['', '', '']);
+  check('changelog from EOD: the new rows look like the newest entry did',
+    [r.changelog.backgrounds.slice(9, 12).map(row => row[0]),
+     r.changelog.fontColors.slice(9, 12).map(row => row[3])],
+    [['#fff2cc', '#fff2cc', '#fff2cc'], ['#ff0000', '#ff0000', '#ff0000']]);
+  check('changelog from EOD: the entry it went on top of is intact',
+    r.changelog.values[12].slice(0, 6), ['9/25/2026', 'Amalie Laz', 'M', '9/28', '2nd PCU6', 'x']);
   checkTruthy('changelog from EOD: the second of two Y\'s counts too',
     r.said().includes('finished &quot;PCU6&quot;') || r.said().includes('finished "PCU6"'));
   checkTruthy('changelog from EOD: no session found is said',
@@ -5972,12 +6017,18 @@ const ATTENDANCE_WOP = wopRows([
 
   // Run again over the same rows: they are green now, and nobody is added twice.
   r.api.processWopToDeck();
-  check('changelog from EOD: a second run adds nothing', r.changelog.values.length, 11);
+  check('changelog from EOD: a second run adds nothing', r.changelog.values.length, 14);
 
   // Nothing that counts: the changelog is not touched at all.
   const none = eodDay({ deck: [deckRow('Bo Peep', 'T1', 'T2')], wop: [wopRow('Bo Peep', 'Y')] });
   check('changelog from EOD: an ordinary task adds nothing',
-    [none.changelog.values.length, none.changelog.writeCount], [8, 0]);
+    [none.changelog.values.length, none.changelog.writeCount], [11, 0]);
+
+  // A changelog with nothing logged yet: straight under the headings.
+  const fresh = eodDay({ deck: [deckRow('Jane Doe', 'CU1', 'T2')], wop: [wopRow('Jane Doe', 'Y')],
+    changelog: logSheet().slice(0, 4) });
+  check('empty changelog: the first entry goes under the headings',
+    fresh.changelog.values.map(row => String(row[1])), ['', 'Student', '', '', 'Jane Doe']);
 
   // No changelog tab: the Deck List is still done, and the student is named.
   const missing = eodDay({ deck: [deckRow('Jane Doe', 'PC2', 'T2')],
@@ -5990,7 +6041,7 @@ const ATTENDANCE_WOP = wopRows([
   // not record as finished.
   const broken = eodDay({ deck: [deckRow('Jane Doe', 'PC2', 'T2')],
     wop: [wopRow('Jane Doe', 'Y')], breakDeck: true });
-  check('deck not saved: nothing added to the changelog', broken.changelog.values.length, 8);
+  check('deck not saved: nothing added to the changelog', broken.changelog.values.length, 11);
   checkTruthy('deck not saved: and said', broken.said().includes('could not be saved'));
 }
 
