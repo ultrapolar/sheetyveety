@@ -1,18 +1,18 @@
 /**
- * Who signed in and out on a day, from Radius's Student Attendance Report.
+ * Who signed in and out on a day, from Radius's Student Attendance Report,
+ * checked against column A of the Daily WOP.
  *
  * The report page (Detail View) fills its table from one request: every
  * sign-in for a range of dates, with the arrival and departure of each. Asked
  * for a single day, it hands over the whole day in one go -- where the Radius
  * import reads a DWP page per student.
  *
- * Laid beside the day's bookings on the calendar, that answers the questions
- * worth asking before everybody goes home:
+ * Laid beside that day's block in column A, it flags:
  *
- *   - who is still signed in (or, for a day gone by, never signed out)
- *   - who was booked and never signed in
- *   - who signed in without being booked, or under a name the calendar spells
- *     differently
+ *   - anybody signed in more than once
+ *   - anybody Radius signed in who is not in column A
+ *   - anybody in column A Radius has no sign-in for
+ *   - anybody still signed in (or, for a day gone by, never signed out)
  *
  * It reads and it reports. Nothing is written to the sheet: this is the first
  * outing for this part of Radius, and a report that is wrong costs a second
@@ -186,21 +186,104 @@ function attendanceNameKeys_(name) {
 }
 
 /**
- * The day's sign-ins laid beside its bookings.
+ * The students column A lists for a day, from that day's block on the Daily
+ * WOP: the rows under its dated heading, down to the next day's.
  *
- * `sessions` is the calendar's list for the day, or null when the calendar
- * could not be read -- in which case the sign-ins are still reported and
- * nothing is said about who did not come, rather than calling everybody a
- * no-show.
+ * A block laid out by Paste the calendar opens with the instructors and
+ * anything else on the calendar, and only then its @HOME and In-Center
+ * headers, so a student is a row under one of those. A block with neither
+ * header was typed by hand, and there a student is any row that starts with a
+ * time and is not an instructor's shift -- said in the report, because it is
+ * a looser reading.
  *
- * A booking is matched to a student, not to a sign-in: a double booked as two
- * hours is one sign-in. When a name fits two students Radius has signed in,
- * neither is chosen, and the booking is listed as one that could not be told
- * apart.
+ * Returns { students, problem, note }. problem is set when there is nothing to
+ * compare against, and then nobody is reported as missing. A student listed
+ * twice (a double, written as two hours) is one student with two rows.
  */
-function compareAttendance_(entries, sessions, date, now) {
+function wopStudentsFor_(sheet, date) {
+  const headers = dayHeaderRows_(sheet);
+  let mine = -1;
+  for (let i = 0; i < headers.length; i++) {
+    if (sameDayAs_(headers[i].date, date)) { mine = i; break; }
+  }
+  if (mine === -1) {
+    return { students: [], problem: 'The Daily WOP has no row for ' +
+      dayHeaderText_(date) + ', so there is no column A to compare with.' };
+  }
+
+  const first = headers[mine].row + 1;
+  const next = headers[mine + 1];
+  const last = next ? next.row - 1 : sheet.getLastRow();
+  if (last < first) {
+    return { students: [], problem: 'Nothing is written under ' +
+      dayHeaderText_(date) + ' on the Daily WOP yet, so there is no column A ' +
+      'to compare with.' };
+  }
+
+  const values = sheet.getRange(first, 1, last - first + 1,
+    Math.max(sheet.getLastColumn(), CONFIG.WOP_COL.NAME)).getValues();
+  const column = CONFIG.WOP_COL.NAME - 1;
+  const headings = (CONFIG.SCHEDULE.SECTIONS || []).map(function (section) {
+    return section.header && section.header[0]
+      ? String(section.header[0].text).trim().toLowerCase() : '';
+  }).filter(Boolean);
+  const textOf = function (row) {
+    const value = row[column];
+    return String(value == null ? '' : value).trim();
+  };
+  const isHeading = function (row) {
+    return headings.indexOf(textOf(row).toLowerCase()) !== -1;
+  };
+
+  const sectioned = values.some(isHeading);
+  let inSection = !sectioned;
+  const students = [];
+  const byKey = {};
+
+  values.forEach(function (row, i) {
+    if (isHeading(row)) { inSection = true; return; }
+    const raw = textOf(row);
+    if (!inSection || !raw) return;
+    const name = extractName_(raw);
+    const time = leadingTimeOf_(raw);
+    if (!name) return;
+    if (!sectioned && (!time || looksLikeShiftTitle_(name))) return;
+
+    const key = normalizeStudentName_(name);
+    if (!byKey[key]) {
+      byKey[key] = { name: name, keys: attendanceNameKeys_(name), rows: [],
+        times: [], minutes: [], notComing: '' };
+      students.push(byKey[key]);
+    }
+    const student = byKey[key];
+    student.rows.push(first + i);
+    if (time) student.times.push(time);
+    student.minutes.push(time ? slotMinutes_(time) : null);
+    student.notComing = student.notComing || rowSaysNotComing_(row);
+  });
+
+  return { students: students, problem: '',
+    note: sectioned ? '' : 'No @HOME or In-Center heading under ' +
+      dayHeaderText_(date) + ', so every row starting with a time was taken ' +
+      'as a student.' };
+}
+
+/**
+ * The day's sign-ins laid beside column A.
+ *
+ * `students` is column A's list for the day, or null when there is none -- in
+ * which case the sign-ins are still reported and nothing is said about who
+ * did not come, rather than calling everybody a no-show.
+ *
+ * Column A is matched to a student Radius signed in, not to a sign-in: a
+ * student written on two rows for a double is one person. When a name fits
+ * two students Radius has signed in, neither is chosen, and the name is listed
+ * as one that could not be told apart.
+ */
+function compareAttendance_(entries, students, date, now) {
   const today = sameDayAs_(date, now);
   const ahead = !today && date > now;   // a day that has not happened yet
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
   const byClock = function (a, b) {
     const x = parseClockTime_(a.signedIn);
@@ -215,91 +298,91 @@ function compareAttendance_(entries, sessions, date, now) {
     const id = entry.studentId ? 'id|' + entry.studentId : 'name|' + entry.name;
     if (!personFor[id]) {
       personFor[id] = { name: entry.name, keys: attendanceNameKeys_(entry.name),
-        entries: [], booked: false, contested: false };
+        entries: [], student: null, contested: false };
       people.push(personFor[id]);
     }
     personFor[id].entries.push(entry);
-  });
-
-  const rows = entries.slice().sort(byClock).map(function (entry) {
-    const review = reviewSessionTiming_(entry.signedIn, entry.signedOut);
-    return { entry: entry, notes: review.notes, odd: review.shade };
   });
 
   const report = {
     date: date,
     today: today,
     people: people.length,
-    rows: rows,
+    rows: [],
     stillIn: entries.filter(function (e) { return !e.signedOut; }).sort(byClock),
-    calendarRead: sessions !== null && sessions !== undefined,
+    // More than one sign-in on the day. Always worth a look: a double is one
+    // sign-in of two hours, so two sign-ins is somebody who went out and came
+    // back, or was signed in twice by mistake.
+    twice: people.filter(function (p) { return p.entries.length > 1; }),
+    listRead: students !== null && students !== undefined,
     missing: [],
     later: [],
+    notComing: [],
+    cameAnyway: [],
     contested: [],
-    unbooked: []
+    notListed: []
   };
-  if (!report.calendarRead) return report;
 
-  const bookings = [];
-  const bookingFor = {};
-  sessions.forEach(function (session) {
-    const key = normalizeStudentName_(session.name);
-    if (!bookingFor[key]) {
-      bookingFor[key] = { name: session.name, keys: attendanceNameKeys_(session.name),
-        starts: [], section: session.section };
-      bookings.push(bookingFor[key]);
-    }
-    if (session.start) bookingFor[key].starts.push(session.start);
-  });
-
-  bookings.forEach(function (booking) {
+  (students || []).forEach(function (student) {
     let found = people.filter(function (p) {
-      return p.keys.exact === booking.keys.exact;
+      return p.keys.exact === student.keys.exact;
     });
     if (!found.length) {
       found = people.filter(function (p) {
-        return p.keys.loose === booking.keys.loose;
+        return p.keys.loose === student.keys.loose;
       });
     }
 
-    if (found.length === 1) { found[0].booked = true; return; }
+    if (found.length === 1) {
+      found[0].student = student;
+      if (student.notComing) report.cameAnyway.push({ student: student, person: found[0] });
+      return;
+    }
     if (found.length > 1) {
       found.forEach(function (p) { p.contested = true; });
-      report.contested.push({ booking: booking, people: found });
+      report.contested.push({ student: student, people: found });
       return;
     }
 
-    // Not in yet is not the same as not coming. On the day itself, a booking
-    // whose hour has not started is listed apart from the ones that have, and
-    // on a day still to come none of them is due.
-    const due = !ahead && (!today || !booking.starts.length ||
-      booking.starts.some(function (start) { return start <= now; }));
-    (due ? report.missing : report.later).push(booking);
+    // Somebody the row already says is not coming is not a surprise.
+    if (student.notComing) { report.notComing.push(student); return; }
+
+    // Not in yet is not the same as not coming. On the day itself, a row whose
+    // hour has not started is listed apart from the ones that have, and on a
+    // day still to come none of them is due.
+    const due = !ahead && (!today || student.minutes.some(function (m) {
+      return m === null || m <= nowMinutes;
+    }));
+    (due ? report.missing : report.later).push(student);
   });
 
-  report.unbooked = people.filter(function (p) {
-    return !p.booked && !p.contested;
-  });
+  if (report.listRead) {
+    report.notListed = people.filter(function (p) {
+      return !p.student && !p.contested;
+    });
+  }
 
-  const byStart = function (a, b) {
-    const x = a.starts.length ? Math.min.apply(null, a.starts) : Infinity;
-    const y = b.starts.length ? Math.min.apply(null, b.starts) : Infinity;
-    return x === y ? 0 : (x < y ? -1 : 1);
-  };
-  report.missing.sort(byStart);
-  report.later.sort(byStart);
+  report.rows = entries.slice().sort(byClock).map(function (entry) {
+    const person = personFor[entry.studentId ? 'id|' + entry.studentId : 'name|' + entry.name];
+    const review = reviewSessionTiming_(entry.signedIn, entry.signedOut);
+    return { entry: entry, notes: review.notes, odd: review.shade,
+      sheetRows: person.student ? person.student.rows : [],
+      twice: person.entries.length > 1 };
+  });
   return report;
 }
 
-/** "4pm, 5pm (In-Center)" for a booking. */
-function attendanceBookedText_(booking) {
-  const section = (CONFIG.SCHEDULE.SECTIONS || [])[booking.section];
-  const label = section && section.header && section.header[0]
-    ? section.header[0].text : '';
-  const times = booking.starts.slice().sort(function (a, b) { return a - b; })
-    .map(function (start) { return timeOfDayLabel_(start, true); });
-  return (times.length ? 'booked ' + times.join(', ') : 'booked') +
-    (label ? ' (' + label + ')' : '');
+/** "row 42 (9:00)" for a column A student. */
+function attendanceRowText_(student) {
+  return (student.rows.length > 1 ? 'rows ' : 'row ') + student.rows.join(', ') +
+    (student.times.length ? ' (' + student.times.join(', ') + ')' : '');
+}
+
+/** "4:48 AM – 5:50 AM, 6:10 AM – still in" for a student's sign-ins. */
+function attendanceTimesText_(person) {
+  return person.entries.map(function (e) {
+    return (e.signedIn || '?') + ' – ' + (e.signedOut || 'still in');
+  }).join(', ');
 }
 
 /** The report, as the page the dialog shows. */
@@ -326,36 +409,45 @@ function attendanceReportHtml_(report, extra) {
   };
 
   const stillInTitle = report.today ? 'Still signed in' : 'Never signed out';
-  const laterTitle = report.today ? 'Booked, later today' : 'Booked, not due yet';
+  const laterTitle = report.today ? 'In column A, later today' : 'In column A, not due yet';
+
+  const twice = report.twice.map(function (p) {
+    return { name: p.name, text: p.entries.length + ' sign-ins: ' + attendanceTimesText_(p) };
+  });
+  const notListed = report.notListed.map(function (p) {
+    return { name: p.name, text: attendanceTimesText_(p) };
+  });
+  const missing = report.missing.map(function (s) {
+    return { name: s.name, text: attendanceRowText_(s) };
+  });
+  const cameAnyway = report.cameAnyway.map(function (c) {
+    return { name: c.student.name, text: attendanceRowText_(c.student) + ' says "' +
+      c.student.notComing + '", but Radius has them in: ' + attendanceTimesText_(c.person) };
+  });
+  const contested = report.contested.map(function (c) {
+    return { name: c.student.name, text: attendanceRowText_(c.student) + ' fits ' +
+      c.people.map(function (p) { return p.name; }).join(' and ') +
+      ', so there is no telling which one it is' };
+  });
   const stillIn = report.stillIn.map(function (e) {
     return { name: e.name, text: 'signed in ' + (e.signedIn || 'at a time Radius did not give') };
   });
-  const missing = report.missing.map(function (b) {
-    return { name: b.name, text: attendanceBookedText_(b) };
+  const later = report.later.map(function (s) {
+    return { name: s.name, text: attendanceRowText_(s) };
   });
-  const later = report.later.map(function (b) {
-    return { name: b.name, text: attendanceBookedText_(b) };
-  });
-  const contested = report.contested.map(function (c) {
-    return { name: c.booking.name, text: 'Radius has ' + c.people.map(function (p) {
-      return p.name;
-    }).join(' and ') + ' signed in, so there is no telling which is booked' };
-  });
-  const unbooked = report.unbooked.map(function (p) {
-    return { name: p.name, text: p.entries.map(function (e) {
-      return (e.signedIn || '?') + ' – ' + (e.signedOut || 'still in');
-    }).join(', ') };
+  const notComing = report.notComing.map(function (s) {
+    return { name: s.name, text: attendanceRowText_(s) + ' says "' + s.notComing + '"' };
   });
 
   let warnings = '';
   const warn = function (text) {
     warnings += '<div style="color: #b45309; margin: 8px 0 0;">⚠️ ' + h(text) + '</div>';
   };
-  if (!report.calendarRead) {
-    warn('The calendar could not be read' +
-      (notes.calendarProblem ? ' (' + notes.calendarProblem + ')' : '') +
-      ', so this lists who signed in and says nothing about who did not.');
+  if (!report.listRead) {
+    warn((notes.listProblem || 'Column A could not be read.') +
+      ' This lists who signed in and says nothing about who did not.');
   }
+  if (notes.listNote) warn(notes.listNote);
   if (notes.otherDays) {
     warn(notes.otherDays + ' row(s) Radius sent back were dated another day, ' +
       'and are left out.');
@@ -366,50 +458,71 @@ function attendanceReportHtml_(report, extra) {
   }
 
   const table = report.rows.length
-    ? '<table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px;">' +
-      '<tr style="text-align: left; color: #64748b;"><th>Student</th><th>In</th>' +
-      '<th>Out</th><th>Mins</th><th>Where</th><th>Note</th></tr>' +
+    ? '<table class="att" style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px;">' +
+      '<tr style="text-align: left; color: #64748b;"><th>Student</th><th>Row</th>' +
+      '<th>In</th><th>Out</th><th>Mins</th><th>Where</th><th>Note</th></tr>' +
       report.rows.map(function (row) {
         const e = row.entry;
-        const shade = row.odd ? ' background: #fef3c7;' : '';
+        const flagged = row.twice || (report.listRead && !row.sheetRows.length);
+        const shade = flagged ? ' background: #fee2e2;' : (row.odd ? ' background: #fef3c7;' : '');
+        const noteList = row.notes.slice();
+        if (row.twice) noteList.unshift('signed in more than once');
         return '<tr style="border-top: 1px solid #e2e8f0;' + shade + '">' +
-          '<td style="padding: 3px 4px 3px 0;">' + h(e.name) + '</td>' +
-          '<td>' + h(e.signedIn || '?') + '</td>' +
-          '<td>' + (e.signedOut ? h(e.signedOut) : '<i>still in</i>') + '</td>' +
+          '<td>' + h(e.name) + '</td>' +
+          '<td style="white-space: nowrap;">' + (row.sheetRows.length ? h(row.sheetRows.join(', '))
+            : (report.listRead ? '<i>not in A</i>' : '')) + '</td>' +
+          '<td style="white-space: nowrap;">' + h(e.signedIn || '?') + '</td>' +
+          '<td style="white-space: nowrap;">' +
+            (e.signedOut ? h(e.signedOut) : '<i>still in</i>') + '</td>' +
           '<td>' + (e.signedOut && e.minutes !== null ? h(String(e.minutes)) : '') + '</td>' +
-          '<td>' + h(e.delivery) + '</td>' +
-          '<td>' + h(row.notes.join('; ')) + '</td></tr>';
+          '<td style="white-space: nowrap;">' + h(e.delivery) + '</td>' +
+          '<td>' + h(noteList.join('; ')) + '</td></tr>';
       }).join('') + '</table>'
     : '<p style="color: #64748b;">Nobody signed in on this day.</p>';
 
   const stats = stat('Signed in', report.people) +
-    stat(stillInTitle, report.stillIn.length, report.stillIn.length > 0) +
-    (report.calendarRead
-      ? stat('Booked, no sign-in', report.missing.length, report.missing.length > 0) +
-        (report.later.length ? stat(laterTitle, report.later.length) : '') +
-        stat('Signed in, not booked', report.unbooked.length, report.unbooked.length > 0)
-      : '');
+    stat('Signed in more than once', report.twice.length, report.twice.length > 0) +
+    (report.listRead
+      ? stat('Signed in, not in column A', report.notListed.length, report.notListed.length > 0) +
+        stat('In column A, no sign-in', report.missing.length, report.missing.length > 0) +
+        (report.later.length ? stat(laterTitle, report.later.length) : '')
+      : '') +
+    stat(stillInTitle, report.stillIn.length, report.stillIn.length > 0);
 
-  return '<div style="font-family: Arial, sans-serif; font-size: 14px; ' +
+  return '<style>.att td, .att th { padding: 3px 8px 3px 0; vertical-align: top; }</style>' +
+    '<div style="font-family: Arial, sans-serif; font-size: 14px; ' +
     'line-height: 1.5; padding: 5px; color: #1e293b;">' +
     '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px;">' +
-    '<h4 style="margin: 0 0 8px 0;">Radius sign-ins, ' + h(dayHeaderText_(report.date)) +
+    '<h4 style="margin: 0 0 8px 0;">Radius sign-ins against column A, ' +
+    h(dayHeaderText_(report.date)) +
     '</h4><table style="width: 100%; font-size: 14px;">' + stats + '</table></div>' +
     warnings +
-    section(stillInTitle, '#b91c1c', stillIn) +
-    section('Booked, no sign-in', '#b91c1c', missing) +
-    section('Booked, but more than one match', '#b45309', contested) +
-    section('Signed in, not booked', '#b45309', unbooked,
-      'A walk-in or a make-up, or a name the calendar spells differently.') +
+    section('Signed in more than once', '#b91c1c', twice,
+      'A double is one sign-in of two hours, so two sign-ins is somebody who ' +
+      'left and came back, or was signed in twice by mistake.') +
+    section('Signed in, not in column A', '#b91c1c', notListed,
+      'Not on the Daily WOP for this day, or written there under a different name.') +
+    section('In column A, no sign-in', '#b91c1c', missing) +
+    section('Marked not coming, but signed in', '#b91c1c', cameAnyway) +
+    section('In column A, more than one match', '#b45309', contested) +
+    section(stillInTitle, '#b45309', stillIn) +
     section(laterTitle, '#334155', later) +
+    section('Marked not coming', '#334155', notComing) +
     '<div style="font-weight: bold; margin: 14px 0 0;">Everybody who signed in</div>' +
     table +
     '<p style="color: #64748b; font-size: 12px; margin-top: 12px;">Read only. ' +
     'Nothing on the sheet was changed.</p></div>';
 }
 
-/** Reads the day, lays it beside the calendar and shows what it found. */
+/** Reads the day, lays it beside column A and shows what it found. */
 function showAttendanceFor_(date) {
+  let list;
+  try {
+    list = wopStudentsFor_(wopSheet_(), date);
+  } catch (err) {
+    list = { students: [], problem: err.message };
+  }
+
   let found;
   try {
     found = loadAttendance_(date);
@@ -418,25 +531,16 @@ function showAttendanceFor_(date) {
     return;
   }
 
-  let sessions = null;
-  let calendarProblem = '';
-  const calendars = allCalendars_();
-  if (calendars.problem) {
-    calendarProblem = calendars.problem;
-  } else if (!calendars.calendars.length) {
-    calendarProblem = 'this account can see no calendars';
-  } else {
-    sessions = scheduleItemsFor_(calendars.calendars, date).sessions;
-  }
-
-  const report = compareAttendance_(found.entries, sessions, date, new Date());
+  const report = compareAttendance_(found.entries,
+    list.problem ? null : list.students, date, new Date());
   const html = attendanceReportHtml_(report, {
-    calendarProblem: calendarProblem,
+    listProblem: list.problem,
+    listNote: list.note,
     otherDays: found.otherDays.length,
     incomplete: !found.complete
   });
   SpreadsheetApp.getUi().showModalDialog(
-    HtmlService.createHtmlOutput(html).setWidth(640).setHeight(600),
+    HtmlService.createHtmlOutput(html).setWidth(680).setHeight(620),
     'Who signed in and out');
 }
 

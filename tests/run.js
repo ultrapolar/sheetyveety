@@ -61,7 +61,7 @@ function loadScript(context) {
   progressAssessmentUrl_,
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
-  attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay
+  attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -5416,7 +5416,7 @@ const ATTENDANCE_TOKEN_PAGE = '<html><body><form action="/Account/LogOff" method
 
 function attendanceCase(opts) {
   const o = opts || {};
-  const wop = new FakeSheet('Daily WOP', [['9/26/2026 Saturday'], ['4:00 Amalie Laz']]);
+  const wop = new FakeSheet('Daily WOP', o.wop || [['9/26/2026 Saturday'], ['4:00 Amalie Laz']]);
   const ctx = vm.createContext({ console, Buffer, JSON, Math,
     Date: fixedDate(o.today || '2026-09-26'), String, Number, Object,
     Array, RegExp, Error, isNaN, parseInt, parseFloat });
@@ -5605,123 +5605,206 @@ function attendanceRow(name, id, inAt, outAt, day) {
   checkTruthy('no centre: says what to set', err.includes('CENTER_ID'));
 }
 
-// 60d. Laying the sign-ins beside the bookings.
+// The Daily WOP these tests compare against. Row numbers matter: the report
+// names them. Column P (16) carries the "not coming" markers.
+function wopRows(list) {
+  return list.map(function (r) {
+    const row = new Array(16).fill('');
+    if (typeof r === 'string') row[0] = r; else { row[0] = r.a; row[15] = r.p || ''; }
+    return row;
+  });
+}
+const ATTENDANCE_WOP = wopRows([
+  '9/25/2026 Friday',                    // 1
+  '4:00 Yesterday Kid',                  // 2
+  '9/26/2026 Saturday',                  // 3
+  '8:45am - 1:15pm IC (Amanda)  AL',     // 4  an instructor
+  '10 - 11am Staff meeting',             // 5  something else on the calendar
+  '@HOME',                               // 6
+  '9:00 Kai Absent',                     // 7  due by noon, never came
+  'In-Center',                           // 8
+  '4:00 Amalie Laz',                     // 9
+  '7:00 Riley Placeholder',              // 10 Radius calls them "(IC)"
+  '8:00 Test Student 1',                 // 11
+  '6:00 Test Student2',                  // 12 a double, written as two hours
+  '7:00 Test Student2',                  // 13
+  { a: '10:00 Called Off', p: 'LM cancel' },   // 14
+  '3:00 Later Kid',                      // 15 3pm: not due at noon
+  { a: '11:00 Casey Sample', p: 'no show' },   // 16 ...but Radius has them in
+  '',                                    // 17
+  '9/28/2026 Monday',                    // 18
+  '4:00 Tomorrow Kid'                    // 19
+]);
+
+// 60d. Column A: who the day's block lists.
 {
-  const t = attendanceCase();
+  const t = attendanceCase({ wop: ATTENDANCE_WOP });
+  const api = t.api;
+  const D = t.ctx.Date;
+  const list = api.wopStudentsFor_(t.wop, new D(2026, 8, 26));
+  check('column A: students under the headings, and only the day\'s',
+    list.students.map(s => s.name),
+    ['Kai Absent', 'Amalie Laz', 'Riley Placeholder', 'Test Student 1', 'Test Student2',
+     'Called Off', 'Later Kid', 'Casey Sample']);
+  check('column A: no problem, no note', [list.problem, list.note], ['', '']);
+  const s = name => list.students.filter(x => x.name === name)[0];
+  check('column A: a double is one student on two rows',
+    [s('Test Student2').rows, s('Test Student2').times], [[12, 13], ['6:00', '7:00']]);
+  check('column A: the row a student is on', s('Amalie Laz').rows, [9]);
+  check('column A: a bare hour is read the way the centre runs',
+    [s('Kai Absent').minutes, s('Later Kid').minutes], [[9 * 60], [15 * 60]]);
+  check('column A: a row marked not coming is noted',
+    [s('Called Off').notComing, s('Amalie Laz').notComing], ['LM cancel', '']);
+
+  // The last day on the sheet runs to the bottom.
+  check('column A: the last day runs to the end',
+    api.wopStudentsFor_(t.wop, new D(2026, 8, 28)).students.map(x => x.name), ['Tomorrow Kid']);
+
+  // No row for the day: nothing to compare with, said as such.
+  const none = api.wopStudentsFor_(t.wop, new D(2026, 8, 27));
+  checkTruthy('column A: no row for the day is a problem, not an empty list',
+    none.problem.includes('9/27/2026'));
+  const bare = attendanceCase({ wop: wopRows(['9/26/2026 Saturday']) });
+  checkTruthy('column A: a day with nothing under it is a problem',
+    bare.api.wopStudentsFor_(bare.wop, new bare.ctx.Date(2026, 8, 26)).problem.includes('Nothing'));
+
+  // Typed by hand, with no headings: any timed row that is not a shift.
+  const typed = attendanceCase({ wop: wopRows(['9/26/2026 Saturday',
+    '8:45am - 1:15pm IC (Amanda)  AL', '4:00 Jane Doe', 'a note to self', '5:00 Jo Ng']) });
+  const typedList = typed.api.wopStudentsFor_(typed.wop, new typed.ctx.Date(2026, 8, 26));
+  check('column A, no headings: timed rows that are not shifts',
+    typedList.students.map(x => x.name), ['Jane Doe', 'Jo Ng']);
+  checkTruthy('column A, no headings: says it read loosely', typedList.note.includes('heading'));
+}
+
+// 60e. Laying the sign-ins beside column A.
+{
+  const t = attendanceCase({ wop: ATTENDANCE_WOP });
   const api = t.api;
   const D = t.ctx.Date;
   const day = new D(2026, 8, 26);
   const now = new D();   // noon
-  const entries = api.loadAttendance_(day).entries;
-  const at = (h, m) => new D(2026, 8, 26, h, m || 0);
-  const sessions = [
-    { name: 'Amalie Laz', start: at(4), section: 1 },
-    { name: 'Riley Placeholder', start: at(7), section: 1 },   // Radius adds (IC)
-    { name: 'Test Student 1', start: at(8), section: 1 },
-    { name: 'No Show', start: at(9), section: 1 },
-    { name: 'No Show', start: at(10), section: 1 },           // a double, booked as two
-    { name: 'Later Kid', start: at(15), section: 0 }
-  ];
-  const r = api.compareAttendance_(entries, sessions, day, now);
+  const students = api.wopStudentsFor_(t.wop, day).students;
+  // Test Student 1 comes back later and signs in again.
+  const entries = api.loadAttendance_(day).entries.concat([api.attendanceEntry_({
+    StudentFullName: 'Test Student 1', StudentId: 9000005, EnrollmentId: 8000005,
+    ArrivalTime: '/Date(1)/', ArrivalTimeString: '9:10 AM', DepartureTime: '/Date(2)/',
+    DepartureTimeString: '9:30 AM', DurationInMinutes: 20,
+    AttendanceDateString: '9/26/2026', DeliveryText: 'In-Center' })]);
+  const r = api.compareAttendance_(entries, students, day, now);
 
   check('compare: six students signed in', r.people, 6);
+  check('compare: signed in twice is flagged', r.twice.map(p => [p.name, p.entries.length]),
+    [['Test Student 1', 2]]);
+  check('compare: signed in, not in column A', r.notListed.map(p => p.name), ['Jordan Example']);
+  check('compare: in column A, hour gone, no sign-in', r.missing.map(s => s.name), ['Kai Absent']);
+  check('compare: in column A for later today is not a no-show', r.later.map(s => s.name),
+    ['Later Kid']);
+  check('compare: a row that says not coming is not a no-show', r.notComing.map(s => s.name),
+    ['Called Off']);
+  check('compare: marked not coming, but signed in', r.cameAnyway.map(c => c.student.name),
+    ['Casey Sample']);
+  check('compare: a bracketed note in Radius still matches column A',
+    r.notListed.some(p => p.name === 'Riley Placeholder (IC)'), false);
   check('compare: still signed in, earliest first', r.stillIn.map(e => e.name),
     ['Amalie Laz', 'Casey Sample', 'Jordan Example']);
-  check('compare: booked, hour gone, never came', r.missing.map(b => b.name), ['No Show']);
-  check('compare: a double is one booking with both hours',
-    r.missing[0].starts.length, 2);
-  check('compare: booked for later today is not a no-show', r.later.map(b => b.name),
-    ['Later Kid']);
-  check('compare: signed in without a booking', r.unbooked.map(p => p.name),
-    ['Test Student2', 'Casey Sample', 'Jordan Example']);
-  check('compare: a bracketed note in Radius still matches the booking',
-    r.unbooked.some(p => p.name === 'Riley Placeholder (IC)'), false);
   check('compare: the table runs in sign-in order', r.rows.map(x => x.entry.name),
     ['Amalie Laz', 'Test Student2', 'Riley Placeholder (IC)', 'Test Student 1',
-     'Casey Sample', 'Jordan Example']);
+     'Casey Sample', 'Jordan Example', 'Test Student 1']);
+  const row = name => r.rows.filter(x => x.entry.name === name)[0];
+  check('compare: each sign-in names its column A rows',
+    [row('Amalie Laz').sheetRows, row('Test Student2').sheetRows, row('Jordan Example').sheetRows],
+    [[9], [12, 13], []]);
+  check('compare: both sign-ins of a double sign-in are marked',
+    r.rows.filter(x => x.entry.name === 'Test Student 1').map(x => x.twice), [true, true]);
+  check('compare: one sign-in is not', row('Amalie Laz').twice, false);
 
   // The same review the Radius import gives a session.
-  const note = name => r.rows.filter(x => x.entry.name === name)[0];
-  check('compare: an 11 minute session is flagged', note('Test Student 1').odd, true);
-  checkTruthy('compare: and says why',
-    note('Test Student 1').notes.indexOf('left 11 minutes early') !== -1);
-  check('compare: an hour is an hour', [note('Riley Placeholder (IC)').odd,
-    note('Riley Placeholder (IC)').notes], [false, []]);
-  check('compare: two hours is a double', [note('Test Student2').odd,
-    note('Test Student2').notes], [false, ['2 hour session']]);
-  check('compare: somebody still in is not judged', [note('Amalie Laz').odd,
-    note('Amalie Laz').notes], [false, []]);
+  check('compare: an 11 minute session is flagged', row('Riley Placeholder (IC)').odd, false);
+  const eleven = r.rows.filter(x => x.entry.signedIn === '8:38 AM')[0];
+  checkTruthy('compare: and says why', eleven.odd &&
+    eleven.notes.indexOf('left 11 minutes early') !== -1);
+  check('compare: two hours is a double', row('Test Student2').notes, ['2 hour session']);
 
   // An exact name beats one with its bracket taken off.
   const e = (name, id, inAt, outAt) => api.attendanceEntry_(attendanceRow(name, id, inAt, outAt));
+  const one = (name, time) => {
+    const list = attendanceCase({ wop: wopRows(['9/26/2026 Saturday', 'In-Center', time + ' ' + name]) });
+    return list.api.wopStudentsFor_(list.wop, new list.ctx.Date(2026, 8, 26)).students;
+  };
   const exact = api.compareAttendance_([e('Sam Lee', 1, '3:00 PM', '4:00 PM'),
-    e('Sam Lee (IC)', 2, '3:05 PM', '4:05 PM')], [{ name: 'Sam Lee', start: at(15) }], day, now);
-  check('exact beats loose', [exact.unbooked.map(p => p.name), exact.contested.length],
+    e('Sam Lee (IC)', 2, '3:05 PM', '4:05 PM')], one('Sam Lee', '3:00'), day, now);
+  check('exact beats loose', [exact.notListed.map(p => p.name), exact.contested.length],
     [['Sam Lee (IC)'], 0]);
 
-  // Two students one booking could belong to: neither is picked.
+  // Two students one row could belong to: neither is picked.
   const twins = api.compareAttendance_([e('Pat Doe', 1, '3:00 PM', '4:00 PM'),
-    e('Pat Doe', 2, '3:00 PM', '4:00 PM')], [{ name: 'Pat Doe', start: at(15) }], day, now);
+    e('Pat Doe', 2, '3:00 PM', '4:00 PM')], one('Pat Doe', '3:00'), day, now);
   check('two of a name: refused', [twins.contested.length, twins.missing.length,
-    twins.unbooked.length], [1, 0, 0]);
+    twins.notListed.length], [1, 0, 0]);
   const loose = api.compareAttendance_([e('Sam Lee (IC)', 1, '3:00 PM', '4:00 PM'),
-    e('Sam Lee (@H)', 2, '3:00 PM', '4:00 PM')], [{ name: 'Sam Lee', start: at(15) }], day, now);
+    e('Sam Lee (@H)', 2, '3:00 PM', '4:00 PM')], one('Sam Lee', '3:00'), day, now);
   check('two loose matches: refused too', loose.contested.length, 1);
 
-  // One student in twice is one student, and one booking covers them.
-  const twice = api.compareAttendance_([e('Jo Ng', 5, '3:00 PM', '3:30 PM'),
-    Object.assign(e('Jo Ng', 5, '3:40 PM', '4:00 PM'), { key: 'second' })],
-    [{ name: 'Jo Ng', start: at(15) }], day, now);
-  check('in twice: one student, booked', [twice.people, twice.unbooked.length,
-    twice.rows.length], [1, 0, 2]);
-
-  // No calendar: the sign-ins are reported, and nobody is called a no-show.
+  // No column A to go on: the sign-ins are reported, and nobody is called a
+  // no-show or an extra.
   const blind = api.compareAttendance_(entries, null, day, now);
-  check('no calendar: nothing said about who did not come',
-    [blind.calendarRead, blind.missing.length, blind.unbooked.length, blind.rows.length],
-    [false, 0, 0, 6]);
+  check('no column A: nothing said either way',
+    [blind.listRead, blind.missing.length, blind.notListed.length, blind.rows.length,
+     blind.twice.length], [false, 0, 0, 7, 1]);
 
-  // A day gone by: every booking was due, whatever the clock says now.
-  const past = api.compareAttendance_([], [{ name: 'Late Kid', start: new D(2026, 8, 25, 18) }],
-    new D(2026, 8, 25), now);
-  check('past day: an evening booking is a no-show', [past.today, past.missing.length,
+  // A day gone by: every row was due, whatever the clock says now.
+  const past = api.compareAttendance_([], one('Late Kid', '6:00'), new D(2026, 8, 25), now);
+  check('past day: an evening row is a no-show', [past.today, past.missing.length,
     past.later.length], [false, 1, 0]);
   // A day to come: none of them was.
-  const ahead = api.compareAttendance_([], [{ name: 'Early Kid', start: new D(2026, 8, 28, 9) }],
-    new D(2026, 8, 28), now);
+  const ahead = api.compareAttendance_([], one('Early Kid', '9:00'), new D(2026, 8, 28), now);
   check('day to come: nobody is a no-show yet', [ahead.missing.length, ahead.later.length],
     [0, 1]);
 }
 
-// 60e. What the dialog says.
+// 60f. What the dialog says.
 {
-  const t = attendanceCase();
+  const t = attendanceCase({ wop: ATTENDANCE_WOP });
   const api = t.api;
   const D = t.ctx.Date;
   const day = new D(2026, 8, 26);
+  const students = api.wopStudentsFor_(t.wop, day).students;
   const entries = api.loadAttendance_(day).entries.concat([
-    api.attendanceEntry_(attendanceRow('<b>Bold</b> Kid', 77, '9:00 AM', '10:00 AM'))]);
-  const r = api.compareAttendance_(entries, [{ name: 'No Show', start: new D(2026, 8, 26, 9), section: 1 }],
-    day, new D());
+    api.attendanceEntry_(attendanceRow('<b>Bold</b> Kid', 77, '9:00 AM', '10:00 AM')),
+    api.attendanceEntry_(Object.assign(attendanceRow('Test Student 1', 9000005, '9:10 AM', '9:30 AM'),
+      { EnrollmentId: 8000005 }))]);
+  const r = api.compareAttendance_(entries, students, day, new D());
   const html = api.attendanceReportHtml_(r, {});
 
   checkTruthy('dialog: the day', html.includes('9/26/2026 Saturday'));
+  checkTruthy('dialog: signed in more than once, with both times',
+    html.includes('Signed in more than once (1)') && html.includes('2 sign-ins: 8:38 AM – 8:49 AM, 9:10 AM – 9:30 AM'));
+  checkTruthy('dialog: not in column A', html.includes('Signed in, not in column A (2)') &&
+    html.includes('Jordan Example'));
+  checkTruthy('dialog: in column A, no sign-in, with the row',
+    html.includes('In column A, no sign-in (1)') && html.includes('row 7 (9:00)'));
+  checkTruthy('dialog: marked not coming but in',
+    html.includes('Marked not coming, but signed in (1)') && html.includes('says &quot;no show&quot;'));
+  checkTruthy('dialog: a double\'s rows', html.includes('nowrap;">12, 13</td>'));
+  checkTruthy('dialog: a sign-in with no row says so', html.includes('<i>not in A</i>'));
   checkTruthy('dialog: still signed in, today', html.includes('Still signed in (3)'));
-  checkTruthy('dialog: the no-show with the hour and the section',
-    html.includes('No Show') && html.includes('booked 9am (In-Center)'));
-  checkTruthy('dialog: somebody still in reads as such', html.includes('<i>still in</i>'));
+  checkTruthy('dialog: later today', html.includes('In column A, later today (1)'));
   checkTruthy('dialog: a name is text, not markup',
     html.includes('&lt;b&gt;Bold&lt;/b&gt; Kid') && !html.includes('<b>Bold</b>'));
+  checkTruthy('dialog: flagged rows are shaded red', html.includes('#fee2e2'));
   checkTruthy('dialog: says it changed nothing', html.includes('Nothing on the sheet was changed'));
-  checkTruthy('dialog: an odd length is shaded', html.includes('#fef3c7'));
 
   const past = api.attendanceReportHtml_(api.compareAttendance_(entries, [], new D(2026, 8, 25), new D()), {});
   checkTruthy('dialog: a past day says never signed out', past.includes('Never signed out (3)'));
 
   const blind = api.attendanceReportHtml_(api.compareAttendance_(entries, null, day, new D()),
-    { calendarProblem: 'No calendar access.', otherDays: 2, incomplete: true });
-  checkTruthy('dialog: why the calendar is missing', blind.includes('No calendar access.'));
-  checkTruthy('dialog: no no-show count without a calendar', !blind.includes('Booked, no sign-in'));
+    { listProblem: 'The Daily WOP has no row for 9/26/2026 Saturday.', otherDays: 2, incomplete: true });
+  checkTruthy('dialog: why column A is missing', blind.includes('has no row for 9/26/2026'));
+  checkTruthy('dialog: no column A counts without column A',
+    !blind.includes('In column A, no sign-in') && !blind.includes('not in A'));
+  checkTruthy('dialog: signed in twice still flagged without column A',
+    blind.includes('Signed in more than once (1)'));
   checkTruthy('dialog: rows from another day are mentioned', blind.includes('2 row(s)'));
   checkTruthy('dialog: a cut-short read is mentioned', blind.includes('MAX_PAGES'));
 
@@ -5729,46 +5812,49 @@ function attendanceRow(name, id, inAt, outAt, day) {
   checkTruthy('dialog: an empty day says so', empty.includes('Nobody signed in on this day'));
 }
 
-// 60f. The menu entries, end to end.
+// 60g. The menu entries, end to end.
 {
-  const at = (h, m) => new Date(2026, 8, 26, h, m || 0);
-  const t = attendanceCase({ calendars: [{ id: 'bookings', name: 'Bookings', events: [
-    { title: 'Amalie Laz - (IN-CENTER) 1 hour session - Appointy', start: at(4), end: at(5) },
-    { title: 'No Show - (IN-CENTER) 1 hour session - Appointy', start: at(9), end: at(10) }] }] });
+  const t = attendanceCase({ wop: ATTENDANCE_WOP });
   const writesBefore = t.wop.writeCount;
   t.api.radiusAttendanceToday();
   check('today: one dialog', t.h.dialogs.length, 1);
   check('today: titled', t.h.dialogs[0].title, 'Who signed in and out');
-  checkTruthy('today: the no-show from the calendar', t.h.dialogs[0].html.includes('No Show'));
+  checkTruthy('today: the no-show from column A', t.h.dialogs[0].html.includes('Kai Absent'));
+  checkTruthy('today: the extra from Radius', t.h.dialogs[0].html.includes('Jordan Example'));
   checkTruthy('today: asked Radius for today',
     t.form(t.posts()[0]).some(p => p[0] === 'start' && p[1] === '9/26/2026 12:00:00 AM'));
   check('today: nothing written to the sheet', t.wop.writeCount, writesBefore);
   check('today: no alert', t.h.alerts, []);
 
   // No cookie: said plainly, and no dialog pretending it found nobody.
-  const noCookie = attendanceCase({ cookie: false });
+  const noCookie = attendanceCase({ cookie: false, wop: ATTENDANCE_WOP });
   noCookie.api.radiusAttendanceToday();
   check('no cookie: no dialog', noCookie.h.dialogs.length, 0);
   checkTruthy('no cookie: says so', String(noCookie.h.alerts[0]).includes('cookie'));
 
   // An expired session answers with the sign-in page.
-  const expired = attendanceCase({ replies: ['<form action="/Account/Login"></form>'] });
+  const expired = attendanceCase({ wop: ATTENDANCE_WOP,
+    replies: ['<form action="/Account/Login"></form>'] });
   expired.api.radiusAttendanceToday();
   checkTruthy('expired: says so', String(expired.h.alerts[0]).includes('expired'));
   check('expired: no dialog', expired.h.dialogs.length, 0);
 
-  // The calendar will not answer: the sign-ins are still shown.
-  const blind = attendanceCase({ calendarsThrow: true });
+  // No row for the day: the sign-ins are still shown, and why nothing else is.
+  const blind = attendanceCase({ wop: wopRows(['9/25/2026 Friday', '4:00 Jane Doe']) });
   blind.api.radiusAttendanceToday();
-  check('no calendar: still a dialog', blind.h.dialogs.length, 1);
-  checkTruthy('no calendar: says why', blind.h.dialogs[0].html.includes('No calendar access.'));
+  check('no row for today: still a dialog', blind.h.dialogs.length, 1);
+  checkTruthy('no row for today: says why', blind.h.dialogs[0].html.includes('no row for 9/26/2026'));
+  checkTruthy('no row for today: yesterday is not compared',
+    !blind.h.dialogs[0].html.includes('Jane Doe'));
 
-  // Pick a day.
-  const pick = attendanceCase();
-  pick.h.promptAnswer.next = '9/24';
+  // Pick a day: that day's block, and that day from Radius.
+  const pick = attendanceCase({ wop: ATTENDANCE_WOP });
+  pick.h.promptAnswer.next = '9/25';
   pick.api.radiusAttendancePickDay();
   checkTruthy('pick a day: that day is asked for',
-    pick.form(pick.posts()[0]).some(p => p[0] === 'end' && p[1] === '9/24/2026 12:00:00 AM'));
+    pick.form(pick.posts()[0]).some(p => p[0] === 'end' && p[1] === '9/25/2026 12:00:00 AM'));
+  checkTruthy('pick a day: that day\'s column A',
+    pick.h.dialogs[0].html.includes('Yesterday Kid'));
 
   const nonsense = attendanceCase();
   nonsense.h.promptAnswer.next = 'thursday';

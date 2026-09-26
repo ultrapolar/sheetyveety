@@ -12,7 +12,7 @@ spreadsheet.
 | `Eod.gs` | **EOD → Colored Sheets Batch Process** |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
-| `Attendance.gs` | **EOD → Who signed in and out**: Radius's attendance report beside the day's bookings. Reads only. |
+| `Attendance.gs` | **EOD → Who signed in and out**: Radius's attendance report checked against column A. Reads only. |
 | `Day.gs` | **SOD → Jump to today / Start a new day**. |
 | `Schedule.gs` | **SOD → Paste the calendar**. |
 | `Changelog.gs` | The **Changelog** menu, and **Tools → Calendar: set the calendar**. |
@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1131 assertions covering the parsing rules and every menu entry end to end,
+1153 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -109,26 +109,54 @@ attributes in the raw HTML — so `UrlFetchApp` can read it without a browser.
 ## Who signed in and out
 
 **EOD → Who signed in and out — today** (or **— pick a day**). Asks Radius who
-signed in on the day, lays that beside the day's bookings on the calendar, and
-shows what it found:
+signed in on the day, checks that against **column A** of the day's block on
+the Daily WOP, and shows what it found. Flagged in red:
+
+- **Signed in more than once.** A double is one sign-in of two hours, so two
+  sign-ins is somebody who left and came back, or was signed in twice by
+  mistake. Both times are listed.
+- **Signed in, not in column A.** On Radius's report, nowhere in the day's
+  block, or written there under a different name.
+- **In column A, no sign-in.** In the day's block, the hour on their row has
+  started, and Radius has no sign-in for them. The row number is given.
+- **Marked not coming, but signed in.** The row says `LM cancel` or `no show`
+  (`CONFIG.RADIUS.SKIP_MARKERS`) and Radius has them in anyway.
+
+And for information:
 
 - **Still signed in**: an arrival with no departure. For a day gone by the
-  heading reads **Never signed out**, because by then that is what it means.
-- **Booked, no sign-in**: on the calendar, the hour has started, and Radius
-  has no sign-in for them.
-- **Signed in, not booked**: a walk-in or a make-up, or a name the calendar
-  spells differently from Radius.
-- **Booked, later today**: not in yet, and not due yet either. Kept apart so a
-  4pm student is not called a no-show at noon.
-- **Everybody who signed in**: name, in, out, minutes, In-Center or At Home,
-  in sign-in order. The note column is the same timing review the Radius
-  import gives a session (late, left early, a double), and an odd length is
-  shaded.
+  heading reads **Never signed out**.
+- **In column A, later today**: not in yet, and not due yet either, so a 4:00
+  student is not called a no-show at noon.
+- **Marked not coming**: rows that already say so, left out of the no-shows.
+- **Everybody who signed in**: name, the column A row(s) they are on, in, out,
+  minutes, In-Center or At Home, in sign-in order. A flagged sign-in is shaded
+  red; an odd session length (the Radius import's timing review) amber.
 
 **It writes nothing.** This is the first use of this part of Radius. A wrong
 report costs a second look; a wrong column costs a day's records. Filling in
 columns L and M from here, in place of the one-page-per-student read the
 Radius import does now, is the natural next step once it has proved itself.
+
+### Which rows of column A are students
+
+The day's block is the rows under its dated heading ("9/26/2026 Saturday"),
+down to the next day's. A block laid out by **Paste the calendar** opens with
+the instructors and anything else on the calendar, then its **@HOME** and
+**In-Center** headings, so a student is any row **under one of those
+headings**. The instructors and the staff meeting above them are not.
+
+A block with neither heading was typed by hand. There, a student is any row
+that starts with a time and is not an instructor's shift, and the report says
+it read the block that way.
+
+A student written on two rows (a double, as two hours) is one student with
+two rows. The hour on the row decides "later today", read the way the centre
+runs: a bare 4:00 is the afternoon.
+
+No row for the day on the Daily WOP, or nothing under it yet: the sign-ins are
+still shown, with a note saying why, and **nobody is called a no-show or an
+extra**. Without column A there is no knowing who was expected.
 
 ### Where it comes from
 
@@ -160,23 +188,16 @@ full means there may be more, so the next is asked for, until one comes back
 short (`PAGE_SIZE`, with `MAX_PAGES` as a backstop that the report mentions if
 it is ever hit). A row dated another day is left out and mentioned.
 
-### Matching a booking to a sign-in
+### Matching column A to a sign-in
 
 Names are compared the way the Radius import compares them: case and spacing
 ignored, "Last, First" read as "First Last". Radius also keeps notes inside a
-name ("Jane Doe (IC)") that a booking will not have, so a name with its
+name ("Jane Doe (IC)") that column A will not have, so a name with its
 brackets taken off is tried **only when nothing matches exactly**; an exact
 match always wins.
 
-A booking is matched to a **student**, not a sign-in: a double booked as two
-hours is one booking with two times, and a student who signed in twice is one
-student with two rows. When a booking's name fits two students Radius has
-signed in, **neither is chosen**. It is listed as one that could not be told
-apart.
-
-If the calendar cannot be read, the sign-ins are still shown, with a note
-saying why, and **nobody is called a no-show**. Without the bookings there is
-no knowing who was expected.
+When a column A name fits two students Radius has signed in, **neither is
+chosen**. It is listed as one that could not be told apart.
 
 ## The Deck Changelog
 
