@@ -15,6 +15,10 @@
  * Changelog, dated today with their next session filled in. Only once the
  * Deck List has been saved, so the changelog never records a task the Deck
  * List does not.
+ *
+ * Then, for the same rows, attendance: column A goes green or orange from
+ * Radius's sign-ins (CONFIG.RADIUS.ATTENDANCE.IN_EOD), and anybody Radius has
+ * no match for is listed in a warning above the report.
  */
 function processWopToDeck() {
   const lock = LockService.getDocumentLock();
@@ -43,6 +47,7 @@ function processWopToDeck() {
   const stats = { students: 0, yActions: 0, pActions: 0, skipped: 0, changelog: 0 };
   const forChangelog = [];
   let saved = false;
+  let attendanceWarning = '';
   const dateStr = Utilities.formatDate(
     new Date(), sheets.ss.getSpreadsheetTimeZone(), CONFIG.DATE_FORMAT);
 
@@ -208,6 +213,23 @@ function processWopToDeck() {
       log.error('Deck Changelog', 'Nothing was added, because the Deck List ' +
         'could not be saved.');
     }
+
+    // Attendance for the same rows, still inside the lock. The Deck List is
+    // saved by now, so nothing Radius does here can undo any of it.
+    const attendance = CONFIG.RADIUS.ATTENDANCE;
+    if (saved && attendance && attendance.IN_EOD) {
+      if (typeof attendanceForEod_ !== 'function') {
+        log.warn('Attendance', 'not checked: Attendance.gs is not in this ' +
+          'spreadsheet\'s script. Copy it in from the repo.');
+      } else {
+        try {
+          attendanceWarning = attendanceForEod_(sheets.wop, selection, log);
+        } catch (attErr) {
+          log.error('Attendance', 'Could not be checked: ' + attErr.message +
+            ' The Deck List itself was saved.');
+        }
+      }
+    }
     lock.releaseLock();
   }
 
@@ -226,5 +248,5 @@ function processWopToDeck() {
     { label: 'Deck Changelog rows added', value: stats.changelog },
     { label: 'Needs attention', value: log.issueCount(), alert: log.issueCount() > 0 });
 
-  showReport_('EOD Complete', '📊 EOD Summary', summary, log);
+  showReport_('EOD Complete', '📊 EOD Summary', summary, log, attendanceWarning);
 }

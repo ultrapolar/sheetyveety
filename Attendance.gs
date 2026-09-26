@@ -460,6 +460,7 @@ function attendancePaint_(students) {
   students.forEach(function (student) {
     if (student.notComing) return;
     let color = null;
+    let reason = '';
     if (student.person) {
       const entries = student.person.entries;
       const review = entries.length === 1
@@ -467,11 +468,26 @@ function attendancePaint_(students) {
       // No sign-out leaves the length unknown, and that is not clean either.
       const clean = review && !review.shade && review.durationMinutes !== null;
       color = clean ? settings.OK_COLOR : settings.ISSUE_COLOR;
-    } else if (student.contested || student.missing) {
+      if (entries.length > 1) {
+        reason = 'signed in ' + entries.length + ' times';
+      } else if (!entries[0].signedOut) {
+        reason = 'signed in at ' + (entries[0].signedIn || '?') + ' and never signed out';
+      } else if (!clean) {
+        reason = entries[0].signedIn + ' – ' + entries[0].signedOut +
+          (review.durationMinutes !== null ? ' (' + review.durationMinutes + ' min)' : '') +
+          (review.notes.length ? ': ' + review.notes.join('; ') : '');
+      }
+    } else if (student.contested) {
       color = settings.ISSUE_COLOR;
+      reason = 'the name fits more than one student signed in on Radius';
+    } else if (student.missing) {
+      color = settings.ISSUE_COLOR;
+      reason = 'no sign-in on Radius';
     }
     if (!color) return;
-    student.rows.forEach(function (row) { paint.push({ row: row, color: color }); });
+    student.rows.forEach(function (row) {
+      paint.push({ row: row, color: color, name: student.name, reason: reason });
+    });
   });
   return paint;
 }
@@ -487,16 +503,142 @@ function paintAttendance_(sheet, list, paint) {
   const lock = LockService.getDocumentLock();
   if (!lock.tryLock(CONFIG.LOCK_TIMEOUT_MS)) return -1;
   try {
-    const range = sheet.getRange(list.first, CONFIG.WOP_COL.NAME,
-      list.last - list.first + 1, 1);
-    const backgrounds = range.getBackgrounds();
-    paint.forEach(function (p) { backgrounds[p.row - list.first][0] = p.color; });
-    range.setBackgrounds(backgrounds);
-    SpreadsheetApp.flush();
-    return paint.length;
+    return paintAttendanceRows_(sheet, list, paint);
   } finally {
     lock.releaseLock();
   }
+}
+
+/** The painting itself, for a caller that already holds the lock. */
+function paintAttendanceRows_(sheet, list, paint) {
+  if (!paint.length) return 0;
+  const range = sheet.getRange(list.first, CONFIG.WOP_COL.NAME,
+    list.last - list.first + 1, 1);
+  const backgrounds = range.getBackgrounds();
+  paint.forEach(function (p) { backgrounds[p.row - list.first][0] = p.color; });
+  range.setBackgrounds(backgrounds);
+  SpreadsheetApp.flush();
+  return paint.length;
+}
+
+/**
+ * The EOD batch's attendance step, over the rows it was given.
+ *
+ * The day is the one those rows sit under -- the dated heading above the
+ * first of them -- so running the batch the next morning over yesterday's
+ * rows checks yesterday. The comparison is made against that whole day's
+ * block, so a name is matched against everybody on it, but only the given
+ * rows are coloured.
+ *
+ * Takes no lock (the batch holds it), reports into the batch's log, and never
+ * throws for Radius: the Deck List work is already saved, and a sign-in that
+ * has expired is a line in the report rather than a failed batch. Returns the
+ * warning to show above the report, or '' when there is nothing to warn about.
+ */
+function attendanceForEod_(wop, selection, log) {
+  const stale = attendanceOutOfDateFiles_();
+  if (stale.length) {
+    log.warn('Attendance', 'not checked: ' + stale.join(', ') + ' need copying ' +
+      'again from the repo before it can run.');
+    return '';
+  }
+
+  let header = null;
+  dayHeaderRows_(wop).forEach(function (h) {
+    if (h.row <= selection.startRow) header = h;
+  });
+  if (!header) {
+    log.warn('Attendance', 'not checked: there is no dated row above the ' +
+      'highlighted rows, so there is no telling which day they are.');
+    return '';
+  }
+  const date = header.date;
+  const list = wopStudentsFor_(wop, date);
+  if (list.problem) {
+    log.warn('Attendance', 'not checked: ' + list.problem);
+    return '';
+  }
+
+  let found;
+  try {
+    found = loadAttendance_(date);
+  } catch (err) {
+    log.error('Attendance', 'Radius could not be asked, so column A was not ' +
+      'coloured. ' + err.message);
+    return '';
+  }
+
+  const report = compareAttendance_(found.entries, list.students, date, new Date());
+  const last = selection.startRow + selection.numRows - 1;
+  const inSelection = function (row) { return row >= selection.startRow && row <= last; };
+  const picked = function (student) { return student.rows.some(inSelection); };
+
+  const paint = report.paint.filter(function (p) { return inSelection(p.row); });
+  paintAttendanceRows_(wop, list, paint);
+
+  const green = paint.filter(function (p) {
+    return p.color === CONFIG.RADIUS.ATTENDANCE.OK_COLOR;
+  }).length;
+  log.ok('Attendance', dayHeaderText_(date) + ': column A coloured ' + green +
+    ' green and ' + (paint.length - green) + ' orange.');
+  const told = {};
+  paint.forEach(function (p) {
+    if (p.color === CONFIG.RADIUS.ATTENDANCE.OK_COLOR || told[p.name]) return;
+    told[p.name] = true;
+    log.warn(p.name, 'orange in column A: ' + p.reason + '.');
+  });
+
+  // The ones Radius and the sheet do not agree on at all.
+  const items = [];
+  report.missing.filter(picked).forEach(function (s) {
+    items.push({ name: s.name, text: attendanceRowText_(s) + ': no sign-in on Radius' });
+  });
+  report.contested.filter(function (c) { return picked(c.student); }).forEach(function (c) {
+    items.push({ name: c.student.name, text: attendanceRowText_(c.student) +
+      ': fits ' + c.people.map(function (p) { return p.name; }).join(' and ') +
+      ' on Radius' });
+  });
+  report.cameAnyway.filter(function (c) { return picked(c.student); }).forEach(function (c) {
+    items.push({ name: c.student.name, text: attendanceRowText_(c.student) +
+      ' says they were not coming, but Radius has them in' });
+  });
+  report.notListed.forEach(function (p) {
+    items.push({ name: p.name, text: 'signed in on Radius (' + attendanceTimesText_(p) +
+      ') but not on ' + dayHeaderText_(date) + ' in column A' });
+  });
+  if (found.otherDays.length || !found.complete) {
+    log.warn('Attendance', 'Radius\'s list may not be the whole day -- run ' +
+      'EOD → Auto Attendance for the details.');
+  }
+  return attendanceWarningHtml_(items);
+}
+
+/**
+ * The big warning for the EOD report: every student Radius and column A do
+ * not match on, and a box for the initials of whoever has read it. Typing
+ * them only lets the warning be dismissed -- nothing is written anywhere --
+ * so it comes back on the next run until the rows are put right.
+ */
+function attendanceWarningHtml_(items) {
+  if (!items.length) return '';
+  const h = escapeHtml_;
+  return '<div style="border: 3px solid #b91c1c; background: #fee2e2; ' +
+    'border-radius: 6px; padding: 12px; margin-bottom: 12px; color: #1e293b;">' +
+    '<div style="font-size: 17px; font-weight: bold; color: #b91c1c; margin-bottom: 6px;">' +
+    '⚠️ ' + items.length + ' student(s) Radius has no match for</div>' +
+    '<div style="margin-bottom: 6px;">These need fixing on the sheet or in Radius:</div>' +
+    '<ul style="padding-left: 20px; margin: 0 0 10px;">' + items.map(function (item) {
+      return '<li style="margin-bottom: 3px;"><strong>' + h(item.name) +
+        '</strong> &mdash; ' + h(item.text) + '</li>';
+    }).join('') + '</ul>' +
+    '<label style="font-weight: bold;">Your initials, to say you have seen this: ' +
+    '<input id="ackInitials" maxlength="5" autocomplete="off" style="width: 60px; ' +
+    'font-size: 15px; text-transform: uppercase;" ' +
+    'oninput="document.getElementById(\'ackButton\').disabled = ' +
+    'this.value.replace(/[^A-Za-z]/g, \'\').length < 2;"></label> ' +
+    '<button id="ackButton" disabled onclick="google.script.host.close()" ' +
+    'style="margin-left: 6px; padding: 4px 12px; font-weight: bold;">Acknowledge</button>' +
+    '</div>';
 }
 
 /** "row 42 (9:00)" for a column A student. */

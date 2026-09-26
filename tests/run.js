@@ -6203,6 +6203,126 @@ const ATTENDANCE_WOP = wopRows([
     !elsewhere.includes('Radius gave no reason'));
 }
 
+// 62. The EOD batch checks attendance for the rows it was given.
+{
+  function eodAttendance(opts) {
+    const o = opts || {};
+    const rows = ATTENDANCE_WOP.map(r => r.slice());
+    (o.status || []).forEach(s => { rows[s[0] - 1][10] = s[1]; });
+    const wop = new FakeSheet('Daily WOP', rows);
+    wop.setSelection(o.start || 4, o.rows || 14);
+    const deckRows = [HEADER, ['Amalie Laz', 'T1', '', '', 'T2', '', '', '', '', '', '', '', '']];
+    const deck = new FakeSheet('Deck List', deckRows);
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-09-26'), String, Number, Object, Array, RegExp, Error,
+      isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop], 'Daily WOP');
+    const api = loadScript(ctx);
+    if (o.cookie !== false) h.scriptProps.RADIUS_COOKIE = 'session=abc';
+    if (o.config) vm.runInContext(o.config, ctx);
+    h.fetchHandler.value = (url, params) => params.method === 'get'
+      ? { code: 200, body: ATTENDANCE_TOKEN_PAGE }
+      : { code: 200, body: o.reply || ATTENDANCE_REPLY };
+    api.processWopToDeck();
+    const html = h.dialogs.length ? h.dialogs[h.dialogs.length - 1].html : '';
+    return { api, h, wop, deck, html, colours: () => wop.backgrounds.map(r => r[0]),
+      said: () => h.alerts.concat(h.dialogs.map(d => d.html)).join(' ') };
+  }
+  const G = '#00ff00', O = '#ff9900', W = '#ffffff';
+
+  // The whole of today's block highlighted, one of them with a Y to process.
+  const r = eodAttendance({ status: [[9, 'Y']] });
+  check('EOD attendance: the Deck List work still happens', r.deck.values[1][1], 'T2');
+  check('EOD attendance: column A coloured for the highlighted students',
+    r.colours().slice(3, 16), [W, W, W, O, W, O, G, O, G, G, W, W, W]);
+  check('EOD attendance: rows outside the day untouched',
+    [r.colours()[1], r.colours()[18]], [W, W]);
+  checkTruthy('EOD attendance: the warning comes first in the report',
+    r.html.indexOf('Radius has no match for') !== -1 &&
+    r.html.indexOf('Radius has no match for') < r.html.indexOf('EOD Summary'));
+  checkTruthy('EOD attendance: a highlighted student never signed in is in it',
+    r.html.includes('Kai Absent') && r.html.includes('no sign-in on Radius'));
+  checkTruthy('EOD attendance: a Radius sign-in not in column A is in it',
+    r.html.includes('Jordan Example') && r.html.includes('not on 9/26/2026 Saturday in column A'));
+  checkTruthy('EOD attendance: marked not coming but in is in it',
+    r.html.includes('Casey Sample') && r.html.includes('says they were not coming'));
+  checkTruthy('EOD attendance: initials are asked for, and the button waits for them',
+    r.html.includes('id="ackInitials"') && /id="ackButton" disabled/.test(r.html));
+  checkTruthy('EOD attendance: the orange ones say why',
+    r.html.includes('orange in column A: signed in at 4:48 AM and never signed out') &&
+    r.html.includes('(11 min)'));
+  checkTruthy('EOD attendance: the counts are reported',
+    r.html.includes('column A coloured 3 green and 3 orange'));
+
+  // Only the highlighted rows are coloured, though the whole day is compared.
+  const part = eodAttendance({ start: 9, rows: 3 });
+  check('EOD attendance: only the highlighted rows change colour',
+    part.colours().slice(3, 16), [W, W, W, W, W, O, G, O, W, W, W, W, W]);
+  checkTruthy('EOD attendance: a no-show outside the highlight is not in the warning',
+    !part.html.includes('Kai Absent'));
+
+  // Everybody matched: no warning at all.
+  const clean = eodAttendance({ start: 10, rows: 1,
+    reply: attendanceReplyOf([attendanceRow('Riley Placeholder', 5, '7:00 PM', '8:00 PM')]) });
+  check('EOD attendance: all matched, green', clean.colours()[9], G);
+  checkTruthy('EOD attendance: all matched, no warning',
+    clean.html !== '' && !clean.html.includes('ackInitials') &&
+    !clean.html.includes('Radius has no match'));
+
+  // No sign-in stored: the batch still finishes, and says attendance was not done.
+  const noCookie = eodAttendance({ cookie: false, status: [[9, 'Y']] });
+  check('EOD attendance, no cookie: Deck List still done', noCookie.deck.values[1][1], 'T2');
+  check('EOD attendance, no cookie: column A left alone',
+    noCookie.colours().slice(3, 16).every(c => c === W), true);
+  checkTruthy('EOD attendance, no cookie: said', noCookie.said().includes('Radius could not be asked'));
+
+  // Turned off: Radius is not contacted at all.
+  const off = eodAttendance({ config: 'CONFIG.RADIUS.ATTENDANCE.IN_EOD = false;' });
+  check('EOD attendance off: nothing fetched', off.h.fetchLog.length, 0);
+  check('EOD attendance off: nothing coloured', off.colours().every(c => c === W), true);
+
+  // Yesterday's rows highlighted the next morning: yesterday is what is asked.
+  const yday = eodAttendance({ start: 2, rows: 1 });
+  const asked = yday.h.fetchLog.filter(c => c.params.method === 'post')
+    .map(c => decodeURIComponent(String(c.params.payload).match(/start=([^&]*)/)[1]));
+  check('EOD attendance: the day the rows sit under is the day asked', asked,
+    ['9/25/2026 12:00:00 AM']);
+  check('EOD attendance: and only its row is coloured',
+    [yday.colours()[1], yday.colours()[8]], [O, W]);
+
+  // The Deck List could not be saved: attendance is not attempted either.
+  const broken = (() => {
+    const rows = ATTENDANCE_WOP.map(r => r.slice());
+    rows[8][10] = 'Y';
+    const wop = new FakeSheet('Daily WOP', rows);
+    wop.setSelection(4, 14);
+    const deck = new FakeSheet('Deck List',
+      [HEADER, ['Amalie Laz', 'T1', '', '', 'T2', '', '', '', '', '', '', '', '']]);
+    const plain = deck.getRange.bind(deck);
+    deck.getRange = function () {
+      const range = plain.apply(null, arguments);
+      range.setValues = () => { throw new Error('Service unavailable'); };
+      return range;
+    };
+    const ctx = vm.createContext({ console, Buffer, JSON, Math,
+      Date: fixedDate('2026-09-26'), String, Number, Object, Array, RegExp, Error,
+      isNaN, parseInt, parseFloat });
+    const h = install(ctx, [deck, wop], 'Daily WOP');
+    const api = loadScript(ctx);
+    h.scriptProps.RADIUS_COOKIE = 'session=abc';
+    api.processWopToDeck();
+    return { h, wop };
+  })();
+  check('EOD attendance, deck not saved: Radius not asked',
+    broken.h.fetchLog.length, 0);
+
+  // Attendance.gs not copied in: the batch still runs and says what is missing.
+  const missing = eodAttendance({ config: 'attendanceForEod_ = undefined;' });
+  checkTruthy('EOD without Attendance.gs: says to copy it in',
+    missing.said().includes('Attendance.gs is not in'));
+}
+
+
 // ==========================================================================
 console.log(`\n${passed} passed, ${failures.length} failed\n`);
 if (failures.length) {

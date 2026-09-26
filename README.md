@@ -9,7 +9,7 @@ spreadsheet.
 | `Common.gs` | Shared plumbing: buffered sheet access, parsing, the action log, the report dialog. |
 | `Sod.gs` | **SOD → Pinks Printed** |
 | `Seating.gs` | **SOD → Organise rows from the seating chart**, and **EOD → Seating chart for highlighted rows**. |
-| `Eod.gs` | **EOD → Colored Sheets Batch Process**, which also adds finished checkups and progress checks to the Deck Changelog. |
+| `Eod.gs` | **EOD → Colored Sheets Batch Process**, which also adds finished checkups and progress checks to the Deck Changelog, and checks attendance for the rows it was given. |
 | `Setup.gs` | **Tools → Check setup**: every column the script reads or writes, next to the heading actually sitting there. |
 | `Radius.gs` | **EOD → Bring in Radius sessions**, and the Radius sign-in under **Tools** — reads radius.mathnasium.com. |
 | `Attendance.gs` | **EOD → Auto Attendance**: Radius's attendance report checked against column A, which it colours green or orange. |
@@ -186,6 +186,37 @@ runs: a bare 4:00 is the afternoon.
 No row for the day on the Daily WOP, or nothing under it yet: the sign-ins are
 still shown, with a note saying why, and **nobody is called a no-show or an
 extra**. Without column A there is no knowing who was expected.
+
+### In the EOD batch too
+
+**EOD → Colored Sheets Batch Process** runs the same check over the rows you
+highlighted, once it has done its Deck List work and saved it:
+
+- **Column A of the highlighted students goes green or orange**, by the same
+  rules as above. Only highlighted rows change colour, but names are matched
+  against the whole day's block, so nobody is called missing for being just
+  outside the highlight.
+- **The day checked is the one the rows sit under** — the dated heading above
+  the first highlighted row — so running it next morning over yesterday's rows
+  checks yesterday.
+- **A big red warning sits above the report** for everybody Radius and the
+  sheet do not match on: a highlighted student with no sign-in, a name that
+  fits two signed-in students, a row that says not coming although Radius has
+  them in, and anybody Radius signed in who is not in that day's column A.
+  It asks for **your initials**; the Acknowledge button stays greyed out until
+  there are at least two letters. Typing them only dismisses the warning —
+  nothing is written — so it comes back on the next run until the rows are
+  put right.
+- Every orange student is listed in the report with the reason (signed in
+  twice, never signed out, the times and length, and so on).
+- **Radius cannot be reached** (an expired sign-in, say): the Deck List work
+  is already saved and stays done; the report says attendance was not
+  checked, and column A is left alone. The same if Attendance.gs is missing
+  from the script.
+- **The Deck List could not be saved**: attendance is not attempted either.
+
+`CONFIG.RADIUS.ATTENDANCE.IN_EOD` turns this off, leaving it to the Auto
+Attendance menu entry alone.
 
 ### If a file is out of date
 

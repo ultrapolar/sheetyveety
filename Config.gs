@@ -200,7 +200,13 @@ const CONFIG = {
       // at all, or a name that fits two students. Both are listed in
       // DONE_COLORS above, so Pinks Printed leaves the rows alone afterwards.
       OK_COLOR: '#00ff00',
-      ISSUE_COLOR: '#ff9900'
+      ISSUE_COLOR: '#ff9900',
+
+      // The Colored Sheets Batch Process runs this check too, over the rows
+      // it was given, once the Deck List is saved: column A coloured, and a
+      // warning for anybody Radius has no match for. false leaves it to the
+      // Auto Attendance menu entry alone.
+      IN_EOD: true
     },
 
     // Which values to pull out of each DWP page, and which Daily WOP column

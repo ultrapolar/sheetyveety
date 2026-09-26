@@ -415,7 +415,7 @@ const LOG_STYLE_ = {
  * Renders the end-of-run summary. Problems are listed first so the operator
  * sees what needs attention without scrolling past the successes.
  */
-function showReport_(title, heading, statRows, log) {
+function showReport_(title, heading, statRows, log, banner) {
   const entries = log.all();
   const problems = entries.filter(function (e) { return e.level !== 'ok'; });
   const successes = entries.filter(function (e) { return e.level === 'ok'; });
@@ -452,8 +452,10 @@ function showReport_(title, heading, statRows, log) {
       'selection needed processing.</p>';
   }
 
+  // banner is ready-made HTML, shown above everything else -- for a warning
+  // that must be read before the rest.
   const html = '<div style="font-family: Arial, sans-serif; font-size: 14px; ' +
-    'line-height: 1.5; padding: 5px; color: #1e293b;">' +
+    'line-height: 1.5; padding: 5px; color: #1e293b;">' + (banner || '') +
     '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px;">' +
     '<h4 style="margin: 0 0 8px 0;">' + escapeHtml_(heading) + '</h4>' +
     '<table style="width: 100%; font-size: 14px;">' + stats + '</table></div>' +
