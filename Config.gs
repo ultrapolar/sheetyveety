@@ -159,7 +159,7 @@ const CONFIG = {
     CENTER_ID: '2514',
 
     // Script Property holding a session cookie copied from a logged-in
-    // browser. Set it via Radius -> Set session cookie; never hard-code it
+    // browser. Set it via Tools -> Radius: sign in; never hard-code it
     // here, or it ends up in the repo.
     COOKIE_PROPERTY: 'RADIUS_COOKIE',
 
@@ -178,11 +178,14 @@ const CONFIG = {
     // same way the Instruction Manager does, so this is the address that
     // answers with the rows.
     //
-    // The page itself, for checking a day by hand (Detail View, the same date
-    // as start and end): https://radius.mathnasium.com/StudentAttendanceMonthlyReport
-    // The script never opens it -- it asks the address below directly.
+    // PAGE_URL is the report page itself -- also the one to open to check a
+    // day by hand (Detail View, the same date as start and end). The script
+    // opens it once a run, for two things the rows request needs from it: the
+    // antiforgery token the page's own script sends along, and to be able to
+    // say it came from there. The rows themselves come from URL.
     ATTENDANCE: {
       URL: 'https://radius.mathnasium.com/StudentAttendanceReport/StudentAttendanceReport_Read',
+      PAGE_URL: 'https://radius.mathnasium.com/StudentAttendanceMonthlyReport',
       // The report's Center box, as the page sends it: one centre.
       CENTER_ID: '2514',
       // The page asks for 100 rows at a time. A busy day can run past that, so

@@ -61,7 +61,7 @@ function loadScript(context) {
   radiusPostForm_, formEncode_, attendanceRequestFields_, attendanceRowsOf_,
   attendanceEntry_, loadAttendance_, attendanceNameKeys_, compareAttendance_,
   attendanceReportHtml_, radiusAttendanceToday, radiusAttendancePickDay, wopStudentsFor_,
-  isDoneColor_, isChangelogTask_, asDate_, attendanceOutOfDateFiles_
+  isDoneColor_, isChangelogTask_, asDate_, attendanceOutOfDateFiles_, mergeCookies_
 };`;
   vm.runInContext(source, context);
   return context.__api;
@@ -6101,6 +6101,72 @@ const ATTENDANCE_WOP = wopRows([
 
   const fresh = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
   check('everything current: nothing named', fresh.api.attendanceOutOfDateFiles_(), []);
+}
+
+
+// 60j. The report request is sent the way the page's own is: with the
+//      report page's token, the cookies that page left, and the page named as
+//      where it came from. A 403 says what Radius said, not "the cookie".
+{
+  const api = attendanceCase().api;
+  check('cookies: a set cookie replaces its old value and new ones are added',
+    api.mergeCookies_('.AspNet.ApplicationCookie=abc; __RequestVerificationToken=old',
+      ['__RequestVerificationToken=new; path=/; HttpOnly', 'ARRAffinity=x1; Path=/']),
+    '.AspNet.ApplicationCookie=abc; __RequestVerificationToken=new; ARRAffinity=x1');
+  check('cookies: nothing set leaves them as stored',
+    api.mergeCookies_('a=1; b=2', []), 'a=1; b=2');
+
+  // The page sets a fresh antiforgery cookie with the token made for it.
+  const t = attendanceCase({ wop: ATTENDANCE_WOP.map(r => r.slice()) });
+  t.h.fetchHandler.value = function (url, params) {
+    if (params.method === 'get') {
+      return { code: 200, body: ATTENDANCE_TOKEN_PAGE,
+        headers: { 'Set-Cookie': ['__RequestVerificationToken=paired; path=/; HttpOnly'] } };
+    }
+    return { code: 200, body: ATTENDANCE_REPLY };
+  };
+  t.api.radiusAttendanceToday();
+  const get = t.h.fetchLog.filter(c => c.params.method === 'get');
+  const post = t.posts()[0];
+  check('report page: the token comes from the report page itself', get.map(c => c.url),
+    ['https://radius.mathnasium.com/StudentAttendanceMonthlyReport']);
+  check('report page: the post carries the cookie the page set with its token',
+    post.params.headers.Cookie, 'session=abc; __RequestVerificationToken=paired');
+  check('report page: and names the page it came from', post.params.headers.Referer,
+    'https://radius.mathnasium.com/StudentAttendanceMonthlyReport');
+  check('report page: and it still worked', t.h.dialogs.length, 1);
+
+  // A 403 on the rows: Radius's own words, and no blaming a cookie that works.
+  const refused = attendanceCase({ replies: [{ code: 403,
+    body: '<html><head><title>Forbidden</title></head><body>no</body></html>' }] });
+  refused.api.radiusAttendanceToday();
+  const said = String(refused.h.alerts[0]);
+  checkTruthy('403: names the status and the request',
+    said.includes('HTTP 403') && said.includes('StudentAttendanceReport_Read'));
+  checkTruthy('403: says what came back', said.includes('Forbidden'));
+  checkTruthy('403: does not insist it is the cookie',
+    said.includes('If other Radius features still work'));
+
+  // No token on the page, then refused: the likely reason is given.
+  const bare = attendanceCase();
+  bare.h.fetchHandler.value = (url, params) => params.method === 'get'
+    ? { code: 200, body: '<html><body>no form here</body></html>' }
+    : { code: 403, body: '' };
+  bare.api.radiusAttendanceToday();
+  checkTruthy('no token: the refusal says the page had none',
+    String(bare.h.alerts[0]).includes('had no antiforgery token'));
+  check('no token: the post still went, without one',
+    bare.form(bare.posts()[0]).some(p => p[0] === '__RequestVerificationToken'), false);
+
+  // The report page itself refused: that is about the account, and said so.
+  const locked = attendanceCase();
+  locked.h.fetchHandler.value = (url, params) => params.method === 'get'
+    ? { code: 403, body: '' } : { code: 200, body: ATTENDANCE_REPLY };
+  locked.api.radiusAttendanceToday();
+  checkTruthy('report page refused: says which page and what to check',
+    String(locked.h.alerts[0]).includes('StudentAttendanceMonthlyReport') &&
+    String(locked.h.alerts[0]).includes('can open that page'));
+  check('report page refused: the rows were not asked for', locked.posts().length, 0);
 }
 
 // ==========================================================================

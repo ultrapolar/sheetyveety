@@ -288,7 +288,7 @@ function radiusFetch_(url) {
 
   if (status === 401 || status === 403) {
     throw new Error('Radius rejected the session cookie (HTTP ' + status +
-      '). Log in again and re-run Radius → Set session cookie.');
+      '). Log in again and re-run Tools → Radius: sign in.');
   }
   if (status >= 400) {
     throw new Error('Radius returned HTTP ' + status + ' for ' + url +
@@ -296,7 +296,7 @@ function radiusFetch_(url) {
   }
   if (looksLikeLoginPage_(html, url)) {
     throw new Error('Radius returned the sign-in page, so the stored cookie has ' +
-      'expired. Log in again and re-run Radius → Set session cookie.');
+      'expired. Log in again and re-run Tools → Radius: sign in.');
   }
   return html;
 }
@@ -309,18 +309,103 @@ function radiusPostJson_(url, payload) {
 }
 
 /**
+ * Opens the page a form belongs to, the way the browser has before it posts
+ * one, and keeps what the post needs from it: the antiforgery token rendered
+ * into the page, and the cookies as they stand after the visit.
+ *
+ * ASP.NET pairs the token in the page with a cookie. When the stored cookies
+ * do not already carry that cookie, the page sets a fresh one alongside a
+ * token made for it -- and a post that brings the token without the cookie
+ * it was made for is turned away. The browser keeps both without being asked;
+ * a script has to be told to.
+ *
+ * Returns { token, cookie, referer }. token is '' when the page has none.
+ */
+function radiusFormSession_(pageUrl) {
+  const stored = radiusCookie_();
+  const response = UrlFetchApp.fetch(pageUrl, {
+    method: 'get',
+    headers: { Cookie: stored },
+    muteHttpExceptions: true,
+    followRedirects: true
+  });
+
+  const status = response.getResponseCode();
+  const html = response.getContentText();
+  if (status === 401 || status === 403) {
+    throw new Error('Radius would not open ' + pageUrl + ' for this sign-in ' +
+      '(HTTP ' + status + '). Check that the account whose cookie is stored ' +
+      'can open that page in a browser.' + serverComplaint_(html));
+  }
+  if (status >= 400) {
+    throw new Error('Radius returned HTTP ' + status + ' for ' + pageUrl +
+      serverComplaint_(html));
+  }
+  if (looksLikeLoginPage_(html, pageUrl)) {
+    throw new Error('Radius returned the sign-in page, so the stored cookie has ' +
+      'expired. Log in again and re-run Tools → Radius: sign in.');
+  }
+
+  const tag = html.match(/<input\b[^>]*__RequestVerificationToken[^>]*>/i);
+  const value = tag ? tag[0].match(/\bvalue="([^"]*)"/i) : null;
+
+  let headers = {};
+  try {
+    headers = response.getAllHeaders ? response.getAllHeaders() || {} : {};
+  } catch (err) {
+    headers = {};
+  }
+  let set = [];
+  Object.keys(headers).forEach(function (name) {
+    if (name.toLowerCase() !== 'set-cookie') return;
+    set = set.concat(headers[name]);
+  });
+
+  return { token: value ? value[1] : '', cookie: mergeCookies_(stored, set),
+    referer: pageUrl };
+}
+
+/**
+ * The stored cookie header with whatever a response set laid over it: a
+ * cookie it set again takes the new value, a new one is added on the end.
+ * Only the name=value from each Set-Cookie counts; its path and flags are for
+ * a browser deciding where to send it.
+ */
+function mergeCookies_(stored, setCookies) {
+  const order = [];
+  const values = {};
+  const put = function (pair) {
+    const at = pair.indexOf('=');
+    if (at <= 0) return;
+    const name = pair.slice(0, at).trim();
+    if (!name) return;
+    if (!(name in values)) order.push(name);
+    values[name] = pair.slice(at + 1).trim();
+  };
+  String(stored || '').split(';').forEach(function (part) { put(part.trim()); });
+  (setCookies || []).forEach(function (line) {
+    put(String(line || '').split(';')[0].trim());
+  });
+  return order.map(function (name) { return name + '=' + values[name]; }).join('; ');
+}
+
+/**
  * Posts a form to Radius, the way a Kendo grid sends one.
  *
  * `fields` is a list of [name, value] pairs rather than an object, because it
  * is the page's own request copied field for field, and a list keeps it that
- * way. The antiforgery token goes in the body, which is where the page puts
- * it. It is passed in rather than fetched here, so a report read a page at a
- * time costs one extra request, not one extra request a page.
+ * way. `session` is what radiusFormSession_ read off the form's page: the
+ * token goes in the body, which is where the page puts it, the cookies are
+ * the ones it was made for, and the page is named as where the post came
+ * from. It is passed in rather than fetched here, so a report read a page at
+ * a time costs one extra request, not one extra request a page.
  */
-function radiusPostForm_(url, fields, token) {
-  const all = token ? [['__RequestVerificationToken', token]].concat(fields) : fields;
+function radiusPostForm_(url, fields, session) {
+  const all = session.token
+    ? [['__RequestVerificationToken', session.token]].concat(fields) : fields;
   return radiusPost_(url, 'application/x-www-form-urlencoded; charset=UTF-8',
-    formEncode_(all), {});
+    formEncode_(all), session.referer ? { Referer: session.referer } : {},
+    session.cookie);
 }
 
 function formEncode_(fields) {
@@ -337,13 +422,13 @@ function formEncode_(fields) {
  * an empty body -- means the request did not reach the endpoint as a signed-in
  * user, whatever the status code claims.
  */
-function radiusPost_(url, contentType, payload, extraHeaders) {
+function radiusPost_(url, contentType, payload, extraHeaders, cookie) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: contentType,
     payload: payload,
     headers: Object.assign({
-      Cookie: radiusCookie_(),
+      Cookie: cookie || radiusCookie_(),
       // Radius reaches these endpoints through jQuery's $.ajax, and ASP.NET MVC
       // decides whether a request is an AJAX call by looking for these. A
       // controller written for the AJAX path can fail outright without them.
@@ -358,8 +443,14 @@ function radiusPost_(url, contentType, payload, extraHeaders) {
   const body = response.getContentText();
 
   if (status === 401 || status === 403) {
-    throw new Error('Radius rejected the session cookie (HTTP ' + status +
-      '). Log in again and re-run Radius → Set session cookie.');
+    // Not necessarily the cookie: a request the sign-in is fine for can be
+    // turned away for a missing token or a page the account may not use. What
+    // Radius says with it is the only way to tell which.
+    throw new Error('Radius rejected the request (HTTP ' + status + ') for ' + url +
+      '.' + (serverComplaint_(body) || '\n\nRadius gave no reason.') +
+      '\n\nIf other Radius features still work, the sign-in is fine and it is ' +
+      'this request being turned away. Otherwise, log in again and re-run ' +
+      'Tools → Radius: sign in.');
   }
   if (status >= 400) {
     throw new Error('Radius returned HTTP ' + status + ' for ' + url +
@@ -367,7 +458,7 @@ function radiusPost_(url, contentType, payload, extraHeaders) {
   }
   if (looksLikeLoginPage_(body, url)) {
     throw new Error('Radius returned the sign-in page, so the stored cookie has ' +
-      'expired. Log in again and re-run Radius → Set session cookie.');
+      'expired. Log in again and re-run Tools → Radius: sign in.');
   }
 
   try {
@@ -375,7 +466,7 @@ function radiusPost_(url, contentType, payload, extraHeaders) {
   } catch (err) {
     throw new Error('Radius did not return data for ' + url + '. The stored ' +
       'cookie has most likely expired — log in again and re-run ' +
-      'Radius → Set session cookie.');
+      'Tools → Radius: sign in.');
   }
 }
 

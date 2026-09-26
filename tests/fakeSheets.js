@@ -304,7 +304,8 @@ function install(globalObj, sheets, activeSheetName) {
       const res = fetchHandler.value ? fetchHandler.value(url, params) : {};
       return {
         getResponseCode: () => (res.code === undefined ? 200 : res.code),
-        getContentText: () => (res.body === undefined ? '' : res.body)
+        getContentText: () => (res.body === undefined ? '' : res.body),
+        getAllHeaders: () => res.headers || {}
       };
     }
   };

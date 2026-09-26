@@ -140,15 +140,26 @@ function loadAttendance_(date) {
   }
 
   const size = Number(settings.PAGE_SIZE);
-  const token = radiusVerificationToken_();
+  // The report page's own token and cookies, read once for every page of rows.
+  const session = radiusFormSession_(String(settings.PAGE_URL || '').trim() ||
+    CONFIG.RADIUS.TOKEN_PAGE_URL);
   const seen = {};
   const entries = [];
   const otherDays = [];
 
   for (let page = 1; page <= settings.MAX_PAGES; page++) {
     if (page > 1) Utilities.sleep(CONFIG.RADIUS.FETCH_DELAY_MS);
-    const rows = attendanceRowsOf_(
-      radiusPostForm_(url, attendanceRequestFields_(date, page), token));
+    let reply;
+    try {
+      reply = radiusPostForm_(url, attendanceRequestFields_(date, page), session);
+    } catch (err) {
+      // A form turned away for want of its token says so in no words at all,
+      // so say it here.
+      throw new Error(err.message + (session.token ? '' : '\n\nThe report page ' +
+        'had no antiforgery token on it to send, which is the usual reason a ' +
+        'request like this is refused.'));
+    }
+    const rows = attendanceRowsOf_(reply);
 
     rows.forEach(function (row) {
       const entry = attendanceEntry_(row);

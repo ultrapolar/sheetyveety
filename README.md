@@ -34,7 +34,7 @@ Needs Node, nothing else:
 node tests/run.js
 ```
 
-1191 assertions covering the parsing rules and every menu entry end to end,
+1204 assertions covering the parsing rules and every menu entry end to end,
 including the recovery paths that are awkward to rehearse by hand in a live
 spreadsheet.
 
@@ -208,6 +208,25 @@ sends it**, copied from the browser's own request: start and end the same day
 the page's own grouping and paging, and the antiforgery token in the body.
 Some of those fields do nothing for us, but a server is only known to answer
 the request it has been seen answering.
+
+Before asking, the script **opens the report page itself**
+(`CONFIG.RADIUS.ATTENDANCE.PAGE_URL`, the StudentAttendanceMonthlyReport page),
+as the browser has by the time you press Search, and keeps two things from it:
+
+- **the antiforgery token** rendered into it, which the rows request carries
+  in its body — ASP.NET refuses a form post without the token made for it;
+- **any cookie the page sets**, laid over the stored ones for the rows
+  request. A fresh token comes with a fresh cookie it is paired with, and the
+  token is refused without it. A browser keeps both without being asked.
+
+The page is also sent as the `Referer`, as the browser's own request does.
+
+A refusal (HTTP 403) quotes what Radius said with it. The DWP import working
+with the same cookie means the sign-in is fine, and the message says so rather
+than sending you off to redo it. If the report page had no token on it, the
+message says that too, since it is the usual reason. If the report page itself
+is refused, the account whose cookie is stored cannot open it, and that is
+what the message says.
 
 What comes back is grouped by student and then by enrollment, and **every
 group carries its rows twice**, under `Items` and again under `Subgroups`.
