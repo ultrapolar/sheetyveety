@@ -256,6 +256,10 @@ const CONFIG = {
     // reading those columns can tell at a glance what they did not type.
     BOT_PREFIX: 'ALB: ',
 
+    // How each finished assignment is marked in the mastery column: "PK3918(P)"
+    // for Completed & Mastered, "PK3902(F)" for Completed but Not Mastered.
+    MASTERY_MARKS: { MASTERED: 'P', NOT_MASTERED: 'F' },
+
     // A session with both times filled in is finished. If its DWP was never
     // finalised, say so rather than leaving the column looking untouched.
     // The roster hands back a student's most recent session whether or not it

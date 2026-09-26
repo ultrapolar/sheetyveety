@@ -4457,12 +4457,12 @@ const DECK_FILLER_ROWS = [
   // absent from the list even though all seven were worked on.
   check('mastery: completed page, worked-on-only row omitted',
     score('dwp-complete.html'),
-    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)');
+    'PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F)');
   check('mastery: order follows the learning plan, not mastered-first',
-    score('dwp-complete.html').split(', ')[0], 'PK3918(100)');
+    score('dwp-complete.html').split(', ')[0], 'PK3918(P)');
 
   check('mastery: partly filled page', score('dwp-filled.html'),
-    'PK3909(100), PK3902(0)');
+    'PK3909(P), PK3902(F)');
   check('mastery: nothing completed yet', score('dwp-live.html'), '');
 
   // The page shows PK-3918-00; the sheet wants PK3918.
@@ -4484,10 +4484,10 @@ const DECK_FILLER_ROWS = [
     '<td><input id="1_CBNM_checkbox x" checked /></td>' +
     '</tr></tbody>';
   check('mastery: mastered wins if both are somehow ticked',
-    api.RADIUS_EXTRACTORS.masteryScores(bothTicked), 'PK1234(100)');
+    api.RADIUS_EXTRACTORS.masteryScores(bothTicked), 'PK1234(P)');
 
   // A completed row with no PK code falls back to the topic name rather than
-  // emitting a bare "(100)".
+  // emitting a bare "(P)".
   const noCode =
     '<tbody id="dwpPKsBody"><tr>' +
     '<td><div></div></td><td><div></div></td><td><div>Unnamed Topic</div></td>' +
@@ -4496,7 +4496,7 @@ const DECK_FILLER_ROWS = [
     '<td><input id="2_CBNM_checkbox x" /></td>' +
     '</tr></tbody>';
   check('mastery: falls back to the topic name when the PK cell is blank',
-    api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(100)');
+    api.RADIUS_EXTRACTORS.masteryScores(noCode), 'Unnamed Topic(P)');
 }
 
 // 52c. The Daily WOP column layout, and the values that land in each.
@@ -4534,14 +4534,14 @@ const DECK_FILLER_ROWS = [
   // Column G folds the assessment status onto the end of the mastery list.
   check('column G: mastery plus assessment, one comma-separated list',
     get('masteryAndAssessment'),
-    'PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0), ' +
+    'PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F), ' +
     'Pre completed');
   check('column G: empty when nothing is finished',
     get('masteryAndAssessment', LIVE), '');
   check('column G: mastery alone when no assessment was given',
     api.RADIUS_EXTRACTORS.masteryAndAssessment(
       dwp('filled')),
-    'PK3909(100), PK3902(0)');
+    'PK3909(P), PK3902(F)');
 
   // The layout itself, so a stray edit to Config.gs shows up here.
   const layout = {};

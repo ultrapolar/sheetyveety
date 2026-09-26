@@ -1007,12 +1007,13 @@ const RADIUS_EXTRACTORS = {
   },
 
   /**
-   * Every completed assignment as "PK3918(100)" or "PK3902(0)", comma
+   * Every completed assignment as "PK3918(P)" or "PK3902(F)", comma
    * separated, in the order the learning plan lists them.
    *
-   * Mastered scores 100, completed-but-not-mastered scores 0. A row that was
-   * only worked on -- neither box ticked -- is left out entirely, so this
-   * column is a record of what was finished rather than what was attempted.
+   * Mastered is P, completed-but-not-mastered is F (CONFIG.RADIUS.MASTERY_MARKS).
+   * A row that was only worked on -- neither box ticked -- is left out
+   * entirely, so this column is a record of what was finished rather than
+   * what was attempted.
    *
    * The page's own script stops both boxes being ticked at once; if one ever
    * slips through, mastered wins.
@@ -1021,6 +1022,7 @@ const RADIUS_EXTRACTORS = {
     const rows = dwpAssignmentRows_(html);
     if (!rows.length) return '';
 
+    const marks = CONFIG.RADIUS.MASTERY_MARKS;
     const scored = [];
     rows.forEach(function (row) {
       const mastered = assignmentCheckboxChecked_(row, '_CM_checkbox');
@@ -1031,7 +1033,8 @@ const RADIUS_EXTRACTORS = {
       // Row shape: [marker, PK code, topic, WO, C&M, CBNM].
       const code = formatPkCode_(htmlCellText_(cells[1] === undefined ? '' : cells[1]));
       const topic = htmlCellText_(cells[2] === undefined ? '' : cells[2]);
-      scored.push((code || topic || '(unnamed)') + '(' + (mastered ? '100' : '0') + ')');
+      scored.push((code || topic || '(unnamed)') + '(' +
+        (mastered ? marks.MASTERED : marks.NOT_MASTERED) + ')');
     });
     return scored.join(', ');
   },

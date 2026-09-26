@@ -981,7 +981,7 @@ the replacement is named in the report. One already correct is left alone.
 | Column | Field | Written as |
 | --- | --- | --- |
 | F | Problem of the Week | `Y`, or blank |
-| G | Mastery / assessment | `PK3918(100), PK3902(0), Pre completed` |
+| G | Mastery / assessment | `PK3918(P), PK3902(F), Pre completed` |
 | H | Pages completed | the number |
 | J | Finalized | `Y`; `N` once the session is over and it still is not |
 | K | Deck update | **parked** — see below |
@@ -1166,13 +1166,14 @@ column A.
 
 ### The mastery column
 
-Column U lists every assignment that was **finished**, in learning-plan order:
+Column G lists every assignment that was **finished**, in learning-plan order:
 
 ```
-PK3918(100), PK3902(0), PK3901(0), PK3900(100), PK3910(100), PK3916(0)
+PK3918(P), PK3902(F), PK3901(F), PK3900(P), PK3910(P), PK3916(F)
 ```
 
-`100` is Completed & Mastered, `0` is Completed but Not Mastered. A row that
+`P` is Completed & Mastered, `F` is Completed but Not Mastered
+(`CONFIG.RADIUS.MASTERY_MARKS`, if you ever want different letters). A row that
 was only *worked on* — neither box ticked — is left out, so the column records
 what was finished rather than what was attempted. On the completed sample all
 seven topics were worked on but only six were finished, and only three of
@@ -1180,7 +1181,7 @@ those mastered.
 
 The page writes `PK-3918-00`; the trailing segment is a revision number and is
 dropped, giving `PK3918`. A completed row with no PK code falls back to its
-topic name rather than emitting a bare `(100)`.
+topic name rather than emitting a bare `(P)`.
 
 The page's own script stops both boxes being ticked at once. If one ever slips
 through, mastered wins.
